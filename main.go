@@ -4694,7 +4694,7 @@ func main() {
 		container.NewTabItem("图色工具", rightToolPanel),
 		container.NewTabItem("节点工具", container.NewCenter(widget.NewLabel("节点工具布局待实现"))),
 	)
-	rightPanel := makeFixedPanel(340, rightTabs)
+	rightPanel := makeFixedPanel(340, container.NewVScroll(rightTabs))
 
 	// 左工具栏固定宽度；中间图像区和右工具栏保持可拖拽
 	centerRightSplit := container.NewHSplit(tabs, rightPanel)
