@@ -83,6 +83,28 @@ var (
 	adb              = findADBPath()
 )
 
+func initialWindowSize(widthRatio, heightRatio float32) fyne.Size {
+	const (
+		fallbackWidth  = 1000
+		fallbackHeight = 650
+	)
+
+	screenWidth, screenHeight := screenSizePixels()
+	if screenWidth <= 0 || screenHeight <= 0 {
+		return fyne.NewSize(fallbackWidth, fallbackHeight)
+	}
+
+	scale := screenScale()
+	if scale <= 0 {
+		scale = 1
+	}
+
+	return fyne.NewSize(
+		float32(screenWidth)/scale*widthRatio,
+		float32(screenHeight)/scale*heightRatio,
+	)
+}
+
 // 固定高度的容器布局
 type fixedHeightContainer struct {
 	widget.BaseWidget
@@ -2607,7 +2629,7 @@ func main() {
 
 	// 创建窗口
 	w := a.NewWindow("AutoGo图色助手")
-	w.Resize(fyne.NewSize(1540, 850))
+	mainWindowSize := initialWindowSize(0.70, 0.70)
 
 	// 创建标签页容器（使用修改后的DocTabs，无滚动条但支持关闭功能）
 	tabs := container.NewDocTabs()
@@ -3497,6 +3519,8 @@ func main() {
 
 	// 设置窗口内容并显示
 	w.SetContent(mainContent)
+	w.Resize(mainWindowSize)
+	w.CenterOnScreen()
 
 	// 设置拖放图片功能
 	w.SetOnDropped(func(pos fyne.Position, uris []fyne.URI) {

@@ -8,6 +8,14 @@ import (
 	"os/exec"
 )
 
+func screenSizePixels() (int, int) {
+	return 0, 0
+}
+
+func screenScale() float32 {
+	return 1
+}
+
 func adbExec(str ...string) string {
 	cmd := exec.Command(adb, str...)
 	output, err := cmd.Output()

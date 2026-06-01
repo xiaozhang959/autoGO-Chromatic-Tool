@@ -1,0 +1,71 @@
+name: Platform Tests
+on: [push, pull_request]
+permissions:
+  contents: read
+
+jobs:
+  platform_tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ['', 'stable']
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            runner: xvfb-run
+            tags: ci,migrated_fynedo
+          - os: macos-latest
+            tags: no_glfw,ci,migrated_fynedo
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        go-version-file: 'go.mod'
+
+    - name: Get dependencies
+      run: >-
+        sudo apt-get update &&
+        sudo apt-get install
+        bc
+        gcc
+        libgl1-mesa-dev
+        libwayland-dev
+        libx11-dev
+        libxkbcommon-dev
+        xorg-dev
+        xvfb
+        language-pack-en
+      if: ${{ runner.os == 'Linux' }}
+
+    - name: Set environment variable LANG
+      run: export LANG=en_EN.UTF-8
+      if: ${{ runner.os == 'Linux' }}
+
+    - name: Tests
+      run: ${{ matrix.runner }} go test -race -tags "${{ matrix.tags }}" ./...
+
+    - name: Wayland Tests
+      run: go test -race -tags no_glfw,ci,wayland ./...
+      if: ${{ runner.os == 'Linux' }}
+
+  windows_tests:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ['1.20.x', 'stable']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: WillAbides/setup-go-faster@v1
+        with:
+          go-version: ${{ matrix.go-version }}
+    
+      - name: Tests
+        run: ${{ matrix.runner }} go test -race -tags no_glfw,migrated_fynedo ./...

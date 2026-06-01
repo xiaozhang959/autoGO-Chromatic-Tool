@@ -13,6 +13,26 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
+func screenSizePixels() (int, int) {
+	user32 := syscall.NewLazyDLL("user32.dll")
+	getSystemMetrics := user32.NewProc("GetSystemMetrics")
+
+	width, _, _ := getSystemMetrics.Call(0)  // SM_CXSCREEN
+	height, _, _ := getSystemMetrics.Call(1) // SM_CYSCREEN
+	return int(width), int(height)
+}
+
+func screenScale() float32 {
+	user32 := syscall.NewLazyDLL("user32.dll")
+	getDpiForSystem := user32.NewProc("GetDpiForSystem")
+
+	dpi, _, _ := getDpiForSystem.Call()
+	if dpi <= 0 {
+		return 1
+	}
+	return float32(dpi) / 96
+}
+
 func adbExec(str ...string) string {
 	cmd := exec.Command(adb, str...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}

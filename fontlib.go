@@ -582,7 +582,7 @@ func (h *hoverContainer) MouseOut() {
 func openFontLibWindow(parentWindow fyne.Window) {
 	a := fyne.CurrentApp()
 	w := a.NewWindow("AutoGo 字库制作")
-	w.Resize(fyne.NewSize(1540, 850))
+	fontLibWindowSize := initialWindowSize(0.70, 0.70)
 
 	var charCells []CharCell
 	var charNameEntries []*widget.Entry
@@ -1026,5 +1026,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 
 	mainContent := container.NewBorder(nil, nil, leftPanel, rightPanel, centerArea)
 	w.SetContent(mainContent)
+	w.Resize(fontLibWindowSize)
+	w.CenterOnScreen()
 	w.Show()
 }
