@@ -1,0 +1,12 @@
+.codegraph/
+
+.idea/
+
+build/
+!build/*.png
+!build/*.ico
+!build/*.icns
+
+
+fyne-master/
+
