@@ -34,6 +34,7 @@ type ColorPoint struct {
 	ID       int
 	Position string
 	Color    string
+	Offset   string
 	Selected bool
 }
 
@@ -66,11 +67,17 @@ var (
 	// 偏色值输入
 	colorOffsetEntry *widget.Entry
 
+	// 右侧表格新增点时使用的默认偏色
+	defaultColorPointOffset = "202020"
+
 	// 找色模式选择
 	colorModeRadio *widget.RadioGroup
 
 	// 图像查看器（当前活动的）
 	imageViewer *ImageViewer
+
+	// 放大镜显示状态
+	magnifierEnabled = true
 
 	// 代码显示框
 	codeDisplayEntry *widget.Entry
@@ -268,6 +275,218 @@ func newClickableTableRow(bg color.Color, content *fyne.Container, onTapped func
 	}
 	row.ExtendBaseWidget(row)
 	return row
+}
+
+type commitEntry struct {
+	widget.BaseWidget
+	Text        string
+	cursor      int
+	focused     bool
+	disabled    bool
+	onCommit    func(string)
+	OnSubmitted func(string)
+}
+
+func newCommitEntry() *commitEntry {
+	entry := &commitEntry{}
+	entry.ExtendBaseWidget(entry)
+	return entry
+}
+
+func (e *commitEntry) SetText(text string) {
+	e.Text = text
+	if e.cursor > len([]rune(e.Text)) {
+		e.cursor = len([]rune(e.Text))
+	}
+	e.Refresh()
+}
+
+func (e *commitEntry) Enable() {
+	e.disabled = false
+	e.Refresh()
+}
+
+func (e *commitEntry) Disable() {
+	e.disabled = true
+	e.focused = false
+	e.Refresh()
+}
+
+func (e *commitEntry) Tapped(*fyne.PointEvent) {
+	if e.disabled {
+		return
+	}
+	canvas := fyne.CurrentApp().Driver().CanvasForObject(e)
+	if canvas != nil {
+		canvas.Focus(e)
+	}
+}
+
+func (e *commitEntry) FocusGained() {
+	if e.disabled {
+		return
+	}
+	e.focused = true
+	e.cursor = len([]rune(e.Text))
+	e.Refresh()
+}
+
+func (e *commitEntry) FocusLost() {
+	if !e.focused {
+		return
+	}
+	e.focused = false
+	if e.onCommit != nil {
+		e.onCommit(e.Text)
+	}
+	e.Refresh()
+}
+
+func (e *commitEntry) TypedRune(r rune) {
+	if e.disabled {
+		return
+	}
+
+	runes := []rune(e.Text)
+	if e.cursor < 0 || e.cursor > len(runes) {
+		e.cursor = len(runes)
+	}
+	runes = append(runes[:e.cursor], append([]rune{r}, runes[e.cursor:]...)...)
+	e.Text = string(runes)
+	e.cursor++
+	e.Refresh()
+}
+
+func (e *commitEntry) TypedKey(key *fyne.KeyEvent) {
+	if e.disabled {
+		return
+	}
+
+	runes := []rune(e.Text)
+	switch key.Name {
+	case fyne.KeyLeft:
+		if e.cursor > 0 {
+			e.cursor--
+		}
+	case fyne.KeyRight:
+		if e.cursor < len(runes) {
+			e.cursor++
+		}
+	case fyne.KeyHome:
+		e.cursor = 0
+	case fyne.KeyEnd:
+		e.cursor = len(runes)
+	case fyne.KeyBackspace:
+		if e.cursor > 0 {
+			runes = append(runes[:e.cursor-1], runes[e.cursor:]...)
+			e.cursor--
+			e.Text = string(runes)
+		}
+	case fyne.KeyDelete:
+		if e.cursor < len(runes) {
+			runes = append(runes[:e.cursor], runes[e.cursor+1:]...)
+			e.Text = string(runes)
+		}
+	case fyne.KeyReturn, fyne.KeyEnter:
+		e.focused = false
+		if e.OnSubmitted != nil {
+			e.OnSubmitted(e.Text)
+		}
+		canvas := fyne.CurrentApp().Driver().CanvasForObject(e)
+		if canvas != nil {
+			canvas.Unfocus()
+		}
+	}
+	e.Refresh()
+}
+
+func (e *commitEntry) TypedShortcut(shortcut fyne.Shortcut) {
+	if e.disabled {
+		return
+	}
+
+	switch s := shortcut.(type) {
+	case *fyne.ShortcutPaste:
+		if s.Clipboard != nil {
+			for _, r := range s.Clipboard.Content() {
+				e.TypedRune(r)
+			}
+		}
+	case *fyne.ShortcutCopy:
+		if s.Clipboard != nil {
+			s.Clipboard.SetContent(e.Text)
+		}
+	}
+}
+
+func (e *commitEntry) CreateRenderer() fyne.WidgetRenderer {
+	bg := canvas.NewRectangle(color.Transparent)
+	label := canvas.NewText("", getTextColor(isDarkTheme))
+	label.TextSize = 12
+	return &commitEntryRenderer{
+		entry:   e,
+		bg:      bg,
+		label:   label,
+		objects: []fyne.CanvasObject{bg, label},
+	}
+}
+
+type commitEntryRenderer struct {
+	entry   *commitEntry
+	bg      *canvas.Rectangle
+	label   *canvas.Text
+	objects []fyne.CanvasObject
+}
+
+func (r *commitEntryRenderer) Destroy() {}
+
+func (r *commitEntryRenderer) Layout(size fyne.Size) {
+	r.bg.Resize(size)
+	labelSize := r.label.MinSize()
+	r.label.Move(fyne.NewPos(6, (size.Height-labelSize.Height)/2))
+	r.label.Resize(fyne.NewSize(fyne.Max(0, size.Width-12), labelSize.Height))
+}
+
+func (r *commitEntryRenderer) MinSize() fyne.Size {
+	return fyne.NewSize(58, 24)
+}
+
+func (r *commitEntryRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *commitEntryRenderer) Refresh() {
+	if r.entry.disabled {
+		r.bg.FillColor = transparent
+		r.label.Text = ""
+	} else {
+		if isDarkTheme {
+			r.bg.FillColor = color.NRGBA{55, 55, 55, 255}
+		} else {
+			r.bg.FillColor = color.NRGBA{220, 220, 220, 255}
+		}
+		r.label.Text = r.displayText()
+	}
+	r.label.Color = getTextColor(isDarkTheme)
+	r.bg.Refresh()
+	r.label.Refresh()
+}
+
+func (r *commitEntryRenderer) displayText() string {
+	if !r.entry.focused {
+		return r.entry.Text
+	}
+
+	runes := []rune(r.entry.Text)
+	cursor := r.entry.cursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(runes) {
+		cursor = len(runes)
+	}
+	runes = append(runes[:cursor], append([]rune{'|'}, runes[cursor:]...)...)
+	return string(runes)
 }
 
 func (r *ClickableTableRow) TappedSecondary(*fyne.PointEvent) {
@@ -1018,6 +1237,183 @@ func restoreTabData(tab *container.TabItem) {
 	}
 }
 
+func parsePointPosition(pos string) (int, int, bool) {
+	parts := strings.Split(strings.TrimSpace(pos), ",")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+
+	x, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, false
+	}
+	y, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, false
+	}
+	return x, y, true
+}
+
+func colorHexAtImage(img image.Image, x, y int) (string, color.Color, bool) {
+	if img == nil {
+		return "", nil, false
+	}
+
+	bounds := img.Bounds()
+	if x < bounds.Min.X || x >= bounds.Max.X || y < bounds.Min.Y || y >= bounds.Max.Y {
+		return "", nil, false
+	}
+
+	pixelColor := img.At(x, y)
+	r, g, b, _ := pixelColor.RGBA()
+	return fmt.Sprintf("#%02X%02X%02X", uint8(r>>8), uint8(g>>8), uint8(b>>8)), pixelColor, true
+}
+
+func normalizeColorOffset(text string) (string, bool) {
+	text = strings.TrimPrefix(strings.TrimSpace(text), "#")
+	if len(text) != 6 {
+		return "", false
+	}
+
+	for _, c := range text {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return "", false
+		}
+	}
+	return strings.ToUpper(text), true
+}
+
+func refreshColorPointFromImage(index int) bool {
+	if index < 0 || index >= len(colorPoints) || imageViewer == nil || imageViewer.image == nil {
+		return false
+	}
+
+	x, y, ok := parsePointPosition(colorPoints[index].Position)
+	if !ok {
+		return false
+	}
+
+	hexColor, _, ok := colorHexAtImage(imageViewer.image, x, y)
+	if !ok {
+		return false
+	}
+
+	colorPoints[index].Color = hexColor
+	return true
+}
+
+func refreshAllColorPointsFromImage() {
+	for i := range colorPoints {
+		refreshColorPointFromImage(i)
+	}
+}
+
+func syncImageViewerMarksFromColorPoints() {
+	if imageViewer == nil {
+		return
+	}
+
+	imageViewer.markPoints = imageViewer.markPoints[:0]
+	for _, point := range colorPoints {
+		x, y, ok := parsePointPosition(point.Position)
+		if !ok {
+			continue
+		}
+		imageViewer.markPoints = append(imageViewer.markPoints, MarkPoint{
+			X:     x,
+			Y:     y,
+			Color: getInverseColor(hexToColor(point.Color)),
+		})
+	}
+
+	if !imageViewer.manualRectSelected {
+		imageViewer.updateBoundingBox()
+	}
+	imageViewer.Refresh()
+}
+
+func commitColorPointPosition(index int, value string) {
+	if index < 0 || index >= len(colorPoints) {
+		return
+	}
+
+	x, y, ok := parsePointPosition(value)
+	if !ok {
+		updateTableSelection()
+		return
+	}
+
+	if imageViewer == nil || imageViewer.image == nil {
+		colorPoints[index].Position = fmt.Sprintf("%d, %d", x, y)
+		updateTableSelection()
+		return
+	}
+
+	hexColor, _, ok := colorHexAtImage(imageViewer.image, x, y)
+	if !ok {
+		updateTableSelection()
+		return
+	}
+
+	colorPoints[index].Position = fmt.Sprintf("%d, %d", x, y)
+	colorPoints[index].Color = hexColor
+	syncImageViewerMarksFromColorPoints()
+	updateTableSelection()
+}
+
+func colorPointCoordinatesText() string {
+	positions := make([]string, 0, len(colorPoints))
+	for _, point := range colorPoints {
+		x, y, ok := parsePointPosition(point.Position)
+		if !ok {
+			continue
+		}
+		positions = append(positions, fmt.Sprintf("%d, %d", x, y))
+	}
+	return strings.Join(positions, "\n")
+}
+
+func parsePointPositionsText(text string) []image.Point {
+	lines := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == ';'
+	})
+
+	points := make([]image.Point, 0, len(lines))
+	for _, line := range lines {
+		x, y, ok := parsePointPosition(line)
+		if !ok {
+			continue
+		}
+		points = append(points, image.Pt(x, y))
+	}
+	return points
+}
+
+func replaceColorPointsByPositions(points []image.Point, offset string) {
+	if imageViewer == nil || imageViewer.image == nil {
+		return
+	}
+
+	colorPoints = colorPoints[:0]
+	for _, point := range points {
+		hexColor, _, ok := colorHexAtImage(imageViewer.image, point.X, point.Y)
+		if !ok {
+			continue
+		}
+
+		colorPoints = append(colorPoints, ColorPoint{
+			ID:       len(colorPoints),
+			Position: fmt.Sprintf("%d, %d", point.X, point.Y),
+			Color:    hexColor,
+			Offset:   offset,
+			Selected: true,
+		})
+	}
+
+	syncImageViewerMarksFromColorPoints()
+	updateTableSelection()
+}
+
 // 根据颜色点自动计算矩形范围
 func calculateAutoRect() string {
 	if len(colorPoints) == 0 {
@@ -1027,18 +1423,14 @@ func calculateAutoRect() string {
 	// 找到所有点的最小和最大坐标
 	minX, minY := int(^uint(0)>>1), int(^uint(0)>>1) // int 最大值
 	maxX, maxY := 0, 0
+	validCount := 0
 
 	for _, point := range colorPoints {
-		// 解析坐标 "x, y" 格式
-		coords := strings.Split(point.Position, ", ")
-		if len(coords) != 2 {
+		x, y, ok := parsePointPosition(point.Position)
+		if !ok {
 			continue
 		}
-		x, err1 := strconv.Atoi(strings.TrimSpace(coords[0]))
-		y, err2 := strconv.Atoi(strings.TrimSpace(coords[1]))
-		if err1 != nil || err2 != nil {
-			continue
-		}
+		validCount++
 
 		if x < minX {
 			minX = x
@@ -1052,6 +1444,9 @@ func calculateAutoRect() string {
 		if y > maxY {
 			maxY = y
 		}
+	}
+	if validCount == 0 {
+		return ""
 	}
 
 	// 如果只有一个点，创建一个小的矩形范围
@@ -1106,17 +1501,19 @@ func getColorOffset() string {
 	text = strings.TrimPrefix(text, "#")
 
 	// 验证是否为有效的十六进制字符串（6位）
-	if len(text) == 6 {
-		// 检查是否全是十六进制字符
-		for _, c := range text {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-				return "101010" // 包含非十六进制字符，返回默认值
-			}
-		}
-		return strings.ToUpper(text) // 返回大写格式
+	if offset, ok := normalizeColorOffset(text); ok {
+		return offset // 返回大写格式
 	}
 
 	return "101010" // 长度不对，返回默认值
+}
+
+func colorPointValue(point ColorPoint) string {
+	colorValue := strings.ToLower(strings.TrimPrefix(point.Color, "#"))
+	if offset, ok := normalizeColorOffset(point.Offset); ok {
+		return fmt.Sprintf("%s-%s", colorValue, offset)
+	}
+	return colorValue
 }
 
 // 颜色匹配辅助函数
@@ -1140,17 +1537,6 @@ func generateColorCode() string {
 		return ""
 	}
 
-	// 检查用户是否输入了偏色值
-	hasOffset := false
-	offset := ""
-	if colorOffsetEntry != nil {
-		offsetText := strings.TrimSpace(colorOffsetEntry.Text)
-		if offsetText != "" {
-			hasOffset = true
-			offset = getColorOffset() // 获取验证后的偏色值
-		}
-	}
-
 	// 获取找色模式
 	mode := getColorMode()
 
@@ -1158,24 +1544,13 @@ func generateColorCode() string {
 		// 多点比色格式: "x1,y1,color1-offset,x2,y2,color2-offset,..."
 		var parts []string
 		for _, point := range selectedPoints {
-			// 解析坐标 "x, y" 格式
-			coords := strings.Split(point.Position, ", ")
-			if len(coords) != 2 {
+			x, y, ok := parsePointPosition(point.Position)
+			if !ok {
 				continue
 			}
-			x := strings.TrimSpace(coords[0])
-			y := strings.TrimSpace(coords[1])
-
-			// 移除颜色的#前缀
-			color := strings.TrimPrefix(point.Color, "#")
-			color = strings.ToLower(color) // 转为小写
 
 			// 组合: x,y,color 或 x,y,color-offset
-			if hasOffset {
-				parts = append(parts, fmt.Sprintf("%s,%s,%s-%s", x, y, color, offset))
-			} else {
-				parts = append(parts, fmt.Sprintf("%s,%s,%s", x, y, color))
-			}
+			parts = append(parts, fmt.Sprintf("%d,%d,%s", x, y, colorPointValue(point)))
 		}
 
 		colorStr := strings.Join(parts, ",")
@@ -1204,49 +1579,28 @@ func generateColorCode() string {
 
 		// 获取第一个勾选的点作为基准点
 		firstPoint := selectedPoints[0]
-		coords := strings.Split(firstPoint.Position, ", ")
-		if len(coords) != 2 {
+		baseX, baseY, ok := parsePointPosition(firstPoint.Position)
+		if !ok {
 			return ""
 		}
-		baseX, _ := strconv.Atoi(strings.TrimSpace(coords[0]))
-		baseY, _ := strconv.Atoi(strings.TrimSpace(coords[1]))
-
-		// 第一个点只有颜色或颜色-偏色
-		firstColor := strings.TrimPrefix(firstPoint.Color, "#")
-		firstColor = strings.ToLower(firstColor)
 
 		var parts []string
-		if hasOffset {
-			parts = append(parts, fmt.Sprintf("%s-%s", firstColor, offset))
-		} else {
-			parts = append(parts, firstColor)
-		}
+		parts = append(parts, colorPointValue(firstPoint))
 
 		// 后续点使用相对坐标
 		for i := 1; i < len(selectedPoints); i++ {
 			point := selectedPoints[i]
-			coords := strings.Split(point.Position, ", ")
-			if len(coords) != 2 {
+			x, y, ok := parsePointPosition(point.Position)
+			if !ok {
 				continue
 			}
-
-			x, _ := strconv.Atoi(strings.TrimSpace(coords[0]))
-			y, _ := strconv.Atoi(strings.TrimSpace(coords[1]))
 
 			// 计算相对坐标
 			dx := x - baseX
 			dy := y - baseY
 
-			// 移除颜色的#前缀
-			color := strings.TrimPrefix(point.Color, "#")
-			color = strings.ToLower(color)
-
 			// 组合: dx,dy,color 或 dx,dy,color-offset
-			if hasOffset {
-				parts = append(parts, fmt.Sprintf("%d,%d,%s-%s", dx, dy, color, offset))
-			} else {
-				parts = append(parts, fmt.Sprintf("%d,%d,%s", dx, dy, color))
-			}
+			parts = append(parts, fmt.Sprintf("%d,%d,%s", dx, dy, colorPointValue(point)))
 		}
 
 		colorStr := strings.Join(parts, ",")
@@ -1261,6 +1615,7 @@ func addColorPointToList(x, y int, colorHex string, selected bool) {
 		ID:       len(colorPoints),
 		Position: fmt.Sprintf("%d, %d", x, y),
 		Color:    colorHex,
+		Offset:   defaultColorPointOffset,
 		Selected: selected,
 	}
 
@@ -1532,7 +1887,7 @@ func (v *ImageViewer) MouseUp(e *desktop.MouseEvent) {
 	v.isDragging = false
 
 	// 鼠标弹起时重新显示放大镜
-	if v.magnifier != nil {
+	if magnifierEnabled && v.magnifier != nil {
 		v.magnifier.Show()
 	}
 
@@ -1717,7 +2072,7 @@ func (v *ImageViewer) MouseMoved(e *desktop.MouseEvent) {
 	}
 
 	// 更新放大镜（不在拖动状态时）
-	if !v.isDragging && v.magnifier != nil && v.scrollContainer != nil {
+	if !v.isDragging && magnifierEnabled && v.magnifier != nil && v.scrollContainer != nil {
 		// mouseX, mouseY 是相对于ImageViewer的坐标（图像坐标）
 		// 需要转换为相对于可见窗口的坐标
 		scrollOffset := v.scrollContainer.Offset
@@ -1747,7 +2102,7 @@ func (v *ImageViewer) MouseIn(*desktop.MouseEvent) {
 	if v.window != nil {
 		v.window.Canvas().Focus(v)
 	}
-	if v.magnifier != nil && v.image != nil {
+	if magnifierEnabled && v.magnifier != nil && v.image != nil {
 		v.magnifier.Show()
 	}
 }
@@ -1857,7 +2212,7 @@ func (v *ImageViewer) TypedKey(key *fyne.KeyEvent) {
 	}
 
 	// 主动更新放大镜（因为移动鼠标可能不会触发MouseMoved事件）
-	if v.magnifier != nil && v.scrollContainer != nil {
+	if magnifierEnabled && v.magnifier != nil && v.scrollContainer != nil {
 		// 计算相对于可见窗口的坐标
 		scrollOffset := v.scrollContainer.Offset
 		viewX := float32(newX) - scrollOffset.X
@@ -2388,6 +2743,10 @@ func getPixelColorFast(img image.Image, x, y int) (r, g, b uint8) {
 
 // 更新放大镜显示 - 完全复刻参考代码的逻辑
 func (m *MagnifierWidget) Update(img image.Image, imageX, imageY int, cursorX, cursorY float32) {
+	if !magnifierEnabled {
+		m.Hide()
+		return
+	}
 	if img == nil {
 		return
 	}
@@ -3171,7 +3530,7 @@ func main() {
 	fontLibBtn.Importance = widget.MediumImportance
 
 	// 主题切换按钮使用高重要性，使其更加突出
-	themeBtn := widget.NewButtonWithIcon("切换主题", theme.ColorPaletteIcon(), toggleTheme)
+	themeBtn := widget.NewButtonWithIcon("", theme.ColorPaletteIcon(), toggleTheme)
 	themeBtn.Importance = widget.MediumImportance
 
 	// 创建代码显示框（多行只读文本框）
@@ -3315,207 +3674,322 @@ func main() {
 		imageViewer.getGridParams = getGridParamsFunc
 	}
 
-	// 左侧工具栏布局 - 使用Border布局让代码显示框占据更多空间
-	// 上部分：所有按钮和输入框（不包括生成按钮）
-	topControls := container.New(&fixedWidthLayout{
-		width:           180,
-		padding:         12,
-		verticalSpacing: 8, // 添加垂直间距
-	},
-		layout.NewSpacer(),
-		deviceSelect, // 设备选择器
-		screenshotBtn,
-		importBtn,
-		saveBtn,
-		rotateBtn,
-		cutBtn,
-		fontLibBtn, // 字库制作按钮
-		gridRow,    // 点阵按钮行（固定高度）
-		themeBtn,
-		rectCoordEntry,   // 添加坐标显示框
-		colorOffsetEntry, // 偏色值输入框
-		colorModeRadio,   // 找色模式选择
-		layout.NewSpacer(),
-	)
-
-	// 设置代码显示框的最小高度
-	codeDisplayEntry.SetMinRowsVisible(8) // 至少显示8行
-
-	// 中间部分：代码显示框和生成按钮
-	// 使用Border布局：代码显示框在中心（自动扩展），生成按钮在底部
-	codeAndGenContainer := container.NewBorder(nil, genBtn, nil, nil,
-		container.NewPadded(codeDisplayEntry))
-
-	// 整体布局：topControls 在顶部，codeAndGenContainer 在中心（自动扩展）
-	leftPanel := container.NewBorder(topControls, nil, nil, nil, codeAndGenContainer)
-
-	// 创建表格标题
-	headerBg = canvas.NewRectangle(getHeaderBgColor(isDarkTheme)) // 使用更深的背景色
-	headerBg.SetMinSize(fyne.NewSize(250, 30))
-
-	// 表格标题 - 白色文字
-	idHeader = canvas.NewText("序号", getTextColor(isDarkTheme))
-	idHeader.Alignment = fyne.TextAlignCenter
-	idHeader.TextSize = 14
-	idHeader.TextStyle = fyne.TextStyle{Bold: true} // 使文字加粗
-
-	posHeader = canvas.NewText("坐标", getTextColor(isDarkTheme))
-	posHeader.Alignment = fyne.TextAlignCenter
-	posHeader.TextSize = 14
-	posHeader.TextStyle = fyne.TextStyle{Bold: true} // 使文字加粗
-
-	colorHeader = canvas.NewText("颜色", getTextColor(isDarkTheme))
-	colorHeader.Alignment = fyne.TextAlignCenter
-	colorHeader.TextSize = 14
-	colorHeader.TextStyle = fyne.TextStyle{Bold: true} // 使文字加粗
-
-	statusHeader = canvas.NewText("状态", getTextColor(isDarkTheme))
-	statusHeader.Alignment = fyne.TextAlignCenter
-	statusHeader.TextSize = 14
-	statusHeader.TextStyle = fyne.TextStyle{Bold: true} // 使文字加粗
-
-	// 使用容器将标题文字排列 - 为颜色列分配更多空间
-	// 使用一个具有权重的布局，让不同列有不同的宽度
-	headerTextContainer := container.New(&weightedGridLayout{
-		cols:    4,
-		weights: []float32{1, 1.5, 2, 1}, // 颜色列的权重更大
-	},
-		container.NewPadded(idHeader),
-		container.NewPadded(posHeader),
-		container.NewPadded(colorHeader),
-		container.NewPadded(statusHeader),
-	)
-
-	// 将背景和文字叠加
-	tableHeader = container.NewStack(headerBg, headerTextContainer)
-
-	// 定义更新表头的函数
-	updateTableHeader = func() {
-		// 更新表头背景颜色
-		headerBg.FillColor = getHeaderBgColor(isDarkTheme)
-		headerBg.Refresh()
-
-		// 更新表头文字颜色
-		textColor := getTextColor(isDarkTheme)
-		idHeader.Color = textColor
-		posHeader.Color = textColor
-		colorHeader.Color = textColor
-		statusHeader.Color = textColor
-
-		idHeader.Refresh()
-		posHeader.Refresh()
-		colorHeader.Refresh()
-		statusHeader.Refresh()
+	// 左侧工具栏布局：模拟 AutoGo 工具面板的窄栏按钮布局
+	makeButton := func(text string) *widget.Button {
+		btn := widget.NewButton(text, func() {})
+		btn.Importance = widget.MediumImportance
+		return btn
+	}
+	makeEntry := func(text string) *widget.Entry {
+		entry := widget.NewEntry()
+		entry.SetText(text)
+		return entry
+	}
+	makeFixedPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
+		minWidth := canvas.NewRectangle(color.Transparent)
+		minWidth.SetMinSize(fyne.NewSize(width, 1))
+		return container.NewStack(minWidth, content)
+	}
+	makeFixedWidthPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
+		return container.New(&fixedWidthLayout{width: width}, content)
 	}
 
-	// 创建表格更新函数
+	showMagnifierCheck := widget.NewCheck("显示放大镜", func(checked bool) {
+		magnifierEnabled = checked
+		if !checked && imageViewer != nil && imageViewer.magnifier != nil {
+			imageViewer.magnifier.Hide()
+		}
+	})
+	showMagnifierCheck.SetChecked(true)
+	magnifierThemeRow := container.NewBorder(nil, nil, nil, themeBtn, showMagnifierCheck)
+
+	screenshotBtn.button.SetText("截图 (CTRL+Z)")
+	importBtn.SetText("加载 (CTRL+L)")
+
+	rotateLeftBtn := widget.NewButtonWithIcon("", theme.ContentUndoIcon(), func() {
+		if imageViewer == nil || imageViewer.originalImage == nil {
+			return
+		}
+		imageViewer.RotateImage((imageViewer.rotationDegrees + 270) % 360)
+	})
+	rotateRightBtn := widget.NewButtonWithIcon("", theme.ContentRedoIcon(), func() {
+		if imageViewer == nil || imageViewer.originalImage == nil {
+			return
+		}
+		imageViewer.RotateImage((imageViewer.rotationDegrees + 90) % 360)
+	})
+	rotateRow := container.NewGridWithColumns(2, rotateLeftBtn, rotateRightBtn)
+
+	coordDisplayEntry := makeEntry("0, 0, 0, 0")
+	copyResetRow := container.NewGridWithColumns(2, widget.NewButton("复制", func() {
+		w.Clipboard().SetContent(coordDisplayEntry.Text)
+	}), makeButton("重置"))
+
+	pickModeSelect := widget.NewSelect([]string{
+		"随机取点",
+		"轮廓取点",
+		"重要取点",
+		"最高和点",
+		"最高和取点",
+		"颜色分类轮廓",
+		"颜色分类随机",
+	}, func(string) {})
+	pickModeSelect.SetSelected("轮廓取点")
+	pickCountEntry := makeEntry("20个")
+	applyRangeCheck := widget.NewCheck("选取后应用范围", func(bool) {})
+	autoCopyRangeCheck := widget.NewCheck("自动复制范围", func(bool) {})
+	autoCopyRangeCheck.SetChecked(true)
+
+	leftControls := container.NewVBox(
+		deviceSelect,
+		magnifierThemeRow,
+		screenshotBtn,
+		rotateRow,
+		importBtn,
+		makeButton("范围 (CTRL+R)"),
+		coordDisplayEntry,
+		copyResetRow,
+		makeButton("重置缩放"),
+		makeButton("显示原始尺寸"),
+		makeButton("抓取节点"),
+		makeButton("清除查找标记"),
+		makeButton("自动取色 (CTRL+A)"),
+		pickModeSelect,
+		container.NewBorder(nil, nil, widget.NewLabel("取色个数"), nil, pickCountEntry),
+		applyRangeCheck,
+		autoCopyRangeCheck,
+		gridRow,
+		fontLibBtn,
+	)
+	leftPanel := makeFixedWidthPanel(190, container.New(&compactPaddedLayout{padding: 2}, container.NewVScroll(container.New(&fixedContentWidthLayout{width: 170}, leftControls))))
+
+	// 右侧工具栏布局：模拟图色工具 / 节点工具面板
+	headerBg = canvas.NewRectangle(getHeaderBgColor(isDarkTheme))
+	headerBg.SetMinSize(fyne.NewSize(360, 28))
+
+	idHeader = canvas.NewText("", getTextColor(isDarkTheme))
+	checkHeader := canvas.NewText("勾选", getTextColor(isDarkTheme))
+	posHeader = canvas.NewText("坐标", getTextColor(isDarkTheme))
+	colorHeader = canvas.NewText("取色", getTextColor(isDarkTheme))
+	statusHeader = canvas.NewText("RGB", getTextColor(isDarkTheme))
+	offsetHeader := canvas.NewText("偏色", getTextColor(isDarkTheme))
+	for _, header := range []*canvas.Text{idHeader, checkHeader, posHeader, colorHeader, statusHeader, offsetHeader} {
+		header.Alignment = fyne.TextAlignCenter
+		header.TextSize = 12
+		header.TextStyle = fyne.TextStyle{Bold: true}
+	}
+
+	tableHeader = container.NewStack(headerBg, container.New(&weightedGridLayout{
+		cols:    6,
+		weights: []float32{0.55, 1.0, 1.7, 1.6, 2.0, 1.45},
+	},
+		container.NewCenter(idHeader),
+		container.NewCenter(checkHeader),
+		container.NewCenter(posHeader),
+		container.NewCenter(colorHeader),
+		container.NewCenter(statusHeader),
+		container.NewCenter(offsetHeader),
+	))
+
+	updateTableHeader = func() {
+		headerBg.FillColor = getHeaderBgColor(isDarkTheme)
+		headerBg.Refresh()
+		textColor := getTextColor(isDarkTheme)
+		for _, header := range []*canvas.Text{idHeader, checkHeader, posHeader, colorHeader, statusHeader, offsetHeader} {
+			header.Color = textColor
+			header.Refresh()
+		}
+	}
+
 	updateTableSelection = func() {
 		if tableContent != nil {
-			// 使用fyne.Do确保在主线程中执行UI更新
 			fyne.Do(func() {
 				tableContent.Refresh()
 			})
 		}
 	}
 
-	// 创建表格内容 - 使用透明背景
 	tableContent = widget.NewList(
-		// 列表长度
 		func() int {
-			return len(colorPoints)
+			if len(colorPoints) > 11 {
+				return len(colorPoints)
+			}
+			return 11
 		},
-		// 创建单元格
 		func() fyne.CanvasObject {
-			// 创建单元格文字
-			idText := canvas.NewText("", getTextColor(isDarkTheme))
-			idText.Alignment = fyne.TextAlignCenter
+			idxText := canvas.NewText("", getTextColor(isDarkTheme))
+			idxText.Alignment = fyne.TextAlignCenter
+			idxText.TextSize = 11
 
-			posText := canvas.NewText("", getTextColor(isDarkTheme))
-			posText.Alignment = fyne.TextAlignCenter
+			statusCheck := NewColorCheck(false, color.RGBA{240, 240, 240, 255}, func(bool) {})
+			coordEntry := newCommitEntry()
 
-			colorText := canvas.NewText("", getTextColor(isDarkTheme))
-			colorText.Alignment = fyne.TextAlignCenter
+			swatch := canvas.NewRectangle(color.Black)
+			swatch.SetMinSize(fyne.NewSize(56, 24))
 
-			// 创建自定义颜色的复选框
-			statusCheck := NewColorCheck(false, color.RGBA{100, 100, 255, 255}, func(bool) {})
+			rgbText := canvas.NewText("", getTextColor(isDarkTheme))
+			rgbText.Alignment = fyne.TextAlignCenter
+			rgbText.TextSize = 11
+			offsetEntry := newCommitEntry()
 
-			// 使用网格布局排列单元格 - 为颜色列分配更多空间
-			cellContainer := container.New(&weightedGridLayout{
-				cols:    4,
-				weights: []float32{1, 1.5, 2, 1}, // 颜色列的权重更大
+			rowContent := container.New(&weightedGridLayout{
+				cols:    6,
+				weights: []float32{0.55, 1.0, 1.7, 1.6, 2.0, 1.45},
 			},
-				container.NewPadded(idText),
-				container.NewPadded(posText),
-				container.NewPadded(colorText),
+				container.NewCenter(idxText),
 				container.NewCenter(statusCheck),
+				coordEntry,
+				container.NewPadded(swatch),
+				container.NewCenter(rgbText),
+				offsetEntry,
 			)
-
-			// 创建可点击的行，使用透明背景
-			row := newClickableTableRow(transparent, cellContainer, nil)
-
-			return row
+			return newClickableTableRow(transparent, rowContent, nil)
 		},
-		// 更新单元格
 		func(id widget.ListItemID, item fyne.CanvasObject) {
+			row := item.(*ClickableTableRow)
+			rowContent := row.content
+			idxText := rowContent.Objects[0].(*fyne.Container).Objects[0].(*canvas.Text)
+			statusCheck := rowContent.Objects[1].(*fyne.Container).Objects[0].(*ColorCheck)
+			coordEntry := rowContent.Objects[2].(*commitEntry)
+			swatch := rowContent.Objects[3].(*fyne.Container).Objects[0].(*canvas.Rectangle)
+			rgbText := rowContent.Objects[4].(*fyne.Container).Objects[0].(*canvas.Text)
+			offsetEntry := rowContent.Objects[5].(*commitEntry)
+
+			textColor := getTextColor(isDarkTheme)
+			idxText.Color = textColor
+			rgbText.Color = textColor
+			idxText.Text = strconv.Itoa(id + 1)
+
 			if id < len(colorPoints) {
 				point := colorPoints[id]
-				row := item.(*ClickableTableRow)
-				cellContainer := row.content
-
-				// 获取单元格内容
-				idText := cellContainer.Objects[0].(*fyne.Container).Objects[0].(*canvas.Text)
-				posText := cellContainer.Objects[1].(*fyne.Container).Objects[0].(*canvas.Text)
-				colorText := cellContainer.Objects[2].(*fyne.Container).Objects[0].(*canvas.Text)
-				statusContainer := cellContainer.Objects[3].(*fyne.Container)
-
-				// 更新文本颜色
-				textColor := getTextColor(isDarkTheme)
-				idText.Color = textColor
-				posText.Color = textColor
-				colorText.Color = textColor
-
-				// 获取并更新自定义复选框
-				colorCheck := statusContainer.Objects[0].(*ColorCheck)
-
-				// 设置复选框颜色
-				colorCheck.Color = hexToColor(point.Color)
-
-				// 更新文本内容
-				idText.Text = strconv.Itoa(point.ID)
-				posText.Text = point.Position
-				colorText.Text = point.Color
-
-				// 更新选中状态
-				colorCheck.Checked = point.Selected
-				colorCheck.OnChanged = func(checked bool) {
-					colorPoints[id].Selected = checked
-					updateTableSelection() // 使用前面声明的函数
+				coordEntry.Enable()
+				coordEntry.onCommit = func(value string) {
+					commitColorPointPosition(id, value)
 				}
-
-				// 刷新文字和复选框
-				idText.Refresh()
-				posText.Refresh()
-				colorText.Refresh()
-				colorCheck.Refresh()
+				coordEntry.OnSubmitted = coordEntry.onCommit
+				coordEntry.SetText(point.Position)
+				rgbText.Text = point.Color
+				offsetEntry.Enable()
+				offsetEntry.onCommit = func(value string) {
+					if id >= len(colorPoints) {
+						return
+					}
+					colorPoints[id].Offset = strings.TrimSpace(value)
+					updateTableSelection()
+				}
+				offsetEntry.OnSubmitted = offsetEntry.onCommit
+				offsetEntry.SetText(point.Offset)
+				swatch.FillColor = hexToColor(point.Color)
+				statusCheck.Color = hexToColor(point.Color)
+				statusCheck.Checked = point.Selected
+				statusCheck.OnChanged = func(checked bool) {
+					if id >= len(colorPoints) {
+						return
+					}
+					colorPoints[id].Selected = checked
+					updateTableSelection()
+				}
+			} else {
+				coordEntry.onCommit = nil
+				coordEntry.OnSubmitted = nil
+				coordEntry.SetText("")
+				coordEntry.Disable()
+				rgbText.Text = ""
+				offsetEntry.onCommit = nil
+				offsetEntry.OnSubmitted = nil
+				offsetEntry.SetText("")
+				offsetEntry.Disable()
+				swatch.FillColor = color.Black
+				statusCheck.Color = color.RGBA{240, 240, 240, 255}
+				statusCheck.Checked = false
+				statusCheck.OnChanged = func(bool) {}
 			}
+
+			idxText.Refresh()
+			coordEntry.Refresh()
+			rgbText.Refresh()
+			offsetEntry.Refresh()
+			swatch.Refresh()
+			statusCheck.Refresh()
 		},
 	)
-
-	// 将表格包装在一个滚动容器中
 	tableScroll := container.NewVScroll(tableContent)
+	tableBlock := container.NewBorder(tableHeader, nil, nil, nil, tableScroll)
+	tableArea := newFixedHeightContainer(tableBlock, 230)
 
-	// 创建右侧面板：表头 + 滚动表格内容
-	rightContent := container.NewBorder(tableHeader, nil, nil, nil, tableScroll)
-	rightPanel := container.New(&fixedWidthLayout{width: 250}, rightContent)
+	clearAllBtn := widget.NewButton("清除所有 (CTRL+E)", func() {
+		w.Canvas().Unfocus()
+		if imageViewer != nil {
+			imageViewer.ClearMarks()
+			return
+		}
+		colorPoints = colorPoints[:0]
+		updateTableSelection()
+	})
+	uniformOffsetEntry := makeEntry("202020")
+	defaultColorPointOffset = uniformOffsetEntry.Text
+	copyCoordsBtn := widget.NewButton("复制坐标", func() {
+		w.Canvas().Unfocus()
+		w.Clipboard().SetContent(colorPointCoordinatesText())
+	})
+	pasteCoordsBtn := widget.NewButton("粘贴坐标", func() {
+		w.Canvas().Unfocus()
+		points := parsePointPositionsText(w.Clipboard().Content())
+		if len(points) == 0 {
+			return
+		}
+		defaultColorPointOffset = strings.TrimSpace(uniformOffsetEntry.Text)
+		replaceColorPointsByPositions(points, defaultColorPointOffset)
+	})
+	uniformOffsetBtn := widget.NewButton("统一偏色", func() {
+		defaultColorPointOffset = strings.TrimSpace(uniformOffsetEntry.Text)
+		for i := range colorPoints {
+			colorPoints[i].Offset = defaultColorPointOffset
+		}
+		updateTableSelection()
+	})
 
-	// 创建一个外层容器，包含三个区域，中间是标签页容器
-	mainContent := container.NewBorder(
-		nil,        // 顶部
-		nil,        // 底部
-		leftPanel,  // 左侧
-		rightPanel, // 右侧
-		tabs,       // 中间区域使用标签页容器
+	precisionEntry := makeEntry("0.90")
+	functionSelect := widget.NewSelect([]string{"findMultiColor", "findColor", "cmpColor"}, func(string) {})
+	functionSelect.SetSelected("findMultiColor")
+	directionSelect := widget.NewSelect([]string{"0: 从左上往右下", "1: 从中心向外", "2: 从右下往左上"}, func(string) {})
+	directionSelect.SetSelected("0: 从左上往右下")
+	colorEntry := makeEntry("")
+	paramsEntry := makeEntry("")
+	resultEntry := widget.NewMultiLineEntry()
+	resultEntry.SetPlaceHolder("结果")
+	resultEntry.SetMinRowsVisible(6)
+
+	toolForm := container.NewVBox(
+		container.NewGridWithColumns(2, clearAllBtn, container.NewGridWithColumns(2, copyCoordsBtn, pasteCoordsBtn)),
+		container.NewBorder(nil, nil, uniformOffsetBtn, nil, uniformOffsetEntry),
+		container.NewAppTabs(
+			container.NewTabItem("图色面板", container.NewVBox(
+				container.NewBorder(nil, nil, widget.NewLabel("精度"), nil, precisionEntry),
+				container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, functionSelect),
+				container.NewBorder(nil, nil, widget.NewLabel("方向"), nil, directionSelect),
+				container.NewBorder(nil, nil, widget.NewLabel("颜色"), widget.NewButton("复制颜色", func() { w.Clipboard().SetContent(colorEntry.Text) }), colorEntry),
+				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(makeButton("格式"), widget.NewButton("复制参数", func() { w.Clipboard().SetContent(paramsEntry.Text) })), paramsEntry),
+				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
+				container.NewGridWithColumns(4, genBtn, makeButton("找色测试"), makeButton("代码测试"), makeButton("图片查找")),
+			)),
+			container.NewTabItem("点阵OCR", container.NewCenter(widget.NewLabel("点阵OCR布局待实现"))),
+			container.NewTabItem("光学OCR", container.NewCenter(widget.NewLabel("光学OCR布局待实现"))),
+		),
 	)
+
+	rightToolPanel := container.NewBorder(tableArea, nil, nil, nil, toolForm)
+	rightTabs := container.NewAppTabs(
+		container.NewTabItem("图色工具", rightToolPanel),
+		container.NewTabItem("节点工具", container.NewCenter(widget.NewLabel("节点工具布局待实现"))),
+	)
+	rightPanel := makeFixedPanel(340, rightTabs)
+
+	// 左工具栏固定宽度；中间图像区和右工具栏保持可拖拽
+	centerRightSplit := container.NewHSplit(tabs, rightPanel)
+	centerRightSplit.Offset = 0.70
+
+	mainContent := container.NewBorder(nil, nil, leftPanel, nil, centerRightSplit)
 
 	// 设置窗口内容并显示
 	w.SetContent(mainContent)
@@ -3710,6 +4184,52 @@ func (t *topLeftLayout) Layout(objects []fyne.CanvasObject, containerSize fyne.S
 		obj.Resize(size)
 		obj.Move(pos)
 	}
+}
+
+type compactPaddedLayout struct {
+	padding float32
+}
+
+func (p *compactPaddedLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) == 0 {
+		return fyne.NewSize(p.padding*2, p.padding*2)
+	}
+
+	size := objects[0].MinSize()
+	return size.Add(fyne.NewSize(p.padding*2, p.padding*2))
+}
+
+func (p *compactPaddedLayout) Layout(objects []fyne.CanvasObject, containerSize fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+
+	innerSize := fyne.NewSize(
+		fyne.Max(0, containerSize.Width-p.padding*2),
+		fyne.Max(0, containerSize.Height-p.padding*2),
+	)
+	objects[0].Move(fyne.NewPos(p.padding, p.padding))
+	objects[0].Resize(innerSize)
+}
+
+type fixedContentWidthLayout struct {
+	width float32
+}
+
+func (l *fixedContentWidthLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	height := float32(1)
+	if len(objects) > 0 {
+		height = objects[0].MinSize().Height
+	}
+	return fyne.NewSize(l.width, height)
+}
+
+func (l *fixedContentWidthLayout) Layout(objects []fyne.CanvasObject, containerSize fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	objects[0].Move(fyne.NewPos(0, 0))
+	objects[0].Resize(fyne.NewSize(l.width, containerSize.Height))
 }
 
 // 固定宽度布局
