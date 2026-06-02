@@ -7,13 +7,16 @@ func withColorPointsForTest(t *testing.T, points []ColorPoint) {
 
 	oldPoints := colorPoints
 	oldRectCoordEntry := rectCoordEntry
+	oldTemplates := apiFormatTemplates
 	t.Cleanup(func() {
 		colorPoints = oldPoints
 		rectCoordEntry = oldRectCoordEntry
+		apiFormatTemplates = oldTemplates
 	})
 
 	rectCoordEntry = nil
 	colorPoints = points
+	apiFormatTemplates = defaultAPIFormatTemplates()
 }
 
 func TestBuildImagesAPICodeColorExportUsesOfficialParamOrder(t *testing.T) {
@@ -74,5 +77,22 @@ func TestBuildImagesAPICodeColorExportUsesOfficialParamOrder(t *testing.T) {
 				t.Fatalf("code mismatch:\nwant: %s\n got: %s", tt.wantCode, code)
 			}
 		})
+	}
+}
+
+func TestBuildImagesAPICodeUsesCustomFormatTemplate(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "10, 20", Color: "#081029", Offset: "202020", Selected: true},
+		{Position: "197, -1", Color: "#1C3A6D", Offset: "202020", Selected: true},
+	})
+	apiFormatTemplates = normalizeAPIFormatTemplates(map[string]string{
+		"findmulticolor": "call([颜色参数]) params=[参数]",
+	})
+
+	_, _, code := buildImagesAPICode("FindMultiColors", "0.9", "0: 从左到右，从上到下")
+
+	want := `call({0,0,0,0,"081029-202020,187,-21,1c3a6d-202020",0.9,0,0}) params=0, 0, 0, 0, "081029-202020,187,-21,1c3a6d-202020", 0.9, 0, 0`
+	if code != want {
+		t.Fatalf("custom code mismatch:\nwant: %s\n got: %s", want, code)
 	}
 }

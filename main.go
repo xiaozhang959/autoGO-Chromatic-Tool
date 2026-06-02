@@ -62,6 +62,8 @@ type UserConfig struct {
 	GridCols      int    `json:"grid_cols"`
 	GridRows      int    `json:"grid_rows"`
 	GridSpacing   int    `json:"grid_spacing"`
+
+	FormatTemplates map[string]string `json:"format_templates"`
 }
 
 // 全局变量定义
@@ -104,6 +106,9 @@ var (
 
 	// 图色面板 API 字段刷新回调
 	updateImagesAPIFields func() string
+
+	// 图色面板结果代码格式模板
+	apiFormatTemplates = defaultAPIFormatTemplates()
 
 	// 点阵模式状态
 	gridModeEnabled  = false // 默认关闭点阵模式
@@ -305,6 +310,8 @@ func defaultUserConfig() UserConfig {
 		GridCols:      4,
 		GridRows:      4,
 		GridSpacing:   7,
+
+		FormatTemplates: defaultAPIFormatTemplates(),
 	}
 }
 
@@ -345,6 +352,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 	if config.GridSpacing <= 0 {
 		config.GridSpacing = defaults.GridSpacing
 	}
+	config.FormatTemplates = normalizeAPIFormatTemplates(config.FormatTemplates)
 	return config
 }
 
@@ -1773,6 +1781,210 @@ func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) s
 	return fmt.Sprintf("{%d,%d,%d,%d,\"%s\",%s,%d,0}", x1, y1, x2, y2, colorText, sim, dir)
 }
 
+func defaultAPIFormatTemplates() map[string]string {
+	return map[string]string{
+		"FindColor":          "x, y := images.FindColor([参数])",
+		"FindMultiColors":    "x, y := images.FindMultiColors([参数])",
+		"FindMultiColorsAll": "points := images.FindMultiColorsAll([参数])",
+		"CmpColor":           "matched := images.CmpColor([参数])",
+	}
+}
+
+func copyAPIFormatTemplates(templates map[string]string) map[string]string {
+	copied := make(map[string]string, len(templates))
+	for key, value := range templates {
+		copied[key] = value
+	}
+	return copied
+}
+
+func normalizeAPIFormatTemplates(templates map[string]string) map[string]string {
+	normalized := defaultAPIFormatTemplates()
+	for key, value := range templates {
+		name := normalizeImagesFunctionName(key)
+		if strings.TrimSpace(value) != "" {
+			normalized[name] = value
+		}
+	}
+	return normalized
+}
+
+func formatTemplateFor(functionName string) string {
+	functionName = normalizeImagesFunctionName(functionName)
+	template := strings.TrimSpace(apiFormatTemplates[functionName])
+	if template != "" {
+		return apiFormatTemplates[functionName]
+	}
+	return defaultAPIFormatTemplates()[functionName]
+}
+
+func applyFormatTemplate(template string, values map[string]string) string {
+	result := template
+	for _, placeholder := range apiFormatPlaceholders {
+		result = strings.ReplaceAll(result, placeholder.token, values[placeholder.token])
+	}
+	return result
+}
+
+func renderImageAPICode(functionName string, values map[string]string) string {
+	return applyFormatTemplate(formatTemplateFor(functionName), values)
+}
+
+func apiFormatValues(functionName, params, colorParams, colorText, sim string, dir, x1, y1, x2, y2, pointX, pointY int) map[string]string {
+	return map[string]string{
+		"[函数名]":      functionName,
+		"[参数]":       params,
+		"[颜色参数]":     colorParams,
+		"[颜色值]":      colorText,
+		"[相似度]":      sim,
+		"[查找方向]":     strconv.Itoa(dir),
+		"[屏幕ID]":     "0",
+		"[范围_左]":     strconv.Itoa(x1),
+		"[范围_上]":     strconv.Itoa(y1),
+		"[范围_右]":     strconv.Itoa(x2),
+		"[范围_下]":     strconv.Itoa(y2),
+		"[坐标_X]":     strconv.Itoa(pointX),
+		"[坐标_Y]":     strconv.Itoa(pointY),
+		"[区域_左上]":    fmt.Sprintf("%d, %d", x1, y1),
+		"[区域_右下]":    fmt.Sprintf("%d, %d", x2, y2),
+		"[CmpColor]": fmt.Sprintf("%d, %d, \"%s\", %s, 0", pointX, pointY, colorText, sim),
+	}
+}
+
+type apiFormatPlaceholder struct {
+	token       string
+	description string
+}
+
+var apiFormatPlaceholders = []apiFormatPlaceholder{
+	{token: "[参数]", description: "完整函数参数"},
+	{token: "[颜色参数]", description: "右侧颜色字段参数对象"},
+	{token: "[颜色值]", description: "colorStr / colors"},
+	{token: "[相似度]", description: "sim"},
+	{token: "[查找方向]", description: "dir"},
+	{token: "[屏幕ID]", description: "displayId"},
+	{token: "[范围_左]", description: "x1"},
+	{token: "[范围_上]", description: "y1"},
+	{token: "[范围_右]", description: "x2"},
+	{token: "[范围_下]", description: "y2"},
+	{token: "[坐标_X]", description: "x"},
+	{token: "[坐标_Y]", description: "y"},
+	{token: "[函数名]", description: "函数名称"},
+}
+
+func sampleAPIFormatValues(functionName string) map[string]string {
+	functionName = normalizeImagesFunctionName(functionName)
+	switch functionName {
+	case "FindColor":
+		colorText := "FFFFFF|CCCCCC-101010"
+		params := "0, 0, 0, 0, \"FFFFFF|CCCCCC-101010\", 0.9, 0, 0"
+		return apiFormatValues(functionName, params, apiRegionParamsObject(0, 0, 0, 0, colorText, "0.9", 0), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	case "FindMultiColorsAll":
+		colorText := "ffccff-151515,635,978,ffab2d-101010"
+		params := "0, 0, 0, 0, \"ffccff-151515,635,978,ffab2d-101010\", 0.9, 0, 0"
+		return apiFormatValues(functionName, params, apiRegionParamsObject(0, 0, 0, 0, colorText, "0.9", 0), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	case "CmpColor":
+		colorText := "FFFFFF|CCCCCC-101010"
+		params := "100, 200, \"FFFFFF|CCCCCC-101010\", 0.9, 0"
+		return apiFormatValues(functionName, params, fmt.Sprintf("{100,200,\"%s\",0.9,0}", colorText), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	default:
+		colorText := "ffccff-151515,635,978,ffab2d-101010"
+		params := "0, 0, 0, 0, \"ffccff-151515,635,978,ffab2d-101010\", 0.9, 0, 0"
+		return apiFormatValues("FindMultiColors", params, apiRegionParamsObject(0, 0, 0, 0, colorText, "0.9", 0), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	}
+}
+
+func showAPIFormatDialog(parent fyne.Window, selectedFunction string, saveConfig func()) {
+	functions := []string{"FindMultiColors", "FindColor", "FindMultiColorsAll", "CmpColor"}
+	localTemplates := copyAPIFormatTemplates(normalizeAPIFormatTemplates(apiFormatTemplates))
+	defaultTemplates := defaultAPIFormatTemplates()
+	currentFunction := normalizeImagesFunctionName(selectedFunction)
+
+	templateEntry := widget.NewMultiLineEntry()
+	templateEntry.Wrapping = fyne.TextWrapWord
+	templateEntry.SetMinRowsVisible(8)
+
+	previewEntry := widget.NewMultiLineEntry()
+	previewEntry.Wrapping = fyne.TextWrapWord
+	previewEntry.SetMinRowsVisible(7)
+	previewEntry.Disable()
+
+	refreshPreview := func() {
+		localTemplates[currentFunction] = templateEntry.Text
+		previewEntry.SetText(applyFormatTemplate(templateEntry.Text, sampleAPIFormatValues(currentFunction)))
+	}
+	templateEntry.OnChanged = func(string) {
+		refreshPreview()
+	}
+
+	methodSelect := widget.NewSelect(functions, func(value string) {
+		currentFunction = normalizeImagesFunctionName(value)
+		templateEntry.SetText(localTemplates[currentFunction])
+		refreshPreview()
+	})
+
+	placeholderButtons := container.NewVBox()
+	for _, placeholder := range apiFormatPlaceholders {
+		token := placeholder.token
+		label := widget.NewLabel(placeholder.description)
+		label.Wrapping = fyne.TextTruncate
+		placeholderButtons.Add(container.NewBorder(nil, nil, widget.NewButton(token, func() {
+			templateEntry.SetText(templateEntry.Text + token)
+		}), nil, label))
+	}
+
+	leftPanel := container.NewBorder(
+		container.NewVBox(
+			container.NewBorder(nil, nil, widget.NewLabel("模板方法："), nil, methodSelect),
+			widget.NewSeparator(),
+			widget.NewLabel("模板参数"),
+		),
+		nil,
+		nil,
+		nil,
+		container.NewVScroll(placeholderButtons),
+	)
+
+	templateBlock := container.NewBorder(widget.NewLabel("模板内容"), nil, nil, nil, templateEntry)
+	previewBlock := container.NewBorder(widget.NewLabel("实时预览"), nil, nil, nil, previewEntry)
+	rightSplit := container.NewVSplit(templateBlock, previewBlock)
+	rightSplit.Offset = 0.55
+
+	bodySplit := container.NewHSplit(container.New(&fixedWidthLayout{width: 230}, leftPanel), rightSplit)
+	bodySplit.Offset = 0.34
+
+	var formatDialog *dialog.CustomDialog
+	restoreButton := widget.NewButton("还原配置", func() {
+		localTemplates[currentFunction] = defaultTemplates[currentFunction]
+		templateEntry.SetText(localTemplates[currentFunction])
+		refreshPreview()
+	})
+	closeButton := widget.NewButton("关闭", func() {
+		if formatDialog != nil {
+			formatDialog.Hide()
+		}
+	})
+	saveButton := widget.NewButton("保存配置", func() {
+		localTemplates[currentFunction] = templateEntry.Text
+		apiFormatTemplates = copyAPIFormatTemplates(normalizeAPIFormatTemplates(localTemplates))
+		if saveConfig != nil {
+			saveConfig()
+		}
+		refreshImagesAPIFields()
+		if formatDialog != nil {
+			formatDialog.Hide()
+		}
+	})
+	saveButton.Importance = widget.HighImportance
+
+	content := container.NewBorder(nil, container.NewHBox(layout.NewSpacer(), restoreButton, closeButton, saveButton), nil, nil, bodySplit)
+	formatDialog = dialog.NewCustomWithoutButtons("自定义参数格式", content, parent)
+	formatDialog.Resize(fyne.NewSize(720, 520))
+
+	methodSelect.SetSelected(currentFunction)
+	formatDialog.Show()
+}
+
 func refreshImagesAPIFields() {
 	if updateImagesAPIFields != nil {
 		updateImagesAPIFields()
@@ -1813,12 +2025,14 @@ func buildImagesAPICode(functionName, precisionText, directionText string) (stri
 		colorText := apiColorAlternatives(points)
 		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorParams, params, fmt.Sprintf("x, y := images.FindColor(%s)", params)
+		values := apiFormatValues(functionName, params, colorParams, colorText, sim, dir, x1, y1, x2, y2, 0, 0)
+		return colorParams, params, renderImageAPICode(functionName, values)
 	case "FindMultiColorsAll":
 		colorText := apiMultiColorTemplate(points)
 		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorParams, params, fmt.Sprintf("points := images.FindMultiColorsAll(%s)", params)
+		values := apiFormatValues(functionName, params, colorParams, colorText, sim, dir, x1, y1, x2, y2, 0, 0)
+		return colorParams, params, renderImageAPICode(functionName, values)
 	case "CmpColor":
 		x, y, ok := parsePointPosition(points[0].Position)
 		if !ok {
@@ -1827,12 +2041,14 @@ func buildImagesAPICode(functionName, precisionText, directionText string) (stri
 		colorText := apiColorAlternatives(points)
 		colorParams := fmt.Sprintf("{%d,%d,\"%s\",%s,0}", x, y, colorText, sim)
 		params := fmt.Sprintf("%d, %d, \"%s\", %s, 0", x, y, colorText, sim)
-		return colorParams, params, fmt.Sprintf("matched := images.CmpColor(%s)", params)
+		values := apiFormatValues(functionName, params, colorParams, colorText, sim, dir, x1, y1, x2, y2, x, y)
+		return colorParams, params, renderImageAPICode(functionName, values)
 	default:
 		colorText := apiMultiColorTemplate(points)
 		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorParams, params, fmt.Sprintf("x, y := images.FindMultiColors(%s)", params)
+		values := apiFormatValues(functionName, params, colorParams, colorText, sim, dir, x1, y1, x2, y2, 0, 0)
+		return colorParams, params, renderImageAPICode(functionName, values)
 	}
 }
 
@@ -3526,6 +3742,7 @@ func main() {
 	w := a.NewWindow("AutoGo图色助手")
 	mainWindowSize := initialWindowSize(0.70, 0.70)
 	userConfig := loadUserConfig()
+	apiFormatTemplates = copyAPIFormatTemplates(userConfig.FormatTemplates)
 	magnifierEnabled = userConfig.ShowMagnifier
 	autoCopyRangeEnabled = userConfig.AutoCopyRange
 	gridModeEnabled = userConfig.GridMode
@@ -4681,6 +4898,8 @@ func main() {
 			GridCols:      gridColsValue,
 			GridRows:      gridRowsValue,
 			GridSpacing:   gridSpacingValue,
+
+			FormatTemplates: copyAPIFormatTemplates(apiFormatTemplates),
 		})
 	}
 
@@ -4696,7 +4915,7 @@ func main() {
 					w.Clipboard().SetContent(colorEntry.Text)
 				}), colorEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(widget.NewButton("格式", func() {
-					updateImagesAPIFields()
+					showAPIFormatDialog(w, functionSelect.Selected, saveCurrentConfig)
 				}), widget.NewButton("复制参数", func() {
 					w.Clipboard().SetContent(paramsEntry.Text)
 				})), paramsEntry),
