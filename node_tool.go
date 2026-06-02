@@ -10,14 +10,13 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
 const androidNodeDumpPath = "/sdcard/window_dump.xml"
-const compactNodeToolTextSize float32 = 11
 const compactNodeToolAttrSelectWidth float32 = 24
 const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 58
@@ -44,16 +43,16 @@ type androidNodeAttrRow struct {
 	Finder   string
 }
 
-func newCompactNodeToolText(value string) *canvas.Text {
-	text := canvas.NewText(value, getTextColor(isDarkTheme))
-	text.TextSize = compactNodeToolTextSize
+func newCompactNodeToolText(value string) *widget.Label {
+	text := widget.NewLabel(value)
+	text.SizeName = theme.SizeNameCaptionText
+	text.Truncation = fyne.TextTruncateClip
+	text.Wrapping = fyne.TextWrapOff
 	return text
 }
 
-func setCompactNodeToolText(text *canvas.Text, value string) {
-	text.Color = getTextColor(isDarkTheme)
-	text.Text = value
-	text.Refresh()
+func setCompactNodeToolText(text *widget.Label, value string) {
+	text.SetText(value)
 }
 
 func newCompactNodeToolAttrRow(selected, name, value, finder fyne.CanvasObject) *fyne.Container {
@@ -67,10 +66,10 @@ func newCompactNodeToolAttrRow(selected, name, value, finder fyne.CanvasObject) 
 type androidNodeAttrRowView struct {
 	*fyne.Container
 
-	selectedText *canvas.Text
-	nameText     *canvas.Text
-	valueText    *canvas.Text
-	finderText   *canvas.Text
+	selectedText *widget.Label
+	nameText     *widget.Label
+	valueText    *widget.Label
+	finderText   *widget.Label
 }
 
 func newAndroidNodeAttrRowView() *androidNodeAttrRowView {
@@ -189,7 +188,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		},
 		func(uid widget.TreeNodeID, branch bool, item fyne.CanvasObject) {
 			row := item.(*fyne.Container)
-			label := row.Objects[0].(*canvas.Text)
+			label := row.Objects[0].(*widget.Label)
 			if uid == "" {
 				setCompactNodeToolText(label, "")
 				return
