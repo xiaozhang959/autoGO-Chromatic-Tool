@@ -140,6 +140,59 @@ func TestAutoPickContourPointsPureColorDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestAutoPickHighlightPointsPreferBrightRegion(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 20, 20))
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0x18, G: 0x18, B: 0x18, A: 0xff})
+		}
+	}
+	brightRect := image.Rect(6, 7, 14, 15)
+	for y := brightRect.Min.Y; y < brightRect.Max.Y; y++ {
+		for x := brightRect.Min.X; x < brightRect.Max.X; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0xf0, G: 0xf0, B: 0xf0, A: 0xff})
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 20, 20),
+		Count:       8,
+		Mode:        autoPickModeHighlight,
+		MinDistance: 2,
+	})
+
+	if len(points) == 0 {
+		t.Fatal("expected highlight points, got none")
+	}
+	for _, point := range points {
+		if !point.In(brightRect) {
+			t.Fatalf("highlight point should be inside bright region %v, got %v in %v", brightRect, point, points)
+		}
+	}
+}
+
+func TestAutoPickHighlightPointsPureDarkReturnsEmpty(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 10, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0x10, B: 0x10, A: 0xff})
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 10, 10),
+		Count:       5,
+		Mode:        autoPickModeHighlight,
+		MinDistance: 2,
+	})
+
+	if len(points) != 0 {
+		t.Fatalf("expected no highlight points for pure dark image, got %v", points)
+	}
+}
+
 func TestNormalizePickRectClampsAndNormalizes(t *testing.T) {
 	img := image.NewNRGBA(image.Rect(0, 0, 10, 8))
 
