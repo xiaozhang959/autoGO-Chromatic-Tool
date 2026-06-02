@@ -10,12 +10,17 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
 const androidNodeDumpPath = "/sdcard/window_dump.xml"
+const compactNodeToolTextSize float32 = 11
+const compactNodeToolAttrSelectWidth float32 = 24
+const compactNodeToolAttrNameWidth float32 = 68
+const compactNodeToolAttrFinderWidth float32 = 58
 
 type AndroidUINode struct {
 	Number   int
@@ -37,6 +42,65 @@ type androidNodeAttrRow struct {
 	Name     string
 	Value    string
 	Finder   string
+}
+
+func newCompactNodeToolText(value string) *canvas.Text {
+	text := canvas.NewText(value, getTextColor(isDarkTheme))
+	text.TextSize = compactNodeToolTextSize
+	return text
+}
+
+func setCompactNodeToolText(text *canvas.Text, value string) {
+	text.Color = getTextColor(isDarkTheme)
+	text.Text = value
+	text.Refresh()
+}
+
+func newCompactNodeToolAttrRow(selected, name, value, finder fyne.CanvasObject) *fyne.Container {
+	selectedBox := container.New(&fixedContentWidthLayout{width: compactNodeToolAttrSelectWidth}, selected)
+	nameBox := container.New(&fixedContentWidthLayout{width: compactNodeToolAttrNameWidth}, name)
+	finderBox := container.New(&fixedContentWidthLayout{width: compactNodeToolAttrFinderWidth}, finder)
+	main := container.NewBorder(nil, nil, nameBox, nil, value)
+	return container.NewBorder(nil, nil, selectedBox, finderBox, main)
+}
+
+type androidNodeAttrRowView struct {
+	*fyne.Container
+
+	selectedText *canvas.Text
+	nameText     *canvas.Text
+	valueText    *canvas.Text
+	finderText   *canvas.Text
+}
+
+func newAndroidNodeAttrRowView() *androidNodeAttrRowView {
+	view := &androidNodeAttrRowView{
+		selectedText: newCompactNodeToolText(""),
+		nameText:     newCompactNodeToolText(""),
+		valueText:    newCompactNodeToolText(""),
+		finderText:   newCompactNodeToolText(""),
+	}
+	view.selectedText.Alignment = fyne.TextAlignCenter
+	view.Container = newCompactNodeToolAttrRow(view.selectedText, view.nameText, view.valueText, view.finderText)
+	return view
+}
+
+func (v *androidNodeAttrRowView) setAttr(attr androidNodeAttrRow) {
+	selected := "☐"
+	if attr.Selected {
+		selected = "☑"
+	}
+	setCompactNodeToolText(v.selectedText, selected)
+	setCompactNodeToolText(v.nameText, attr.Name)
+	setCompactNodeToolText(v.valueText, trimMiddle(attr.Value, 28))
+	setCompactNodeToolText(v.finderText, attr.Finder)
+}
+
+func (v *androidNodeAttrRowView) clear() {
+	setCompactNodeToolText(v.selectedText, "")
+	setCompactNodeToolText(v.nameText, "")
+	setCompactNodeToolText(v.valueText, "")
+	setCompactNodeToolText(v.finderText, "")
 }
 
 type AndroidNodeTool struct {
@@ -121,25 +185,25 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 			return uid == "" || len(tool.treeChildren[uid]) > 0
 		},
 		func(bool) fyne.CanvasObject {
-			return container.NewHBox(widget.NewLabel(""))
+			return container.NewHBox(newCompactNodeToolText(""))
 		},
 		func(uid widget.TreeNodeID, branch bool, item fyne.CanvasObject) {
 			row := item.(*fyne.Container)
-			label := row.Objects[0].(*widget.Label)
+			label := row.Objects[0].(*canvas.Text)
 			if uid == "" {
-				label.SetText("")
+				setCompactNodeToolText(label, "")
 				return
 			}
 			node := tool.treeNodeByID[uid]
 			if node == nil {
-				label.SetText("")
+				setCompactNodeToolText(label, "")
 				return
 			}
 			prefix := "  "
 			if node == tool.selectedNode {
 				prefix = "▶ "
 			}
-			label.SetText(prefix + androidNodeSummary(node))
+			setCompactNodeToolText(label, prefix+androidNodeSummary(node))
 		},
 	)
 	tool.nodeTree.HideSeparators = true
@@ -159,45 +223,27 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 			return len(tool.attrRows)
 		},
 		func() fyne.CanvasObject {
-			return container.NewGridWithColumns(
-				4,
-				widget.NewCheck("", nil),
-				widget.NewLabel(""),
-				widget.NewLabel(""),
-				widget.NewLabel(""),
-			)
+			return newAndroidNodeAttrRowView()
 		},
 		func(id widget.ListItemID, item fyne.CanvasObject) {
-			row := item.(*fyne.Container)
-			check := row.Objects[0].(*widget.Check)
-			nameLabel := row.Objects[1].(*widget.Label)
-			valueLabel := row.Objects[2].(*widget.Label)
-			finderLabel := row.Objects[3].(*widget.Label)
-
+			row := item.(*androidNodeAttrRowView)
 			if id < 0 || id >= len(tool.attrRows) {
-				check.OnChanged = nil
-				check.SetChecked(false)
-				nameLabel.SetText("")
-				valueLabel.SetText("")
-				finderLabel.SetText("")
+				row.clear()
 				return
 			}
-
-			attr := tool.attrRows[id]
-			check.OnChanged = nil
-			check.SetChecked(attr.Selected)
-			check.OnChanged = func(checked bool) {
-				if id < 0 || id >= len(tool.attrRows) {
-					return
-				}
-				tool.attrRows[id].Selected = checked
-				tool.refreshSelector()
-			}
-			nameLabel.SetText(attr.Name)
-			valueLabel.SetText(trimMiddle(attr.Value, 32))
-			finderLabel.SetText(attr.Finder)
+			row.setAttr(tool.attrRows[id])
 		},
 	)
+	tool.attrList.HideSeparators = true
+	tool.attrList.OnSelected = func(id widget.ListItemID) {
+		if id < 0 || id >= len(tool.attrRows) {
+			return
+		}
+		tool.attrRows[id].Selected = !tool.attrRows[id].Selected
+		tool.refreshSelector()
+		tool.attrList.Unselect(id)
+		tool.attrList.RefreshItem(id)
+	}
 
 	tool.selectAllBtn = widget.NewButton("全部勾选", func() {
 		tool.setAllAttrRows(true)
@@ -221,15 +267,14 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 
 	tool.selectorEntry = widget.NewMultiLineEntry()
 	tool.selectorEntry.SetPlaceHolder("选择节点并勾选属性后生成 XPath 选择器")
-	tool.selectorEntry.SetMinRowsVisible(4)
+	tool.selectorEntry.SetMinRowsVisible(2)
 
-	nodeHeader := widget.NewLabel("节点树")
-	attrHeader := container.NewGridWithColumns(
-		4,
-		widget.NewLabel("勾选"),
-		widget.NewLabel("属性"),
-		widget.NewLabel("值"),
-		widget.NewLabel("查找函数"),
+	nodeHeader := newCompactNodeToolText("节点树")
+	attrHeader := newCompactNodeToolAttrRow(
+		newCompactNodeToolText("选"),
+		newCompactNodeToolText("属性"),
+		newCompactNodeToolText("值"),
+		newCompactNodeToolText("函数"),
 	)
 
 	tool.root = container.NewVBox(
@@ -237,9 +282,9 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, prevBtn, nextBtn), tool.searchEntry),
 		tool.statusLabel,
 		nodeHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 190),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 230),
 		attrHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.attrList), 230),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.attrList), 180),
 		container.NewGridWithColumns(3, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn),
 		container.NewBorder(nil, nil, widget.NewLabel("选择器"), container.NewHBox(tool.copyAttrsBtn, tool.copySelectorBtn), tool.selectorEntry),
 	)
