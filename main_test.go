@@ -224,6 +224,22 @@ func TestRunImageFindTestHighlightPointsFindColor(t *testing.T) {
 	assertImagePoints(t, got, []image.Point{image.Pt(4, 1)})
 }
 
+func TestFindTestHighlightRectsUsesLargerBox(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 50, 50))
+
+	rects := findTestHighlightRects(img, []image.Point{image.Pt(25, 25), image.Pt(2, 3)})
+
+	if len(rects) != 2 {
+		t.Fatalf("rect count mismatch: got %d", len(rects))
+	}
+	if rects[0].X1 != 15 || rects[0].Y1 != 15 || rects[0].X2 != 36 || rects[0].Y2 != 36 {
+		t.Fatalf("center rect mismatch: got %+v", rects[0])
+	}
+	if rects[1].X1 != 0 || rects[1].Y1 != 0 || rects[1].X2 != 13 || rects[1].Y2 != 14 {
+		t.Fatalf("clamped rect mismatch: got %+v", rects[1])
+	}
+}
+
 func TestRunImageFindTestHighlightPointsFindMultiColorsAll(t *testing.T) {
 	withColorPointsForTest(t, []ColorPoint{
 		{Position: "0, 0", Color: "#112233", Offset: "000000", Selected: true},

@@ -1232,7 +1232,7 @@ const (
 	zoomStepMultiplier float32 = 1.1
 	maxRightMenuPoints         = 20
 	defaultRangeText           = "0,0,0,0"
-	findTestMarkRadius         = 5
+	findTestMarkRadius         = 10
 )
 
 // 自定义图像查看器，支持显示图像和鼠标事件跟踪
@@ -5104,6 +5104,12 @@ func main() {
 			imageViewer.ShowOriginalSize()
 		}
 	})
+	clearFindMarksBtn := widget.NewButton("清除查找标记", func() {
+		if imageViewer != nil {
+			imageViewer.ClearFindTestHighlights()
+		}
+	})
+	clearFindMarksBtn.Importance = widget.MediumImportance
 
 	pickModeSelect := widget.NewSelect([]string{
 		"随机取点",
@@ -5151,7 +5157,7 @@ func main() {
 		resetZoomBtn,
 		originalSizeBtn,
 		makeButton("抓取节点"),
-		makeButton("清除查找标记"),
+		clearFindMarksBtn,
 		makeButton("自动取色 (CTRL+A)"),
 		pickModeSelect,
 		container.NewBorder(nil, nil, widget.NewLabel("取色个数"), nil, pickCountEntry),
