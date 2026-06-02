@@ -144,6 +144,21 @@ func initialWindowSize(widthRatio, heightRatio float32) fyne.Size {
 	)
 }
 
+func splitOffsetForFixedRightWidth(totalWidth, leftWidth, rightWidth float32) float64 {
+	availableWidth := totalWidth - leftWidth
+	if availableWidth <= rightWidth || availableWidth <= 0 {
+		return 0.5
+	}
+	offset := (availableWidth - rightWidth) / availableWidth
+	if offset < 0.05 {
+		return 0.05
+	}
+	if offset > 0.95 {
+		return 0.95
+	}
+	return float64(offset)
+}
+
 // 固定高度的容器布局
 type fixedHeightContainer struct {
 	widget.BaseWidget
@@ -2938,7 +2953,7 @@ func showCodeTestDialog(parent fyne.Window, selectedFunction, precisionText, dir
 	testButton.Importance = widget.HighImportance
 
 	content := container.NewBorder(
-		container.NewBorder(nil, nil, widget.NewLabel("代码测试"), topCloseButton),
+		container.NewHBox(layout.NewSpacer(), topCloseButton),
 		container.NewHBox(layout.NewSpacer(), cancelButton, testButton),
 		nil,
 		nil,
@@ -5835,7 +5850,11 @@ func main() {
 		gridRow,
 		fontLibBtn,
 	)
-	leftPanel := makeFixedWidthPanel(190, container.New(&compactPaddedLayout{padding: 2}, container.NewVScroll(container.New(&fixedContentWidthLayout{width: 170}, leftControls))))
+	const (
+		leftPanelWidth     float32 = 190
+		rightPanelMinWidth float32 = 340
+	)
+	leftPanel := makeFixedWidthPanel(leftPanelWidth, container.New(&compactPaddedLayout{padding: 2}, container.NewVScroll(container.New(&fixedContentWidthLayout{width: 170}, leftControls))))
 
 	// 右侧工具栏布局：模拟图色工具 / 节点工具面板
 	headerBg = canvas.NewRectangle(getHeaderBgColor(isDarkTheme))
@@ -6094,7 +6113,7 @@ func main() {
 	paramsEntry := makeEntry("")
 	resultEntry := widget.NewMultiLineEntry()
 	resultEntry.SetPlaceHolder("找色测试结果将显示在这里...")
-	resultEntry.SetMinRowsVisible(6)
+	resultEntry.SetMinRowsVisible(5)
 	updateImagesAPIFields = func() string {
 		colorText, _, code := buildImagesAPICode(functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
 		colorEntry.SetText(colorText)
@@ -6174,11 +6193,11 @@ func main() {
 		container.NewTabItem("图色工具", rightToolPanel),
 		container.NewTabItem("节点工具", container.NewCenter(widget.NewLabel("节点工具布局待实现"))),
 	)
-	rightPanel := makeFixedPanel(340, container.NewVScroll(rightTabs))
+	rightPanel := makeFixedPanel(rightPanelMinWidth, container.NewVScroll(rightTabs))
 
-	// 左工具栏固定宽度；中间图像区和右工具栏保持可拖拽
+	// 左工具栏固定宽度；右工具栏默认使用最小宽度，用户可拖拽调整
 	centerRightSplit := container.NewHSplit(tabs, rightPanel)
-	centerRightSplit.Offset = 0.70
+	centerRightSplit.Offset = splitOffsetForFixedRightWidth(mainWindowSize.Width, leftPanelWidth, rightPanelMinWidth)
 
 	mainContent := container.NewBorder(nil, nil, leftPanel, nil, centerRightSplit)
 	windowContent := container.NewPadded(mainContent)

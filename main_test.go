@@ -39,6 +39,14 @@ func assertImagePoints(t *testing.T, got, want []image.Point) {
 	}
 }
 
+func TestSplitOffsetForFixedRightWidth(t *testing.T) {
+	got := splitOffsetForFixedRightWidth(1000, 190, 340)
+	want := float64(470) / float64(810)
+	if got < want-0.000001 || got > want+0.000001 {
+		t.Fatalf("split offset mismatch: want %v got %v", want, got)
+	}
+}
+
 func TestBuildImagesAPICodeColorExportUsesOfficialParamOrder(t *testing.T) {
 	withColorPointsForTest(t, []ColorPoint{
 		{Position: "10, 20", Color: "#081029", Offset: "202020", Selected: true},
