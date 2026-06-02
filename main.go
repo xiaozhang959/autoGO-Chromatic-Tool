@@ -63,6 +63,7 @@ type UserConfig struct {
 	GridCols      int    `json:"grid_cols"`
 	GridRows      int    `json:"grid_rows"`
 	GridSpacing   int    `json:"grid_spacing"`
+	EnableLogging bool   `json:"enable_logging"`
 
 	FormatTemplates map[string]string `json:"format_templates"`
 }
@@ -342,6 +343,7 @@ func defaultUserConfig() UserConfig {
 		GridCols:      4,
 		GridRows:      4,
 		GridSpacing:   7,
+		EnableLogging: false,
 
 		FormatTemplates: defaultAPIFormatTemplates(),
 	}
@@ -1218,7 +1220,11 @@ func updateDeviceList() {
 			deviceSelect.Options = []string{}
 			deviceSelect.Selected = "" // 直接设置 Selected 字段
 			deviceSelect.SetSelected("")
-			deviceSelect.PlaceHolder = "获取设备失败（见日志）"
+			if appLoggingEnabled {
+				deviceSelect.PlaceHolder = "获取设备失败（见日志）"
+			} else {
+				deviceSelect.PlaceHolder = "获取设备失败（可开启日志）"
+			}
 			deviceSelect.Refresh()
 		})
 		return
@@ -5071,8 +5077,11 @@ func (r *magnifierRenderer) Objects() []fyne.CanvasObject {
 func (r *magnifierRenderer) Destroy() {}
 
 func main() {
-	setupAppLogging()
-	log.Printf("应用启动，adb=%q", adb)
+	userConfig := loadUserConfig()
+	setupAppLogging(userConfig.EnableLogging)
+	if userConfig.EnableLogging {
+		log.Printf("应用启动，adb=%q", adb)
+	}
 
 	// 释放嵌入的 cap.dex 到临时目录
 	extractCapDex()
@@ -5108,7 +5117,6 @@ func main() {
 	// 创建窗口
 	w := a.NewWindow("AutoGo图色助手")
 	mainWindowSize := initialWindowSize(0.70, 0.70)
-	userConfig := loadUserConfig()
 	apiFormatTemplates = copyAPIFormatTemplates(userConfig.FormatTemplates)
 	magnifierEnabled = userConfig.ShowMagnifier
 	autoCopyRangeEnabled = userConfig.AutoCopyRange
@@ -6066,6 +6074,16 @@ func main() {
 		}
 	})
 	autoCopyRangeCheck.SetChecked(autoCopyRangeEnabled)
+	loggingCheck := widget.NewCheck("记录日志", func(checked bool) {
+		setAppLoggingEnabled(checked)
+		if checked {
+			log.Printf("日志记录已开启: %s", appLogPath)
+		}
+		if saveCurrentConfig != nil {
+			saveCurrentConfig()
+		}
+	})
+	loggingCheck.SetChecked(userConfig.EnableLogging)
 
 	leftControls := container.NewVBox(
 		deviceSelect,
@@ -6085,6 +6103,7 @@ func main() {
 		container.NewBorder(nil, nil, widget.NewLabel("取色个数"), nil, pickCountEntry),
 		applyRangeCheck,
 		autoCopyRangeCheck,
+		loggingCheck,
 		gridRow,
 		fontLibBtn,
 	)
@@ -6397,6 +6416,7 @@ func main() {
 			GridCols:      gridColsValue,
 			GridRows:      gridRowsValue,
 			GridSpacing:   gridSpacingValue,
+			EnableLogging: loggingCheck.Checked,
 
 			FormatTemplates: copyAPIFormatTemplates(apiFormatTemplates),
 		})
