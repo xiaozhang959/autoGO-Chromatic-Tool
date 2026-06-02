@@ -52,7 +52,7 @@ type AndroidNodeTool struct {
 	captureBtn       *widget.Button
 	searchEntry      *widget.Entry
 	statusLabel      *widget.Label
-	nodeList         *widget.List
+	nodeTree         *widget.Tree
 	attrList         *widget.List
 	selectorEntry    *widget.Entry
 	copySelectorBtn  *widget.Button
@@ -67,7 +67,11 @@ type AndroidNodeTool struct {
 	selectedNode  *AndroidUINode
 	attrRows      []androidNodeAttrRow
 	nodeViewer    *ImageViewer
-	syncingList   bool
+	treeChildren  map[string][]string
+	treeNodeByID  map[string]*AndroidUINode
+	treeIDByNode  map[*AndroidUINode]string
+	treeParentID  map[string]string
+	syncingTree   bool
 }
 
 func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImageViewer func() *ImageViewer, openNodeImage func(image.Image, func(int, int)) *ImageViewer) *AndroidNodeTool {
@@ -78,6 +82,10 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		openNodeImage:     openNodeImage,
 		filteredNodes:     make([]*AndroidUINode, 0),
 		attrRows:          make([]androidNodeAttrRow, 0),
+		treeChildren:      make(map[string][]string),
+		treeNodeByID:      make(map[string]*AndroidUINode),
+		treeIDByNode:      make(map[*AndroidUINode]string),
+		treeParentID:      make(map[string]string),
 	}
 
 	tool.simpleCheck = widget.NewCheck("获取简单节点", nil)
@@ -105,22 +113,28 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	tool.statusLabel = widget.NewLabel("未抓取节点")
 	tool.statusLabel.Wrapping = fyne.TextWrapWord
 
-	tool.nodeList = widget.NewList(
-		func() int {
-			return len(tool.filteredNodes)
+	tool.nodeTree = widget.NewTree(
+		func(uid widget.TreeNodeID) []widget.TreeNodeID {
+			return tool.treeChildren[uid]
 		},
-		func() fyne.CanvasObject {
+		func(uid widget.TreeNodeID) bool {
+			return uid == "" || len(tool.treeChildren[uid]) > 0
+		},
+		func(bool) fyne.CanvasObject {
 			return container.NewHBox(widget.NewLabel(""))
 		},
-		func(id widget.ListItemID, item fyne.CanvasObject) {
+		func(uid widget.TreeNodeID, branch bool, item fyne.CanvasObject) {
 			row := item.(*fyne.Container)
 			label := row.Objects[0].(*widget.Label)
-			if id < 0 || id >= len(tool.filteredNodes) {
+			if uid == "" {
 				label.SetText("")
 				return
 			}
-
-			node := tool.filteredNodes[id]
+			node := tool.treeNodeByID[uid]
+			if node == nil {
+				label.SetText("")
+				return
+			}
 			prefix := "  "
 			if node == tool.selectedNode {
 				prefix = "▶ "
@@ -128,14 +142,16 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 			label.SetText(prefix + androidNodeSummary(node))
 		},
 	)
-	tool.nodeList.OnSelected = func(id widget.ListItemID) {
-		if tool.syncingList {
+	tool.nodeTree.HideSeparators = true
+	tool.nodeTree.OnSelected = func(uid widget.TreeNodeID) {
+		if tool.syncingTree {
 			return
 		}
-		if id < 0 || id >= len(tool.filteredNodes) {
+		node := tool.treeNodeByID[uid]
+		if node == nil {
 			return
 		}
-		tool.selectNode(tool.filteredNodes[id])
+		tool.selectNode(node)
 	}
 
 	tool.attrList = widget.NewList(
@@ -207,7 +223,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	tool.selectorEntry.SetPlaceHolder("选择节点并勾选属性后生成 XPath 选择器")
 	tool.selectorEntry.SetMinRowsVisible(4)
 
-	nodeHeader := widget.NewLabel("节点列表")
+	nodeHeader := widget.NewLabel("节点树")
 	attrHeader := container.NewGridWithColumns(
 		4,
 		widget.NewLabel("勾选"),
@@ -221,7 +237,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, prevBtn, nextBtn), tool.searchEntry),
 		tool.statusLabel,
 		nodeHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeList), 190),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 190),
 		attrHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.attrList), 230),
 		container.NewGridWithColumns(3, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn),
@@ -318,6 +334,7 @@ func (t *AndroidNodeTool) setSnapshot(snapshot *AndroidNodeSnapshot) {
 func (t *AndroidNodeTool) applySearch() {
 	t.filteredNodes = t.filteredNodes[:0]
 	if t.snapshot == nil {
+		t.rebuildNodeTree("")
 		t.refreshLists()
 		return
 	}
@@ -328,6 +345,7 @@ func (t *AndroidNodeTool) applySearch() {
 			t.filteredNodes = append(t.filteredNodes, node)
 		}
 	}
+	t.rebuildNodeTree(keyword)
 
 	if len(t.filteredNodes) > 0 {
 		t.selectNode(t.filteredNodes[0])
@@ -358,7 +376,7 @@ func (t *AndroidNodeTool) selectRelative(offset int) {
 	} else {
 		current = (current + offset + len(t.filteredNodes)) % len(t.filteredNodes)
 	}
-	t.nodeList.Select(current)
+	t.selectNode(t.filteredNodes[current])
 }
 
 func (t *AndroidNodeTool) selectNode(node *AndroidUINode) {
@@ -374,8 +392,8 @@ func (t *AndroidNodeTool) selectNode(node *AndroidUINode) {
 }
 
 func (t *AndroidNodeTool) refreshLists() {
-	if t.nodeList != nil {
-		t.nodeList.Refresh()
+	if t.nodeTree != nil {
+		t.nodeTree.Refresh()
 	}
 	if t.attrList != nil {
 		t.attrList.Refresh()
@@ -428,18 +446,22 @@ func (t *AndroidNodeTool) updateNodeOverlay() {
 }
 
 func (t *AndroidNodeTool) syncNodeListSelection(node *AndroidUINode) {
-	if t.nodeList == nil || node == nil {
+	if t.nodeTree == nil || node == nil {
 		return
 	}
 
-	index := t.filteredNodeIndex(node)
-	if index < 0 {
+	uid := t.treeIDByNode[node]
+	if uid == "" {
 		return
 	}
 
-	t.syncingList = true
-	t.nodeList.Select(index)
-	t.syncingList = false
+	for parentID := t.treeParentID[uid]; parentID != ""; parentID = t.treeParentID[parentID] {
+		t.nodeTree.OpenBranch(parentID)
+	}
+
+	t.syncingTree = true
+	t.nodeTree.Select(uid)
+	t.syncingTree = false
 }
 
 func (t *AndroidNodeTool) filteredNodeIndex(node *AndroidUINode) int {
@@ -451,6 +473,57 @@ func (t *AndroidNodeTool) filteredNodeIndex(node *AndroidUINode) int {
 	return -1
 }
 
+func (t *AndroidNodeTool) rebuildNodeTree(keyword string) {
+	t.treeChildren = make(map[string][]string)
+	t.treeNodeByID = make(map[string]*AndroidUINode)
+	t.treeIDByNode = make(map[*AndroidUINode]string)
+	t.treeParentID = make(map[string]string)
+
+	if t.snapshot == nil {
+		return
+	}
+
+	visible := make(map[*AndroidUINode]bool)
+	if keyword == "" {
+		for _, node := range t.snapshot.Nodes {
+			visible[node] = true
+		}
+	} else {
+		parentByNode := androidNodeParentMap(t.snapshot.Nodes)
+		for _, node := range t.filteredNodes {
+			for current := node; current != nil; current = parentByNode[current] {
+				visible[current] = true
+			}
+		}
+	}
+
+	var addNode func(parentID string, node *AndroidUINode)
+	addNode = func(parentID string, node *AndroidUINode) {
+		if node == nil || !visible[node] {
+			return
+		}
+
+		uid := androidNodeTreeID(node)
+		t.treeChildren[parentID] = append(t.treeChildren[parentID], uid)
+		t.treeNodeByID[uid] = node
+		t.treeIDByNode[node] = uid
+		t.treeParentID[uid] = parentID
+
+		for _, child := range node.Children {
+			addNode(uid, child)
+		}
+	}
+
+	for _, root := range androidRootNodes(t.snapshot.Nodes) {
+		addNode("", root)
+	}
+
+	if t.nodeTree != nil {
+		t.nodeTree.Refresh()
+		t.nodeTree.OpenAllBranches()
+	}
+}
+
 func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
 	node := t.smallestNodeAtPoint(image.Pt(x, y))
 	if node == nil {
@@ -459,7 +532,7 @@ func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
 
 	if t.filteredNodeIndex(node) < 0 && t.snapshot != nil {
 		t.searchEntry.SetText("")
-		t.filteredNodes = append(t.filteredNodes[:0], t.snapshot.Nodes...)
+		t.applySearch()
 	}
 
 	t.selectNode(node)
@@ -775,6 +848,48 @@ func buildAndroidNodeAttrRows(node *AndroidUINode) []androidNodeAttrRow {
 	}
 
 	return rows
+}
+
+func androidNodeTreeID(node *AndroidUINode) string {
+	if node == nil {
+		return ""
+	}
+	return fmt.Sprintf("node-%d", node.Number)
+}
+
+func androidRootNodes(nodes []*AndroidUINode) []*AndroidUINode {
+	roots := make([]*AndroidUINode, 0)
+	for _, node := range nodes {
+		if node != nil && node.Depth == 0 {
+			roots = append(roots, node)
+		}
+	}
+	if len(roots) == 0 && len(nodes) > 0 && nodes[0] != nil {
+		roots = append(roots, nodes[0])
+	}
+	return roots
+}
+
+func androidNodeParentMap(nodes []*AndroidUINode) map[*AndroidUINode]*AndroidUINode {
+	parents := make(map[*AndroidUINode]*AndroidUINode)
+
+	var walk func(parent *AndroidUINode, node *AndroidUINode)
+	walk = func(parent *AndroidUINode, node *AndroidUINode) {
+		if node == nil {
+			return
+		}
+		if parent != nil {
+			parents[node] = parent
+		}
+		for _, child := range node.Children {
+			walk(node, child)
+		}
+	}
+
+	for _, root := range androidRootNodes(nodes) {
+		walk(nil, root)
+	}
+	return parents
 }
 
 func androidNodeSummary(node *AndroidUINode) string {

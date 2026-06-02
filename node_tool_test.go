@@ -112,3 +112,30 @@ func TestSmallestNodeAtPoint(t *testing.T) {
 		t.Fatalf("expected nil outside nodes, got %#v", got)
 	}
 }
+
+func TestRebuildNodeTreeKeepsMatchedAncestors(t *testing.T) {
+	root := &AndroidUINode{Number: 1, Depth: 0, Attrs: map[string]string{"class": "Root"}}
+	container := &AndroidUINode{Number: 2, Depth: 1, Attrs: map[string]string{"class": "Container"}}
+	button := &AndroidUINode{Number: 3, Depth: 2, Attrs: map[string]string{"text": "登录"}}
+	root.Children = []*AndroidUINode{container}
+	container.Children = []*AndroidUINode{button}
+
+	tool := &AndroidNodeTool{
+		snapshot:      &AndroidNodeSnapshot{Nodes: []*AndroidUINode{root, container, button}},
+		filteredNodes: []*AndroidUINode{button},
+	}
+	tool.rebuildNodeTree("登录")
+
+	rootID := androidNodeTreeID(root)
+	containerID := androidNodeTreeID(container)
+	buttonID := androidNodeTreeID(button)
+	if got := tool.treeChildren[""]; len(got) != 1 || got[0] != rootID {
+		t.Fatalf("expected root visible, got %v", got)
+	}
+	if got := tool.treeChildren[rootID]; len(got) != 1 || got[0] != containerID {
+		t.Fatalf("expected container ancestor visible, got %v", got)
+	}
+	if got := tool.treeChildren[containerID]; len(got) != 1 || got[0] != buttonID {
+		t.Fatalf("expected matched button visible, got %v", got)
+	}
+}
