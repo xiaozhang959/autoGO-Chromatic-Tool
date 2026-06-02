@@ -202,6 +202,68 @@ func TestImageViewerAddPointsBatchRefreshesOnce(t *testing.T) {
 	}
 }
 
+func TestImageViewerReplacePointsClearsListAndKeepsRange(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	oldColorPoints := colorPoints
+	oldImageViewer := imageViewer
+	oldRefreshColorList := refreshColorList
+	oldRectCoordEntry := rectCoordEntry
+	t.Cleanup(func() {
+		colorPoints = oldColorPoints
+		imageViewer = oldImageViewer
+		refreshColorList = oldRefreshColorList
+		rectCoordEntry = oldRectCoordEntry
+	})
+
+	rectCoordEntry = widget.NewEntry()
+	rectCoordEntry.SetText("1,2,3,4")
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	img.SetNRGBA(3, 3, color.NRGBA{R: 0xaa, G: 0xbb, B: 0xcc, A: 0xff})
+	viewer := NewImageViewer()
+	viewer.SetImage(img)
+	viewer.markPoints = append(viewer.markPoints, MarkPoint{X: 1, Y: 1, Color: color.White})
+	viewer.markRects = append(viewer.markRects, MarkRect{
+		X1:    1,
+		Y1:    2,
+		X2:    3,
+		Y2:    4,
+		Color: color.RGBA{255, 0, 0, 255},
+	})
+	viewer.manualRectSelected = true
+	imageViewer = viewer
+	colorPoints = []ColorPoint{
+		{ID: 0, Position: "1, 1", Color: "#111111", Selected: true},
+		{ID: 1, Position: "2, 2", Color: "#222222", Selected: true},
+	}
+
+	refreshCount := 0
+	refreshColorList = func() {
+		refreshCount++
+	}
+
+	viewer.ReplacePoints([]image.Point{image.Pt(3, 3)})
+
+	if refreshCount != 1 {
+		t.Fatalf("refresh count mismatch: want 1 got %d", refreshCount)
+	}
+	if len(colorPoints) != 1 {
+		t.Fatalf("color point count mismatch: want 1 got %d", len(colorPoints))
+	}
+	if colorPoints[0].ID != 0 || colorPoints[0].Position != "3, 3" || colorPoints[0].Color != "#AABBCC" {
+		t.Fatalf("replacement color point mismatch: %+v", colorPoints[0])
+	}
+	if len(viewer.markPoints) != 1 || viewer.markPoints[0].X != 3 || viewer.markPoints[0].Y != 3 {
+		t.Fatalf("replacement mark points mismatch: %+v", viewer.markPoints)
+	}
+	if rectCoordEntry.Text != "1,2,3,4" {
+		t.Fatalf("range text was overwritten: got %q", rectCoordEntry.Text)
+	}
+	if len(viewer.markRects) != 1 || viewer.markRects[0].X1 != 1 || viewer.markRects[0].Y1 != 2 || viewer.markRects[0].X2 != 3 || viewer.markRects[0].Y2 != 4 {
+		t.Fatalf("range rect was overwritten: %+v", viewer.markRects)
+	}
+}
+
 func TestAutoPickRangeCallbackDoesNotOverwriteRangeSelection(t *testing.T) {
 	fynetest.NewTempApp(t)
 

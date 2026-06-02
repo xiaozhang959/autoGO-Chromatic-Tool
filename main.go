@@ -4616,8 +4616,24 @@ func colorPointFromImage(img image.Image, p image.Point) (MarkPoint, ColorPoint,
 }
 
 func (v *ImageViewer) AddPoints(points []image.Point) {
+	v.addPoints(points, false)
+}
+
+func (v *ImageViewer) ReplacePoints(points []image.Point) {
+	v.addPoints(points, true)
+}
+
+func (v *ImageViewer) addPoints(points []image.Point, clearExisting bool) {
 	if v.image == nil || len(points) == 0 {
 		return
+	}
+
+	if clearExisting {
+		atomic.AddUint64(&linkedColorPointFlashSeq, 1)
+		linkedColorPointIndex = -1
+		linkedColorPointFlashVisible = false
+		v.markPoints = v.markPoints[:0]
+		colorPoints = colorPoints[:0]
 	}
 
 	added := 0
@@ -5926,10 +5942,7 @@ func main() {
 				"确认在区域 %d,%d,%d,%d 内按「%s」生成 %d 个取色点？",
 				rect.Min.X, rect.Min.Y, rect.Max.X-1, rect.Max.Y-1, mode, count,
 			)
-			dialog.NewCustomConfirm("自动取色", "确认", "取消", widget.NewLabel(message), func(confirmed bool) {
-				if !confirmed {
-					return
-				}
+			applyAutoPick := func(clearExisting bool) {
 				if imageViewer != viewer || viewer.image == nil {
 					dialog.ShowInformation("自动取色", "当前图像已切换，请重新框选", w)
 					return
@@ -5945,8 +5958,28 @@ func main() {
 					dialog.ShowInformation("自动取色", "未生成取色点，请尝试扩大选区或降低取色个数", w)
 					return
 				}
+				if clearExisting {
+					viewer.ReplacePoints(points)
+					return
+				}
 				viewer.AddPoints(points)
-			}, w).Show()
+			}
+
+			autoPickDialog := dialog.NewCustom("自动取色", "取消", widget.NewLabel(message), w)
+			cancelBtn := widget.NewButtonWithIcon("取消", theme.CancelIcon(), func() {
+				autoPickDialog.Hide()
+			})
+			clearConfirmBtn := widget.NewButton("清空并确认", func() {
+				autoPickDialog.Hide()
+				applyAutoPick(true)
+			})
+			confirmBtn := widget.NewButtonWithIcon("确认", theme.ConfirmIcon(), func() {
+				autoPickDialog.Hide()
+				applyAutoPick(false)
+			})
+			confirmBtn.Importance = widget.HighImportance
+			autoPickDialog.SetButtons([]fyne.CanvasObject{cancelBtn, clearConfirmBtn, confirmBtn})
+			autoPickDialog.Show()
 		})
 	}
 	autoPickBtn := widget.NewButton("自动取色 (CTRL+A)", startAutoPick)
