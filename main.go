@@ -62,6 +62,8 @@ type UserConfig struct {
 	GridCols      int    `json:"grid_cols"`
 	GridRows      int    `json:"grid_rows"`
 	GridSpacing   int    `json:"grid_spacing"`
+
+	FormatTemplates map[string]string `json:"format_templates"`
 }
 
 // 全局变量定义
@@ -101,6 +103,12 @@ var (
 
 	// 代码显示框
 	codeDisplayEntry *widget.Entry
+
+	// 图色面板 API 字段刷新回调
+	updateImagesAPIFields func() string
+
+	// 图色面板结果代码格式模板
+	apiFormatTemplates = defaultAPIFormatTemplates()
 
 	// 点阵模式状态
 	gridModeEnabled  = false // 默认关闭点阵模式
@@ -302,6 +310,8 @@ func defaultUserConfig() UserConfig {
 		GridCols:      4,
 		GridRows:      4,
 		GridSpacing:   7,
+
+		FormatTemplates: defaultAPIFormatTemplates(),
 	}
 }
 
@@ -342,6 +352,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 	if config.GridSpacing <= 0 {
 		config.GridSpacing = defaults.GridSpacing
 	}
+	config.FormatTemplates = normalizeAPIFormatTemplates(config.FormatTemplates)
 	return config
 }
 
@@ -1737,6 +1748,18 @@ func directionValue(directionText string) int {
 	return 0
 }
 
+func parseSimilarityValue(precisionText string) float32 {
+	simText := strings.TrimSpace(precisionText)
+	if simText == "" {
+		return 0.9
+	}
+	sim, err := strconv.ParseFloat(simText, 32)
+	if err != nil {
+		return 0.9
+	}
+	return float32(sim)
+}
+
 func apiColorAlternatives(points []ColorPoint) string {
 	colors := make([]string, 0, len(points))
 	for _, point := range points {
@@ -1764,6 +1787,598 @@ func apiMultiColorTemplate(points []ColorPoint) string {
 		parts = append(parts, fmt.Sprintf("%d,%d,%s", x-baseX, y-baseY, colorPointValue(point)))
 	}
 	return strings.Join(parts, ",")
+}
+
+type imageSearchRange struct {
+	x1, x2 int
+	y1, y2 int
+	stepX  int
+	stepY  int
+}
+
+type testColorInfo struct {
+	x, y int
+	c2   color.NRGBA
+	c3   color.NRGBA
+}
+
+func sanitizeTestColorText(text string) string {
+	replacer := strings.NewReplacer("[", "", "]", "", "#", "", " ", "", `"`, "")
+	return replacer.Replace(text)
+}
+
+func imageSearchBounds(img image.Image, x1, y1, x2, y2 int) (int, int, int, int, bool) {
+	if img == nil {
+		return 0, 0, 0, 0, false
+	}
+
+	width := img.Bounds().Dx()
+	height := img.Bounds().Dy()
+	if x2 == 0 || x2 > width {
+		x2 = width
+	}
+	if y2 == 0 || y2 > height {
+		y2 = height
+	}
+	if x1 < 0 || y1 < 0 || x2 > width || y2 > height || x1 >= x2 || y1 >= y2 {
+		return 0, 0, 0, 0, false
+	}
+	return x1, y1, x2, y2, true
+}
+
+func genImageSearchRange(dir, x1, y1, x2, y2 int) imageSearchRange {
+	switch dir {
+	case 1:
+		return imageSearchRange{x1: x2 - 1, x2: x1 - 1, y1: y1, y2: y2, stepX: -1, stepY: 1}
+	case 2:
+		return imageSearchRange{x1: x1, x2: x2, y1: y2 - 1, y2: y1 - 1, stepX: 1, stepY: -1}
+	case 3:
+		return imageSearchRange{x1: x2 - 1, x2: x1 - 1, y1: y2 - 1, y2: y1 - 1, stepX: -1, stepY: -1}
+	default:
+		return imageSearchRange{x1: x1, x2: x2, y1: y1, y2: y2, stepX: 1, stepY: 1}
+	}
+}
+
+func imagePixelNRGBA(img image.Image, x, y int) color.NRGBA {
+	bounds := img.Bounds()
+	return color.NRGBAModel.Convert(img.At(bounds.Min.X+x, bounds.Min.Y+y)).(color.NRGBA)
+}
+
+func absDiffUint8(a, b uint8) uint8 {
+	if a > b {
+		return a - b
+	}
+	return b - a
+}
+
+func testColorMatch(c1, c2, c3 color.NRGBA) bool {
+	return absDiffUint8(c1.R, c2.R) <= c3.R &&
+		absDiffUint8(c1.G, c2.G) <= c3.G &&
+		absDiffUint8(c1.B, c2.B) <= c3.B
+}
+
+func parseTestColor(colorStr string, sim float32) (color.NRGBA, color.NRGBA, bool) {
+	colorStr = sanitizeTestColorText(colorStr)
+	parts := strings.Split(colorStr, "-")
+	if len(parts) == 0 || len(parts[0]) < 6 {
+		return color.NRGBA{}, color.NRGBA{}, false
+	}
+
+	parseHex := func(text string) (uint8, uint8, uint8, bool) {
+		if len(text) < 6 {
+			return 0, 0, 0, false
+		}
+		r, errR := strconv.ParseUint(text[0:2], 16, 8)
+		g, errG := strconv.ParseUint(text[2:4], 16, 8)
+		b, errB := strconv.ParseUint(text[4:6], 16, 8)
+		if errR != nil || errG != nil || errB != nil {
+			return 0, 0, 0, false
+		}
+		return uint8(r), uint8(g), uint8(b), true
+	}
+
+	r, g, b, ok := parseHex(parts[0])
+	if !ok {
+		return color.NRGBA{}, color.NRGBA{}, false
+	}
+	base := color.NRGBA{R: r, G: g, B: b, A: 255}
+
+	var tolerance uint8
+	if sim > 0 {
+		tolerance = uint8((1.0 - sim) * 255)
+	}
+
+	if len(parts) > 1 {
+		r, g, b, ok := parseHex(parts[1])
+		if !ok {
+			return color.NRGBA{}, color.NRGBA{}, false
+		}
+		return base, color.NRGBA{R: r + tolerance, G: g + tolerance, B: b + tolerance, A: 255}, true
+	}
+	return base, color.NRGBA{R: tolerance, G: tolerance, B: tolerance, A: 255}, true
+}
+
+func testColorAlternativesMatch(c color.NRGBA, colorText string, sim float32) bool {
+	colorText = sanitizeTestColorText(colorText)
+	for _, part := range strings.Split(colorText, "|") {
+		base, tolerance, ok := parseTestColor(part, sim)
+		if ok && testColorMatch(c, base, tolerance) {
+			return true
+		}
+	}
+	return false
+}
+
+func findColorInImage(img image.Image, x1, y1, x2, y2 int, colorText string, sim float32, dir int) (int, int) {
+	x1, y1, x2, y2, ok := imageSearchBounds(img, x1, y1, x2, y2)
+	if !ok {
+		return -1, -1
+	}
+
+	rng := genImageSearchRange(dir, x1, y1, x2, y2)
+	for y := rng.y1; y != rng.y2; y += rng.stepY {
+		for x := rng.x1; x != rng.x2; x += rng.stepX {
+			if testColorAlternativesMatch(imagePixelNRGBA(img, x, y), colorText, sim) {
+				return x, y
+			}
+		}
+	}
+	return -1, -1
+}
+
+func parseRemainingTestColors(parts []string, sim float32) ([]testColorInfo, bool) {
+	infos := make([]testColorInfo, 0, len(parts)/3)
+	for i := 0; i < len(parts); i += 3 {
+		x, errX := strconv.Atoi(parts[i])
+		y, errY := strconv.Atoi(parts[i+1])
+		base, tolerance, ok := parseTestColor(parts[i+2], sim)
+		if errX != nil || errY != nil || !ok {
+			return nil, false
+		}
+		infos = append(infos, testColorInfo{x: x, y: y, c2: base, c3: tolerance})
+	}
+	return infos, true
+}
+
+func compareTestColorSequence(img image.Image, x, y int, infos []testColorInfo) bool {
+	width := img.Bounds().Dx()
+	height := img.Bounds().Dy()
+	for _, info := range infos {
+		offsetX := x + info.x
+		offsetY := y + info.y
+		if offsetX < 0 || offsetY < 0 || offsetX >= width || offsetY >= height {
+			return false
+		}
+		if !testColorMatch(imagePixelNRGBA(img, offsetX, offsetY), info.c2, info.c3) {
+			return false
+		}
+	}
+	return true
+}
+
+func findMultiColorsInImage(img image.Image, x1, y1, x2, y2 int, colorsText string, sim float32, dir int) (int, int) {
+	x1, y1, x2, y2, ok := imageSearchBounds(img, x1, y1, x2, y2)
+	if !ok {
+		return -1, -1
+	}
+
+	parts := strings.Split(sanitizeTestColorText(colorsText), ",")
+	if len(parts) < 4 || len(parts)%3 != 1 {
+		return -1, -1
+	}
+
+	baseColor, baseTolerance, ok := parseTestColor(parts[0], sim)
+	if !ok {
+		return -1, -1
+	}
+	infos, ok := parseRemainingTestColors(parts[1:], sim)
+	if !ok {
+		return -1, -1
+	}
+
+	rng := genImageSearchRange(dir, x1, y1, x2, y2)
+	for y := rng.y1; y != rng.y2; y += rng.stepY {
+		for x := rng.x1; x != rng.x2; x += rng.stepX {
+			if testColorMatch(imagePixelNRGBA(img, x, y), baseColor, baseTolerance) &&
+				compareTestColorSequence(img, x, y, infos) {
+				return x, y
+			}
+		}
+	}
+	return -1, -1
+}
+
+func findMultiColorsAllInImage(img image.Image, x1, y1, x2, y2 int, colorsText string, sim float32, dir int) []image.Point {
+	x1, y1, x2, y2, ok := imageSearchBounds(img, x1, y1, x2, y2)
+	if !ok {
+		return nil
+	}
+
+	parts := strings.Split(sanitizeTestColorText(colorsText), ",")
+	if len(parts) < 4 || len(parts)%3 != 1 {
+		return nil
+	}
+
+	baseColor, baseTolerance, ok := parseTestColor(parts[0], sim)
+	if !ok {
+		return nil
+	}
+	infos, ok := parseRemainingTestColors(parts[1:], sim)
+	if !ok {
+		return nil
+	}
+
+	matches := make([]image.Point, 0)
+	rng := genImageSearchRange(dir, x1, y1, x2, y2)
+	for y := rng.y1; y != rng.y2; y += rng.stepY {
+		for x := rng.x1; x != rng.x2; x += rng.stepX {
+			if testColorMatch(imagePixelNRGBA(img, x, y), baseColor, baseTolerance) &&
+				compareTestColorSequence(img, x, y, infos) {
+				matches = append(matches, image.Pt(x, y))
+			}
+		}
+	}
+	return matches
+}
+
+func formatFindTestPoints(points []image.Point) string {
+	if len(points) == 0 {
+		return "[]"
+	}
+
+	parts := make([]string, 0, len(points))
+	for _, point := range points {
+		parts = append(parts, fmt.Sprintf("    {%d %d}", point.X, point.Y))
+	}
+	return "[\n" + strings.Join(parts, "\n") + "\n]"
+}
+
+func runImageCmpColorTest(img image.Image, precisionText string) bool {
+	if img == nil {
+		return false
+	}
+
+	points := selectedColorPoints()
+	if len(points) == 0 {
+		return false
+	}
+
+	x, y, ok := parsePointPosition(points[0].Position)
+	if !ok {
+		return false
+	}
+	if !image.Pt(x, y).In(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy())) {
+		return false
+	}
+	return testColorAlternativesMatch(imagePixelNRGBA(img, x, y), apiColorAlternatives(points), parseSimilarityValue(precisionText))
+}
+
+func runImageFindTest(img image.Image, functionName, precisionText, directionText string) (int, int) {
+	if img == nil {
+		return -1, -1
+	}
+
+	points := selectedColorPoints()
+	if len(points) == 0 {
+		return -1, -1
+	}
+
+	sim := parseSimilarityValue(precisionText)
+	dir := directionValue(directionText)
+	x1, y1, x2, y2 := regionValuesFromEntry()
+	switch normalizeImagesFunctionName(functionName) {
+	case "FindColor":
+		return findColorInImage(img, x1, y1, x2, y2, apiColorAlternatives(points), sim, dir)
+	case "FindMultiColorsAll":
+		points := findMultiColorsAllInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(points), sim, dir)
+		if len(points) == 0 {
+			return -1, -1
+		}
+		return points[0].X, points[0].Y
+	default:
+		return findMultiColorsInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(points), sim, dir)
+	}
+}
+
+func runImageFindTestResult(img image.Image, functionName, precisionText, directionText string) string {
+	functionName = normalizeImagesFunctionName(functionName)
+	if functionName == "CmpColor" {
+		return strconv.FormatBool(runImageCmpColorTest(img, precisionText))
+	}
+
+	if img == nil || len(selectedColorPoints()) == 0 {
+		if functionName == "FindMultiColorsAll" {
+			return "[]"
+		}
+		return "-1,-1"
+	}
+
+	sim := parseSimilarityValue(precisionText)
+	dir := directionValue(directionText)
+	x1, y1, x2, y2 := regionValuesFromEntry()
+	if functionName == "FindMultiColorsAll" {
+		return formatFindTestPoints(findMultiColorsAllInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(selectedColorPoints()), sim, dir))
+	}
+
+	x, y := runImageFindTest(img, functionName, precisionText, directionText)
+	return fmt.Sprintf("%d,%d", x, y)
+}
+
+func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) string {
+	return fmt.Sprintf("{%d,%d,%d,%d,\"%s\",%s,%d,0}", x1, y1, x2, y2, colorText, sim, dir)
+}
+
+func defaultAPIFormatTemplates() map[string]string {
+	return map[string]string{
+		"FindColor":          "x, y := images.FindColor([参数])",
+		"FindMultiColors":    "x, y := images.FindMultiColors([参数])",
+		"FindMultiColorsAll": "points := images.FindMultiColorsAll([参数])",
+		"CmpColor":           "matched := images.CmpColor([参数])",
+	}
+}
+
+func copyAPIFormatTemplates(templates map[string]string) map[string]string {
+	copied := make(map[string]string, len(templates))
+	for key, value := range templates {
+		copied[key] = value
+	}
+	return copied
+}
+
+func normalizeAPIFormatTemplates(templates map[string]string) map[string]string {
+	normalized := defaultAPIFormatTemplates()
+	for key, value := range templates {
+		name := normalizeImagesFunctionName(key)
+		if strings.TrimSpace(value) != "" {
+			normalized[name] = value
+		}
+	}
+	return normalized
+}
+
+func formatTemplateFor(functionName string) string {
+	functionName = normalizeImagesFunctionName(functionName)
+	template := strings.TrimSpace(apiFormatTemplates[functionName])
+	if template != "" {
+		return apiFormatTemplates[functionName]
+	}
+	return defaultAPIFormatTemplates()[functionName]
+}
+
+func applyFormatTemplate(template string, values map[string]string) string {
+	result := template
+	for _, placeholder := range apiFormatPlaceholders {
+		result = strings.ReplaceAll(result, placeholder.token, values[placeholder.token])
+	}
+	return result
+}
+
+func renderImageAPICode(functionName string, values map[string]string) string {
+	return applyFormatTemplate(formatTemplateFor(functionName), values)
+}
+
+func apiFormatValues(functionName, params, colorParams, colorText, sim string, dir, x1, y1, x2, y2, pointX, pointY int) map[string]string {
+	return map[string]string{
+		"[函数名]":      functionName,
+		"[参数]":       params,
+		"[颜色参数]":     colorParams,
+		"[颜色值]":      colorText,
+		"[相似度]":      sim,
+		"[查找方向]":     strconv.Itoa(dir),
+		"[屏幕ID]":     "0",
+		"[范围_左]":     strconv.Itoa(x1),
+		"[范围_上]":     strconv.Itoa(y1),
+		"[范围_右]":     strconv.Itoa(x2),
+		"[范围_下]":     strconv.Itoa(y2),
+		"[坐标_X]":     strconv.Itoa(pointX),
+		"[坐标_Y]":     strconv.Itoa(pointY),
+		"[区域_左上]":    fmt.Sprintf("%d, %d", x1, y1),
+		"[区域_右下]":    fmt.Sprintf("%d, %d", x2, y2),
+		"[CmpColor]": fmt.Sprintf("%d, %d, \"%s\", %s, 0", pointX, pointY, colorText, sim),
+	}
+}
+
+type apiFormatPlaceholder struct {
+	token       string
+	description string
+}
+
+var apiFormatPlaceholders = []apiFormatPlaceholder{
+	{token: "[参数]", description: "完整函数参数"},
+	{token: "[颜色参数]", description: "右侧颜色字段参数对象"},
+	{token: "[颜色值]", description: "colorStr / colors"},
+	{token: "[相似度]", description: "sim"},
+	{token: "[查找方向]", description: "dir"},
+	{token: "[屏幕ID]", description: "displayId"},
+	{token: "[范围_左]", description: "x1"},
+	{token: "[范围_上]", description: "y1"},
+	{token: "[范围_右]", description: "x2"},
+	{token: "[范围_下]", description: "y2"},
+	{token: "[坐标_X]", description: "x"},
+	{token: "[坐标_Y]", description: "y"},
+	{token: "[函数名]", description: "函数名称"},
+}
+
+func sampleAPIFormatValues(functionName string) map[string]string {
+	functionName = normalizeImagesFunctionName(functionName)
+	switch functionName {
+	case "FindColor":
+		colorText := "FFFFFF|CCCCCC-101010"
+		params := "0, 0, 0, 0, \"FFFFFF|CCCCCC-101010\", 0.9, 0, 0"
+		return apiFormatValues(functionName, params, apiRegionParamsObject(0, 0, 0, 0, colorText, "0.9", 0), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	case "FindMultiColorsAll":
+		colorText := "ffccff-151515,635,978,ffab2d-101010"
+		params := "0, 0, 0, 0, \"ffccff-151515,635,978,ffab2d-101010\", 0.9, 0, 0"
+		return apiFormatValues(functionName, params, apiRegionParamsObject(0, 0, 0, 0, colorText, "0.9", 0), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	case "CmpColor":
+		colorText := "FFFFFF|CCCCCC-101010"
+		params := "100, 200, \"FFFFFF|CCCCCC-101010\", 0.9, 0"
+		return apiFormatValues(functionName, params, fmt.Sprintf("{100,200,\"%s\",0.9,0}", colorText), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	default:
+		colorText := "ffccff-151515,635,978,ffab2d-101010"
+		params := "0, 0, 0, 0, \"ffccff-151515,635,978,ffab2d-101010\", 0.9, 0, 0"
+		return apiFormatValues("FindMultiColors", params, apiRegionParamsObject(0, 0, 0, 0, colorText, "0.9", 0), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	}
+}
+
+func entryCursorByteIndex(text string, row, column int) int {
+	if row < 0 {
+		row = 0
+	}
+	if column < 0 {
+		column = 0
+	}
+
+	currentRow := 0
+	currentColumn := 0
+	for index, r := range text {
+		if currentRow == row && currentColumn == column {
+			return index
+		}
+		if r == '\n' {
+			if currentRow == row {
+				return index
+			}
+			currentRow++
+			currentColumn = 0
+			continue
+		}
+		if currentRow == row {
+			currentColumn++
+		}
+	}
+	return len(text)
+}
+
+func rowColumnFromByteIndex(text string, byteIndex int) (int, int) {
+	if byteIndex < 0 {
+		byteIndex = 0
+	}
+
+	row := 0
+	column := 0
+	for index, r := range text {
+		if index >= byteIndex {
+			break
+		}
+		if r == '\n' {
+			row++
+			column = 0
+			continue
+		}
+		column++
+	}
+	return row, column
+}
+
+func insertTextAtEntryCursor(entry *widget.Entry, text string) {
+	if entry == nil || text == "" {
+		return
+	}
+
+	insertIndex := entryCursorByteIndex(entry.Text, entry.CursorRow, entry.CursorColumn)
+	newText := entry.Text[:insertIndex] + text + entry.Text[insertIndex:]
+	newRow, newColumn := rowColumnFromByteIndex(newText, insertIndex+len(text))
+	entry.SetText(newText)
+	entry.CursorRow = newRow
+	entry.CursorColumn = newColumn
+	entry.Refresh()
+}
+
+func showAPIFormatDialog(parent fyne.Window, selectedFunction string, saveConfig func()) {
+	functions := []string{"FindMultiColors", "FindColor", "FindMultiColorsAll", "CmpColor"}
+	localTemplates := copyAPIFormatTemplates(normalizeAPIFormatTemplates(apiFormatTemplates))
+	defaultTemplates := defaultAPIFormatTemplates()
+	currentFunction := normalizeImagesFunctionName(selectedFunction)
+
+	templateEntry := widget.NewMultiLineEntry()
+	templateEntry.Wrapping = fyne.TextWrapWord
+	templateEntry.SetMinRowsVisible(8)
+
+	previewLabel := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Monospace: true})
+	previewLabel.Wrapping = fyne.TextWrapWord
+
+	refreshPreview := func() {
+		localTemplates[currentFunction] = templateEntry.Text
+		previewLabel.SetText(applyFormatTemplate(templateEntry.Text, sampleAPIFormatValues(currentFunction)))
+	}
+	templateEntry.OnChanged = func(string) {
+		refreshPreview()
+	}
+
+	methodSelect := widget.NewSelect(functions, func(value string) {
+		currentFunction = normalizeImagesFunctionName(value)
+		templateEntry.SetText(localTemplates[currentFunction])
+		refreshPreview()
+	})
+
+	placeholderButtons := container.NewVBox()
+	for _, placeholder := range apiFormatPlaceholders {
+		token := placeholder.token
+		label := widget.NewLabel(placeholder.description)
+		label.Wrapping = fyne.TextTruncate
+		placeholderButtons.Add(container.NewBorder(nil, nil, widget.NewButton(token, func() {
+			insertTextAtEntryCursor(templateEntry, token)
+			parent.Canvas().Focus(templateEntry)
+		}), nil, label))
+	}
+
+	leftPanel := container.NewBorder(
+		container.NewVBox(
+			container.NewBorder(nil, nil, widget.NewLabel("模板方法："), nil, methodSelect),
+			widget.NewSeparator(),
+			widget.NewLabel("模板参数"),
+		),
+		nil,
+		nil,
+		nil,
+		container.NewVScroll(placeholderButtons),
+	)
+
+	templateBlock := container.NewBorder(widget.NewLabel("模板内容"), nil, nil, nil, templateEntry)
+	previewBlock := container.NewBorder(widget.NewLabel("实时预览"), nil, nil, nil, container.NewVScroll(container.NewPadded(previewLabel)))
+	rightSplit := container.NewVSplit(templateBlock, previewBlock)
+	rightSplit.Offset = 0.55
+
+	bodySplit := container.NewHSplit(container.New(&fixedWidthLayout{width: 230}, leftPanel), rightSplit)
+	bodySplit.Offset = 0.34
+
+	var formatDialog *dialog.CustomDialog
+	restoreButton := widget.NewButton("还原配置", func() {
+		localTemplates[currentFunction] = defaultTemplates[currentFunction]
+		templateEntry.SetText(localTemplates[currentFunction])
+		refreshPreview()
+	})
+	closeButton := widget.NewButton("关闭", func() {
+		if formatDialog != nil {
+			formatDialog.Hide()
+		}
+	})
+	saveButton := widget.NewButton("保存配置", func() {
+		localTemplates[currentFunction] = templateEntry.Text
+		apiFormatTemplates = copyAPIFormatTemplates(normalizeAPIFormatTemplates(localTemplates))
+		if saveConfig != nil {
+			saveConfig()
+		}
+		refreshImagesAPIFields()
+		if formatDialog != nil {
+			formatDialog.Hide()
+		}
+	})
+	saveButton.Importance = widget.HighImportance
+
+	content := container.NewBorder(nil, container.NewHBox(layout.NewSpacer(), restoreButton, closeButton, saveButton), nil, nil, bodySplit)
+	formatDialog = dialog.NewCustomWithoutButtons("自定义参数格式", content, parent)
+	formatDialog.Resize(fyne.NewSize(720, 520))
+
+	methodSelect.SetSelected(currentFunction)
+	formatDialog.Show()
+}
+
+func refreshImagesAPIFields() {
+	if updateImagesAPIFields != nil {
+		updateImagesAPIFields()
+	}
 }
 
 func normalizeImagesFunctionName(name string) string {
@@ -1798,24 +2413,32 @@ func buildImagesAPICode(functionName, precisionText, directionText string) (stri
 	switch functionName {
 	case "FindColor":
 		colorText := apiColorAlternatives(points)
+		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorText, params, fmt.Sprintf("x, y := images.FindColor(%s)", params)
+		values := apiFormatValues(functionName, params, colorParams, colorText, sim, dir, x1, y1, x2, y2, 0, 0)
+		return colorParams, params, renderImageAPICode(functionName, values)
 	case "FindMultiColorsAll":
 		colorText := apiMultiColorTemplate(points)
+		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorText, params, fmt.Sprintf("points := images.FindMultiColorsAll(%s)", params)
+		values := apiFormatValues(functionName, params, colorParams, colorText, sim, dir, x1, y1, x2, y2, 0, 0)
+		return colorParams, params, renderImageAPICode(functionName, values)
 	case "CmpColor":
 		x, y, ok := parsePointPosition(points[0].Position)
 		if !ok {
 			return "", "", ""
 		}
 		colorText := apiColorAlternatives(points)
+		colorParams := fmt.Sprintf("{%d,%d,\"%s\",%s,0}", x, y, colorText, sim)
 		params := fmt.Sprintf("%d, %d, \"%s\", %s, 0", x, y, colorText, sim)
-		return colorText, params, fmt.Sprintf("matched := images.CmpColor(%s)", params)
+		values := apiFormatValues(functionName, params, colorParams, colorText, sim, dir, x1, y1, x2, y2, x, y)
+		return colorParams, params, renderImageAPICode(functionName, values)
 	default:
 		colorText := apiMultiColorTemplate(points)
+		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorText, params, fmt.Sprintf("x, y := images.FindMultiColors(%s)", params)
+		values := apiFormatValues(functionName, params, colorParams, colorText, sim, dir, x1, y1, x2, y2, 0, 0)
+		return colorParams, params, renderImageAPICode(functionName, values)
 	}
 }
 
@@ -3509,6 +4132,7 @@ func main() {
 	w := a.NewWindow("AutoGo图色助手")
 	mainWindowSize := initialWindowSize(0.70, 0.70)
 	userConfig := loadUserConfig()
+	apiFormatTemplates = copyAPIFormatTemplates(userConfig.FormatTemplates)
 	magnifierEnabled = userConfig.ShowMagnifier
 	autoCopyRangeEnabled = userConfig.AutoCopyRange
 	gridModeEnabled = userConfig.GridMode
@@ -3625,12 +4249,13 @@ func main() {
 
 	// 设置刷新表格的函数
 	refreshColorList = func() {
-		if tableContent != nil {
-			// 使用fyne.Do确保在主线程中执行UI更新
-			fyne.Do(func() {
+		// 使用fyne.Do确保在主线程中执行UI更新
+		fyne.Do(func() {
+			if tableContent != nil {
 				tableContent.Refresh()
-			})
-		}
+			}
+			refreshImagesAPIFields()
+		})
 	}
 
 	// 主题切换功能
@@ -3652,6 +4277,9 @@ func main() {
 
 	// 创建区域坐标显示控件
 	rectCoordEntry = widget.NewEntry()
+	rectCoordEntry.OnChanged = func(string) {
+		refreshImagesAPIFields()
+	}
 
 	// 创建偏色值输入控件
 	colorOffsetEntry = widget.NewEntry()
@@ -4089,8 +4717,6 @@ func main() {
 	codeDisplayEntry.Wrapping = fyne.TextWrapWord
 	codeDisplayEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	var updateImagesAPIFields func() string
-
 	// 创建生成代码的函数
 	generateCodeFunc := func() {
 		// 生成代码并复制到剪贴板
@@ -4429,11 +5055,12 @@ func main() {
 	}
 
 	updateTableSelection = func() {
-		if tableContent != nil {
-			fyne.Do(func() {
+		fyne.Do(func() {
+			if tableContent != nil {
 				tableContent.Refresh()
-			})
-		}
+			}
+			refreshImagesAPIFields()
+		})
 	}
 
 	tableContent = widget.NewList(
@@ -4598,6 +5225,7 @@ func main() {
 
 	precisionEntry := makeEntry(userConfig.Precision)
 	precisionEntry.OnChanged = func(string) {
+		refreshImagesAPIFields()
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
 		}
@@ -4636,15 +5264,28 @@ func main() {
 	colorEntry := makeEntry("")
 	paramsEntry := makeEntry("")
 	resultEntry := widget.NewMultiLineEntry()
-	resultEntry.SetPlaceHolder("结果")
+	resultEntry.SetPlaceHolder("找色测试结果将显示在这里...")
 	resultEntry.SetMinRowsVisible(6)
 	updateImagesAPIFields = func() string {
-		colorText, paramsText, code := buildImagesAPICode(functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
+		colorText, _, code := buildImagesAPICode(functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
 		colorEntry.SetText(colorText)
-		paramsEntry.SetText(paramsText)
-		resultEntry.SetText(code)
+		paramsEntry.SetText(code)
+		if strings.TrimSpace(resultEntry.Text) != "" {
+			resultEntry.SetText("")
+		}
 		return code
 	}
+	findTestBtn := widget.NewButton("找色测试", func() {
+		if updateImagesAPIFields != nil {
+			updateImagesAPIFields()
+		}
+
+		var img image.Image
+		if imageViewer != nil {
+			img = imageViewer.image
+		}
+		resultEntry.SetText(runImageFindTestResult(img, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected))
+	})
 	saveCurrentConfig = func() {
 		saveUserConfigSilently(UserConfig{
 			Precision:     strings.TrimSpace(precisionEntry.Text),
@@ -4660,6 +5301,8 @@ func main() {
 			GridCols:      gridColsValue,
 			GridRows:      gridRowsValue,
 			GridSpacing:   gridSpacingValue,
+
+			FormatTemplates: copyAPIFormatTemplates(apiFormatTemplates),
 		})
 	}
 
@@ -4672,17 +5315,15 @@ func main() {
 				container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, functionSelect),
 				container.NewBorder(nil, nil, widget.NewLabel("方向"), nil, directionSelect),
 				container.NewBorder(nil, nil, widget.NewLabel("颜色"), widget.NewButton("复制颜色", func() {
-					updateImagesAPIFields()
 					w.Clipboard().SetContent(colorEntry.Text)
 				}), colorEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(widget.NewButton("格式", func() {
-					updateImagesAPIFields()
+					showAPIFormatDialog(w, functionSelect.Selected, saveCurrentConfig)
 				}), widget.NewButton("复制参数", func() {
-					updateImagesAPIFields()
 					w.Clipboard().SetContent(paramsEntry.Text)
 				})), paramsEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
-				container.NewGridWithColumns(4, genBtn, makeButton("找色测试"), makeButton("代码测试"), makeButton("图片查找")),
+				container.NewGridWithColumns(4, genBtn, findTestBtn, makeButton("代码测试"), makeButton("图片查找")),
 			)),
 			container.NewTabItem("点阵OCR", container.NewCenter(widget.NewLabel("点阵OCR布局待实现"))),
 			container.NewTabItem("光学OCR", container.NewCenter(widget.NewLabel("光学OCR布局待实现"))),
