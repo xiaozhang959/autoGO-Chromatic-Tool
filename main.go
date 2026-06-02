@@ -1988,6 +1988,71 @@ func findMultiColorsInImage(img image.Image, x1, y1, x2, y2 int, colorsText stri
 	return -1, -1
 }
 
+func findMultiColorsAllInImage(img image.Image, x1, y1, x2, y2 int, colorsText string, sim float32, dir int) []image.Point {
+	x1, y1, x2, y2, ok := imageSearchBounds(img, x1, y1, x2, y2)
+	if !ok {
+		return nil
+	}
+
+	parts := strings.Split(sanitizeTestColorText(colorsText), ",")
+	if len(parts) < 4 || len(parts)%3 != 1 {
+		return nil
+	}
+
+	baseColor, baseTolerance, ok := parseTestColor(parts[0], sim)
+	if !ok {
+		return nil
+	}
+	infos, ok := parseRemainingTestColors(parts[1:], sim)
+	if !ok {
+		return nil
+	}
+
+	matches := make([]image.Point, 0)
+	rng := genImageSearchRange(dir, x1, y1, x2, y2)
+	for y := rng.y1; y != rng.y2; y += rng.stepY {
+		for x := rng.x1; x != rng.x2; x += rng.stepX {
+			if testColorMatch(imagePixelNRGBA(img, x, y), baseColor, baseTolerance) &&
+				compareTestColorSequence(img, x, y, infos) {
+				matches = append(matches, image.Pt(x, y))
+			}
+		}
+	}
+	return matches
+}
+
+func formatFindTestPoints(points []image.Point) string {
+	if len(points) == 0 {
+		return "[]"
+	}
+
+	parts := make([]string, 0, len(points))
+	for _, point := range points {
+		parts = append(parts, fmt.Sprintf("{%d %d}", point.X, point.Y))
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
+func runImageCmpColorTest(img image.Image, precisionText string) bool {
+	if img == nil {
+		return false
+	}
+
+	points := selectedColorPoints()
+	if len(points) == 0 {
+		return false
+	}
+
+	x, y, ok := parsePointPosition(points[0].Position)
+	if !ok {
+		return false
+	}
+	if !image.Pt(x, y).In(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy())) {
+		return false
+	}
+	return testColorAlternativesMatch(imagePixelNRGBA(img, x, y), apiColorAlternatives(points), parseSimilarityValue(precisionText))
+}
+
 func runImageFindTest(img image.Image, functionName, precisionText, directionText string) (int, int) {
 	if img == nil {
 		return -1, -1
@@ -2004,21 +2069,39 @@ func runImageFindTest(img image.Image, functionName, precisionText, directionTex
 	switch normalizeImagesFunctionName(functionName) {
 	case "FindColor":
 		return findColorInImage(img, x1, y1, x2, y2, apiColorAlternatives(points), sim, dir)
-	case "CmpColor":
-		x, y, ok := parsePointPosition(points[0].Position)
-		if !ok {
+	case "FindMultiColorsAll":
+		points := findMultiColorsAllInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(points), sim, dir)
+		if len(points) == 0 {
 			return -1, -1
 		}
-		if !image.Pt(x, y).In(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy())) {
-			return -1, -1
-		}
-		if testColorAlternativesMatch(imagePixelNRGBA(img, x, y), apiColorAlternatives(points), sim) {
-			return x, y
-		}
-		return -1, -1
+		return points[0].X, points[0].Y
 	default:
 		return findMultiColorsInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(points), sim, dir)
 	}
+}
+
+func runImageFindTestResult(img image.Image, functionName, precisionText, directionText string) string {
+	functionName = normalizeImagesFunctionName(functionName)
+	if functionName == "CmpColor" {
+		return strconv.FormatBool(runImageCmpColorTest(img, precisionText))
+	}
+
+	if img == nil || len(selectedColorPoints()) == 0 {
+		if functionName == "FindMultiColorsAll" {
+			return "[]"
+		}
+		return "-1,-1"
+	}
+
+	sim := parseSimilarityValue(precisionText)
+	dir := directionValue(directionText)
+	x1, y1, x2, y2 := regionValuesFromEntry()
+	if functionName == "FindMultiColorsAll" {
+		return formatFindTestPoints(findMultiColorsAllInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(selectedColorPoints()), sim, dir))
+	}
+
+	x, y := runImageFindTest(img, functionName, precisionText, directionText)
+	return fmt.Sprintf("%d,%d", x, y)
 }
 
 func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) string {
@@ -5197,11 +5280,11 @@ func main() {
 			updateImagesAPIFields()
 		}
 
-		x, y := -1, -1
+		var img image.Image
 		if imageViewer != nil {
-			x, y = runImageFindTest(imageViewer.image, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
+			img = imageViewer.image
 		}
-		resultEntry.SetText(fmt.Sprintf("%d,%d", x, y))
+		resultEntry.SetText(runImageFindTestResult(img, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected))
 	})
 	saveCurrentConfig = func() {
 		saveUserConfigSilently(UserConfig{

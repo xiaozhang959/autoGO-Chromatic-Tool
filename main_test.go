@@ -165,3 +165,36 @@ func TestRunImageFindTestNotFound(t *testing.T) {
 		t.Fatalf("not found result mismatch: got %d,%d", x, y)
 	}
 }
+
+func TestRunImageFindTestResultFindMultiColorsAll(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "0, 0", Color: "#112233", Offset: "000000", Selected: true},
+		{Position: "1, 0", Color: "#445566", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(1, 1, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(2, 1, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+	img.SetNRGBA(3, 2, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(4, 2, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+
+	got := runImageFindTestResult(img, "FindMultiColorsAll", "1.0", "0: 从左到右，从上到下")
+
+	want := "[{1 1} {3 2}]"
+	if got != want {
+		t.Fatalf("find all result mismatch:\nwant: %s\n got: %s", want, got)
+	}
+}
+
+func TestRunImageFindTestResultCmpColor(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "2, 3", Color: "#AABBCC", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(2, 3, color.NRGBA{R: 0xaa, G: 0xbb, B: 0xcc, A: 0xff})
+
+	got := runImageFindTestResult(img, "CmpColor", "1.0", "0: 从左到右，从上到下")
+
+	if got != "true" {
+		t.Fatalf("cmp color result mismatch: got %s", got)
+	}
+}
