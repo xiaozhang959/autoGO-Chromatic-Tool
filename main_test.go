@@ -19,7 +19,7 @@ func TestBuildImagesAPICodeFindMultiColorsColorExport(t *testing.T) {
 
 	colorText, params, code := buildImagesAPICode("FindMultiColors", "0.9", "0: 从左到右，从上到下")
 
-	wantColorText := `{0,0,0,0,"081029-202020","187|-21|1c3a6d-202020|32|128|0d1b3c-202020",0,0.9}`
+	wantColorText := `{0,0,0,0,"081029-202020,187,-21,1c3a6d-202020,32,128,0d1b3c-202020",0.9,0,0}`
 	if colorText != wantColorText {
 		t.Fatalf("color text mismatch:\nwant: %s\n got: %s", wantColorText, colorText)
 	}

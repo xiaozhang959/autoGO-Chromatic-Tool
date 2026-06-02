@@ -1769,27 +1769,8 @@ func apiMultiColorTemplate(points []ColorPoint) string {
 	return strings.Join(parts, ",")
 }
 
-func apiMultiColorParamsObject(x1, y1, x2, y2 int, points []ColorPoint, sim string, dir int) string {
-	if len(points) == 0 {
-		return ""
-	}
-
-	baseX, baseY, ok := parsePointPosition(points[0].Position)
-	if !ok {
-		return ""
-	}
-
-	parts := make([]string, 0, (len(points)-1)*3)
-	for _, point := range points[1:] {
-		x, y, ok := parsePointPosition(point.Position)
-		if !ok {
-			continue
-		}
-		parts = append(parts, strconv.Itoa(x-baseX), strconv.Itoa(y-baseY), colorPointValue(point))
-	}
-
-	return fmt.Sprintf("{%d,%d,%d,%d,\"%s\",\"%s\",%d,%s}",
-		x1, y1, x2, y2, colorPointValue(points[0]), strings.Join(parts, "|"), dir, sim)
+func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) string {
+	return fmt.Sprintf("{%d,%d,%d,%d,\"%s\",%s,%d,0}", x1, y1, x2, y2, colorText, sim, dir)
 }
 
 func refreshImagesAPIFields() {
@@ -1830,12 +1811,12 @@ func buildImagesAPICode(functionName, precisionText, directionText string) (stri
 	switch functionName {
 	case "FindColor":
 		colorText := apiColorAlternatives(points)
-		colorParams := fmt.Sprintf("{%d,%d,%d,%d,\"%s\",%d,%s}", x1, y1, x2, y2, colorText, dir, sim)
+		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
 		return colorParams, params, fmt.Sprintf("x, y := images.FindColor(%s)", params)
 	case "FindMultiColorsAll":
 		colorText := apiMultiColorTemplate(points)
-		colorParams := apiMultiColorParamsObject(x1, y1, x2, y2, points, sim, dir)
+		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
 		return colorParams, params, fmt.Sprintf("points := images.FindMultiColorsAll(%s)", params)
 	case "CmpColor":
@@ -1844,12 +1825,12 @@ func buildImagesAPICode(functionName, precisionText, directionText string) (stri
 			return "", "", ""
 		}
 		colorText := apiColorAlternatives(points)
-		colorParams := fmt.Sprintf("{%d,%d,\"%s\",%s}", x, y, colorText, sim)
+		colorParams := fmt.Sprintf("{%d,%d,\"%s\",%s,0}", x, y, colorText, sim)
 		params := fmt.Sprintf("%d, %d, \"%s\", %s, 0", x, y, colorText, sim)
 		return colorParams, params, fmt.Sprintf("matched := images.CmpColor(%s)", params)
 	default:
 		colorText := apiMultiColorTemplate(points)
-		colorParams := apiMultiColorParamsObject(x1, y1, x2, y2, points, sim, dir)
+		colorParams := apiRegionParamsObject(x1, y1, x2, y2, colorText, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
 		return colorParams, params, fmt.Sprintf("x, y := images.FindMultiColors(%s)", params)
 	}
