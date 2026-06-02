@@ -1748,6 +1748,18 @@ func directionValue(directionText string) int {
 	return 0
 }
 
+func parseSimilarityValue(precisionText string) float32 {
+	simText := strings.TrimSpace(precisionText)
+	if simText == "" {
+		return 0.9
+	}
+	sim, err := strconv.ParseFloat(simText, 32)
+	if err != nil {
+		return 0.9
+	}
+	return float32(sim)
+}
+
 func apiColorAlternatives(points []ColorPoint) string {
 	colors := make([]string, 0, len(points))
 	for _, point := range points {
@@ -1775,6 +1787,238 @@ func apiMultiColorTemplate(points []ColorPoint) string {
 		parts = append(parts, fmt.Sprintf("%d,%d,%s", x-baseX, y-baseY, colorPointValue(point)))
 	}
 	return strings.Join(parts, ",")
+}
+
+type imageSearchRange struct {
+	x1, x2 int
+	y1, y2 int
+	stepX  int
+	stepY  int
+}
+
+type testColorInfo struct {
+	x, y int
+	c2   color.NRGBA
+	c3   color.NRGBA
+}
+
+func sanitizeTestColorText(text string) string {
+	replacer := strings.NewReplacer("[", "", "]", "", "#", "", " ", "", `"`, "")
+	return replacer.Replace(text)
+}
+
+func imageSearchBounds(img image.Image, x1, y1, x2, y2 int) (int, int, int, int, bool) {
+	if img == nil {
+		return 0, 0, 0, 0, false
+	}
+
+	width := img.Bounds().Dx()
+	height := img.Bounds().Dy()
+	if x2 == 0 || x2 > width {
+		x2 = width
+	}
+	if y2 == 0 || y2 > height {
+		y2 = height
+	}
+	if x1 < 0 || y1 < 0 || x2 > width || y2 > height || x1 >= x2 || y1 >= y2 {
+		return 0, 0, 0, 0, false
+	}
+	return x1, y1, x2, y2, true
+}
+
+func genImageSearchRange(dir, x1, y1, x2, y2 int) imageSearchRange {
+	switch dir {
+	case 1:
+		return imageSearchRange{x1: x2 - 1, x2: x1 - 1, y1: y1, y2: y2, stepX: -1, stepY: 1}
+	case 2:
+		return imageSearchRange{x1: x1, x2: x2, y1: y2 - 1, y2: y1 - 1, stepX: 1, stepY: -1}
+	case 3:
+		return imageSearchRange{x1: x2 - 1, x2: x1 - 1, y1: y2 - 1, y2: y1 - 1, stepX: -1, stepY: -1}
+	default:
+		return imageSearchRange{x1: x1, x2: x2, y1: y1, y2: y2, stepX: 1, stepY: 1}
+	}
+}
+
+func imagePixelNRGBA(img image.Image, x, y int) color.NRGBA {
+	bounds := img.Bounds()
+	return color.NRGBAModel.Convert(img.At(bounds.Min.X+x, bounds.Min.Y+y)).(color.NRGBA)
+}
+
+func absDiffUint8(a, b uint8) uint8 {
+	if a > b {
+		return a - b
+	}
+	return b - a
+}
+
+func testColorMatch(c1, c2, c3 color.NRGBA) bool {
+	return absDiffUint8(c1.R, c2.R) <= c3.R &&
+		absDiffUint8(c1.G, c2.G) <= c3.G &&
+		absDiffUint8(c1.B, c2.B) <= c3.B
+}
+
+func parseTestColor(colorStr string, sim float32) (color.NRGBA, color.NRGBA, bool) {
+	colorStr = sanitizeTestColorText(colorStr)
+	parts := strings.Split(colorStr, "-")
+	if len(parts) == 0 || len(parts[0]) < 6 {
+		return color.NRGBA{}, color.NRGBA{}, false
+	}
+
+	parseHex := func(text string) (uint8, uint8, uint8, bool) {
+		if len(text) < 6 {
+			return 0, 0, 0, false
+		}
+		r, errR := strconv.ParseUint(text[0:2], 16, 8)
+		g, errG := strconv.ParseUint(text[2:4], 16, 8)
+		b, errB := strconv.ParseUint(text[4:6], 16, 8)
+		if errR != nil || errG != nil || errB != nil {
+			return 0, 0, 0, false
+		}
+		return uint8(r), uint8(g), uint8(b), true
+	}
+
+	r, g, b, ok := parseHex(parts[0])
+	if !ok {
+		return color.NRGBA{}, color.NRGBA{}, false
+	}
+	base := color.NRGBA{R: r, G: g, B: b, A: 255}
+
+	var tolerance uint8
+	if sim > 0 {
+		tolerance = uint8((1.0 - sim) * 255)
+	}
+
+	if len(parts) > 1 {
+		r, g, b, ok := parseHex(parts[1])
+		if !ok {
+			return color.NRGBA{}, color.NRGBA{}, false
+		}
+		return base, color.NRGBA{R: r + tolerance, G: g + tolerance, B: b + tolerance, A: 255}, true
+	}
+	return base, color.NRGBA{R: tolerance, G: tolerance, B: tolerance, A: 255}, true
+}
+
+func testColorAlternativesMatch(c color.NRGBA, colorText string, sim float32) bool {
+	colorText = sanitizeTestColorText(colorText)
+	for _, part := range strings.Split(colorText, "|") {
+		base, tolerance, ok := parseTestColor(part, sim)
+		if ok && testColorMatch(c, base, tolerance) {
+			return true
+		}
+	}
+	return false
+}
+
+func findColorInImage(img image.Image, x1, y1, x2, y2 int, colorText string, sim float32, dir int) (int, int) {
+	x1, y1, x2, y2, ok := imageSearchBounds(img, x1, y1, x2, y2)
+	if !ok {
+		return -1, -1
+	}
+
+	rng := genImageSearchRange(dir, x1, y1, x2, y2)
+	for y := rng.y1; y != rng.y2; y += rng.stepY {
+		for x := rng.x1; x != rng.x2; x += rng.stepX {
+			if testColorAlternativesMatch(imagePixelNRGBA(img, x, y), colorText, sim) {
+				return x, y
+			}
+		}
+	}
+	return -1, -1
+}
+
+func parseRemainingTestColors(parts []string, sim float32) ([]testColorInfo, bool) {
+	infos := make([]testColorInfo, 0, len(parts)/3)
+	for i := 0; i < len(parts); i += 3 {
+		x, errX := strconv.Atoi(parts[i])
+		y, errY := strconv.Atoi(parts[i+1])
+		base, tolerance, ok := parseTestColor(parts[i+2], sim)
+		if errX != nil || errY != nil || !ok {
+			return nil, false
+		}
+		infos = append(infos, testColorInfo{x: x, y: y, c2: base, c3: tolerance})
+	}
+	return infos, true
+}
+
+func compareTestColorSequence(img image.Image, x, y int, infos []testColorInfo) bool {
+	width := img.Bounds().Dx()
+	height := img.Bounds().Dy()
+	for _, info := range infos {
+		offsetX := x + info.x
+		offsetY := y + info.y
+		if offsetX < 0 || offsetY < 0 || offsetX >= width || offsetY >= height {
+			return false
+		}
+		if !testColorMatch(imagePixelNRGBA(img, offsetX, offsetY), info.c2, info.c3) {
+			return false
+		}
+	}
+	return true
+}
+
+func findMultiColorsInImage(img image.Image, x1, y1, x2, y2 int, colorsText string, sim float32, dir int) (int, int) {
+	x1, y1, x2, y2, ok := imageSearchBounds(img, x1, y1, x2, y2)
+	if !ok {
+		return -1, -1
+	}
+
+	parts := strings.Split(sanitizeTestColorText(colorsText), ",")
+	if len(parts) < 4 || len(parts)%3 != 1 {
+		return -1, -1
+	}
+
+	baseColor, baseTolerance, ok := parseTestColor(parts[0], sim)
+	if !ok {
+		return -1, -1
+	}
+	infos, ok := parseRemainingTestColors(parts[1:], sim)
+	if !ok {
+		return -1, -1
+	}
+
+	rng := genImageSearchRange(dir, x1, y1, x2, y2)
+	for y := rng.y1; y != rng.y2; y += rng.stepY {
+		for x := rng.x1; x != rng.x2; x += rng.stepX {
+			if testColorMatch(imagePixelNRGBA(img, x, y), baseColor, baseTolerance) &&
+				compareTestColorSequence(img, x, y, infos) {
+				return x, y
+			}
+		}
+	}
+	return -1, -1
+}
+
+func runImageFindTest(img image.Image, functionName, precisionText, directionText string) (int, int) {
+	if img == nil {
+		return -1, -1
+	}
+
+	points := selectedColorPoints()
+	if len(points) == 0 {
+		return -1, -1
+	}
+
+	sim := parseSimilarityValue(precisionText)
+	dir := directionValue(directionText)
+	x1, y1, x2, y2 := regionValuesFromEntry()
+	switch normalizeImagesFunctionName(functionName) {
+	case "FindColor":
+		return findColorInImage(img, x1, y1, x2, y2, apiColorAlternatives(points), sim, dir)
+	case "CmpColor":
+		x, y, ok := parsePointPosition(points[0].Position)
+		if !ok {
+			return -1, -1
+		}
+		if !image.Pt(x, y).In(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy())) {
+			return -1, -1
+		}
+		if testColorAlternativesMatch(imagePixelNRGBA(img, x, y), apiColorAlternatives(points), sim) {
+			return x, y
+		}
+		return -1, -1
+	default:
+		return findMultiColorsInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(points), sim, dir)
+	}
 }
 
 func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) string {
@@ -4937,15 +5181,28 @@ func main() {
 	colorEntry := makeEntry("")
 	paramsEntry := makeEntry("")
 	resultEntry := widget.NewMultiLineEntry()
-	resultEntry.SetPlaceHolder("结果")
+	resultEntry.SetPlaceHolder("找色测试结果将显示在这里...")
 	resultEntry.SetMinRowsVisible(6)
 	updateImagesAPIFields = func() string {
-		colorText, paramsText, code := buildImagesAPICode(functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
+		colorText, _, code := buildImagesAPICode(functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
 		colorEntry.SetText(colorText)
-		paramsEntry.SetText(paramsText)
-		resultEntry.SetText(code)
+		paramsEntry.SetText(code)
+		if strings.TrimSpace(resultEntry.Text) != "" {
+			resultEntry.SetText("")
+		}
 		return code
 	}
+	findTestBtn := widget.NewButton("找色测试", func() {
+		if updateImagesAPIFields != nil {
+			updateImagesAPIFields()
+		}
+
+		x, y := -1, -1
+		if imageViewer != nil {
+			x, y = runImageFindTest(imageViewer.image, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
+		}
+		resultEntry.SetText(fmt.Sprintf("%d,%d", x, y))
+	})
 	saveCurrentConfig = func() {
 		saveUserConfigSilently(UserConfig{
 			Precision:     strings.TrimSpace(precisionEntry.Text),
@@ -4983,7 +5240,7 @@ func main() {
 					w.Clipboard().SetContent(paramsEntry.Text)
 				})), paramsEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
-				container.NewGridWithColumns(4, genBtn, makeButton("找色测试"), makeButton("代码测试"), makeButton("图片查找")),
+				container.NewGridWithColumns(4, genBtn, findTestBtn, makeButton("代码测试"), makeButton("图片查找")),
 			)),
 			container.NewTabItem("点阵OCR", container.NewCenter(widget.NewLabel("点阵OCR布局待实现"))),
 			container.NewTabItem("光学OCR", container.NewCenter(widget.NewLabel("光学OCR布局待实现"))),

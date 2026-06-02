@@ -1,6 +1,8 @@
 package main
 
 import (
+	"image"
+	"image/color"
 	"testing"
 
 	fynetest "fyne.io/fyne/v2/test"
@@ -118,5 +120,48 @@ func TestInsertTextAtEntryCursor(t *testing.T) {
 	}
 	if entry.CursorRow != 1 || entry.CursorColumn != 7 {
 		t.Fatalf("cursor mismatch: row=%d column=%d", entry.CursorRow, entry.CursorColumn)
+	}
+}
+
+func TestRunImageFindTestFindMultiColors(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "0, 0", Color: "#112233", Offset: "000000", Selected: true},
+		{Position: "1, 1", Color: "#445566", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(3, 2, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(4, 3, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+
+	x, y := runImageFindTest(img, "FindMultiColors", "1.0", "0: 从左到右，从上到下")
+
+	if x != 3 || y != 2 {
+		t.Fatalf("find multi result mismatch: got %d,%d", x, y)
+	}
+}
+
+func TestRunImageFindTestFindColor(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "0, 0", Color: "#AABBCC", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(4, 1, color.NRGBA{R: 0xaa, G: 0xbb, B: 0xcc, A: 0xff})
+
+	x, y := runImageFindTest(img, "FindColor", "1.0", "0: 从左到右，从上到下")
+
+	if x != 4 || y != 1 {
+		t.Fatalf("find color result mismatch: got %d,%d", x, y)
+	}
+}
+
+func TestRunImageFindTestNotFound(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "0, 0", Color: "#AABBCC", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+
+	x, y := runImageFindTest(img, "FindColor", "1.0", "0: 从左到右，从上到下")
+
+	if x != -1 || y != -1 {
+		t.Fatalf("not found result mismatch: got %d,%d", x, y)
 	}
 }
