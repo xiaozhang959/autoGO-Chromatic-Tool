@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	autoPickModeRandom    = "随机取点"
-	autoPickModeContour   = "轮廓取点"
-	autoPickModeHighlight = "高亮取点"
-	defaultAutoPickCount  = 20
+	autoPickModeRandom         = "随机取点"
+	autoPickModeContour        = "轮廓取点"
+	autoPickModeHighlight      = "高亮取点"
+	autoPickModeHighSaturation = "高饱和取点"
+	defaultAutoPickCount       = 20
 )
 
 type autoPickCandidate struct {
@@ -50,6 +51,8 @@ func autoPickPoints(req autoPickRequest) []image.Point {
 		return pickContourPoints(req.Image, rect, req.Count, minDistance)
 	case autoPickModeHighlight:
 		return pickHighlightPoints(req.Image, rect, req.Count, minDistance)
+	case autoPickModeHighSaturation:
+		return pickHighSaturationPoints(req.Image, rect, req.Count, minDistance)
 	default:
 		return nil
 	}
@@ -57,7 +60,7 @@ func autoPickPoints(req autoPickRequest) []image.Point {
 
 func supportedAutoPickMode(mode string) bool {
 	switch mode {
-	case autoPickModeRandom, autoPickModeContour, autoPickModeHighlight:
+	case autoPickModeRandom, autoPickModeContour, autoPickModeHighlight, autoPickModeHighSaturation:
 		return true
 	default:
 		return false
@@ -271,6 +274,35 @@ func pickHighlightPoints(img image.Image, rect image.Rectangle, count, minDistan
 	return pickTopCandidates(candidates, count, minDistance)
 }
 
+func pickHighSaturationPoints(img image.Image, rect image.Rectangle, count, minDistance int) []image.Point {
+	if img == nil || rect.Empty() || count <= 0 {
+		return nil
+	}
+
+	candidates := make([]autoPickCandidate, 0, rect.Dx()*rect.Dy())
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		for x := rect.Min.X; x < rect.Max.X; x++ {
+			saturation, ok := pickSaturationAt(img, x, y)
+			if !ok || saturation <= 0 {
+				continue
+			}
+
+			contrast := pickLocalLumaContrast(img, rect, x, y)
+			score := saturation*0.75 + contrast*0.25
+			if score <= 0 {
+				continue
+			}
+
+			candidates = append(candidates, autoPickCandidate{
+				Point: image.Pt(x, y),
+				Score: score,
+			})
+		}
+	}
+
+	return pickTopCandidates(candidates, count, minDistance)
+}
+
 func pickTopCandidates(candidates []autoPickCandidate, count, minDistance int) []image.Point {
 	if len(candidates) == 0 || count <= 0 {
 		return nil
@@ -302,6 +334,24 @@ func pickTopCandidates(candidates []autoPickCandidate, count, minDistance int) [
 func pickLumaAt(img image.Image, x, y int) float64 {
 	r, g, b, _ := img.At(x, y).RGBA()
 	return 0.299*float64(uint8(r>>8)) + 0.587*float64(uint8(g>>8)) + 0.114*float64(uint8(b>>8))
+}
+
+func pickSaturationAt(img image.Image, x, y int) (float64, bool) {
+	r, g, b, a := img.At(x, y).RGBA()
+	if uint8(a>>8) < 32 {
+		return 0, false
+	}
+
+	r8 := uint8(r >> 8)
+	g8 := uint8(g >> 8)
+	b8 := uint8(b >> 8)
+	maxValue := max(max(int(r8), int(g8)), int(b8))
+	if maxValue == 0 {
+		return 0, true
+	}
+
+	minValue := min(min(int(r8), int(g8)), int(b8))
+	return float64(maxValue-minValue) / float64(maxValue) * 255, true
 }
 
 func pickLocalLumaContrast(img image.Image, rect image.Rectangle, x, y int) float64 {
