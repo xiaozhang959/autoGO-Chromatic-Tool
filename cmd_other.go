@@ -4,10 +4,15 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+const adbCommandTimeout = 12 * time.Second
 
 func screenSizePixels() (int, int) {
 	return 0, 0
@@ -18,26 +23,34 @@ func screenScale() float32 {
 }
 
 func adbExec(str ...string) string {
-	cmd := exec.Command(adb, str...)
-	output, err := cmd.Output()
+	output, err := runADBCommand(false, str...)
 	if err != nil {
 		return err.Error()
 	}
-	if len(output) > 0 {
-		if output[len(output)-1] == 10 {
-			output = output[:len(output)-1]
-		}
-		if output[len(output)-1] == 13 {
-			output = output[:len(output)-1]
-		}
-	}
-	return string(output)
+	return output
 }
 
 func adbExecCombined(str ...string) (string, error) {
-	cmd := exec.Command(adb, str...)
-	output, err := cmd.CombinedOutput()
+	return runADBCommand(true, str...)
+}
+
+func runADBCommand(combined bool, str ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), adbCommandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, adb, str...)
+	var output []byte
+	var err error
+	if combined {
+		output, err = cmd.CombinedOutput()
+	} else {
+		output, err = cmd.Output()
+	}
+
 	text := strings.TrimRight(string(output), "\r\n")
+	if ctx.Err() == context.DeadlineExceeded {
+		return text, fmt.Errorf("adb 命令超时（%s）", adbCommandTimeout)
+	}
 	if err != nil {
 		return text, err
 	}

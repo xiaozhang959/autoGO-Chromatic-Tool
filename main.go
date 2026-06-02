@@ -1046,7 +1046,12 @@ func (r *colorCheckRenderer) Destroy() {}
 // 获取所有连接的ADB设备（包括虚拟屏）
 func getADBDevices() ([]string, error) {
 	// 解析输出
-	lines := strings.Split(adbExec("devices"), "\n")
+	devicesOutput, err := adbExecCombined("devices")
+	if err != nil {
+		return nil, fmt.Errorf("adb devices 失败: %v", adbErrorWithOutput(err, devicesOutput))
+	}
+
+	lines := strings.Split(devicesOutput, "\n")
 	var baseDevices []string
 
 	// 跳过第一行（标题行）
