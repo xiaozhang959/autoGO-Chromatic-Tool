@@ -51,6 +51,17 @@ func adbExec(str ...string) string {
 	return string(output)
 }
 
+func adbExecCombined(str ...string) (string, error) {
+	cmd := exec.Command(adb, str...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	output, err := cmd.CombinedOutput()
+	text := strings.TrimRight(string(output), "\r\n")
+	if err != nil {
+		return text, err
+	}
+	return text, nil
+}
+
 // 查找 ADB 可执行文件路径
 func findADBPath() string {
 	processes, err := process.Processes()

@@ -3257,6 +3257,27 @@ func (v *ImageViewer) ClearFindTestHighlights() {
 	}
 }
 
+func (v *ImageViewer) SetNodeHighlightRect(rect image.Rectangle) {
+	if v == nil || v.image == nil {
+		return
+	}
+
+	rect = rect.Intersect(v.image.Bounds())
+	if rect.Empty() {
+		v.ClearFindTestHighlights()
+		return
+	}
+
+	v.findTestRects = []MarkRect{{
+		X1:    rect.Min.X,
+		Y1:    rect.Min.Y,
+		X2:    rect.Max.X,
+		Y2:    rect.Max.Y,
+		Color: color.NRGBA{0, 200, 255, 255},
+	}}
+	v.Refresh()
+}
+
 func (v *ImageViewer) SetLinkedPointHighlight(points []image.Point) {
 	v.linkedPointRects = linkedPointHighlightRects(v.image, points)
 	if v.image != nil {
@@ -5802,6 +5823,22 @@ func main() {
 		entry.SetText(text)
 		return entry
 	}
+	var rightTabs *container.AppTabs
+	var nodeTabItem *container.TabItem
+	nodeTool := newAndroidNodeTool(w, func() string {
+		return selectedDevice
+	}, func() *ImageViewer {
+		return imageViewer
+	})
+	nodeTool.SetOnOpen(func() {
+		if rightTabs != nil && nodeTabItem != nil {
+			rightTabs.Select(nodeTabItem)
+		}
+	})
+	grabNodeBtn := widget.NewButton("抓取节点", func() {
+		nodeTool.Capture()
+	})
+	grabNodeBtn.Importance = widget.MediumImportance
 	makeFixedPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
 		minWidth := canvas.NewRectangle(color.Transparent)
 		minWidth.SetMinSize(fyne.NewSize(width, 1))
@@ -6012,7 +6049,7 @@ func main() {
 		copyResetRow,
 		resetZoomBtn,
 		originalSizeBtn,
-		makeButton("抓取节点"),
+		grabNodeBtn,
 		clearFindMarksBtn,
 		autoPickBtn,
 		pickModeSelect,
@@ -6361,9 +6398,10 @@ func main() {
 	)
 
 	rightToolPanel := container.NewBorder(tableArea, nil, nil, nil, toolForm)
-	rightTabs := container.NewAppTabs(
+	nodeTabItem = container.NewTabItem("节点工具", nodeTool.Content())
+	rightTabs = container.NewAppTabs(
 		container.NewTabItem("图色工具", rightToolPanel),
-		container.NewTabItem("节点工具", container.NewCenter(widget.NewLabel("节点工具布局待实现"))),
+		nodeTabItem,
 	)
 	rightPanel := makeFixedPanel(rightPanelMinWidth, container.NewVScroll(rightTabs))
 
