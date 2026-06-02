@@ -306,3 +306,58 @@ func TestRunImageFindTestHighlightPointsNotFound(t *testing.T) {
 
 	assertImagePoints(t, got, nil)
 }
+
+func TestSplitCodeTestArgsSupportsQuotedCommasAndFunctionCall(t *testing.T) {
+	args, err := splitCodeTestArgs(`images.FindMultiColors(0, 0, 0, 0, "112233,1,1,445566", 1.0, 0, 0)`)
+	if err != nil {
+		t.Fatalf("split args failed: %v", err)
+	}
+	if len(args) != 8 {
+		t.Fatalf("arg count mismatch: got %d (%v)", len(args), args)
+	}
+	colorText, err := unquoteCodeTestArg(args[4])
+	if err != nil {
+		t.Fatalf("unquote failed: %v", err)
+	}
+	if colorText != "112233,1,1,445566" {
+		t.Fatalf("color arg mismatch: got %s", colorText)
+	}
+}
+
+func TestRunCodeTestForImageFindMultiColors(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(2, 3, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(3, 4, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+
+	got := runCodeTestForImage(img, "FindMultiColors", `0, 0, 0, 0, "112233,1,1,445566", 1.0, 0, 0`)
+
+	if got != "2,3" {
+		t.Fatalf("code test result mismatch: got %s", got)
+	}
+}
+
+func TestRunCodeTestForImageFindMultiColorsAll(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(1, 1, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(2, 1, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+	img.SetNRGBA(3, 2, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(4, 2, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+
+	got := runCodeTestForImage(img, "findMultiColorAll", `0, 0, 0, 0, "112233,1,0,445566", 1.0, 0, 0`)
+
+	want := "[\n    {1 1}\n    {3 2}\n]"
+	if got != want {
+		t.Fatalf("code test find all mismatch:\nwant: %s\n got: %s", want, got)
+	}
+}
+
+func TestRunCodeTestForImageCmpColor(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(2, 3, color.NRGBA{R: 0xaa, G: 0xbb, B: 0xcc, A: 0xff})
+
+	got := runCodeTestForImage(img, "CmpColor", `2, 3, "AABBCC-000000", 1.0, 0`)
+
+	if got != "true" {
+		t.Fatalf("code test cmp mismatch: got %s", got)
+	}
+}

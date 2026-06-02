@@ -2280,6 +2280,284 @@ func runImageFindTestResultAndHighlights(img image.Image, functionName, precisio
 	return fmt.Sprintf("%d,%d", x, y), foundPointHighlights(x, y)
 }
 
+func defaultCodeTestParams(functionName string) string {
+	switch normalizeImagesFunctionName(functionName) {
+	case "FindColor":
+		return `0, 0, 0, 0, "FFFFFF|CCCCCC-101010", 0.9, 0, 0`
+	case "FindMultiColorsAll":
+		return `0, 0, 0, 0, "ffccff-151515,635,978,ffab2d-101010", 0.9, 0, 0`
+	case "CmpColor":
+		return `100, 200, "FFFFFF|CCCCCC-101010", 0.9, 0`
+	default:
+		return `0, 0, 0, 0, "ffccff-151515,635,978,ffab2d-101010", 0.9, 0, 0`
+	}
+}
+
+func codeTestExampleParams(functionName, precisionText, directionText string) string {
+	_, params, _ := buildImagesAPICode(functionName, precisionText, directionText)
+	if strings.TrimSpace(params) != "" {
+		return params
+	}
+	return defaultCodeTestParams(functionName)
+}
+
+func normalizeCodeTestParamsText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	if openIndex := strings.Index(text, "("); openIndex >= 0 {
+		if closeIndex := strings.LastIndex(text, ")"); closeIndex > openIndex {
+			text = text[openIndex+1 : closeIndex]
+		}
+	}
+
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "{") && strings.HasSuffix(text, "}") && len(text) >= 2 {
+		text = strings.TrimSpace(text[1 : len(text)-1])
+	}
+	return text
+}
+
+func splitCodeTestArgs(text string) ([]string, error) {
+	text = normalizeCodeTestParamsText(text)
+	if text == "" {
+		return nil, fmt.Errorf("请输入参数")
+	}
+
+	args := make([]string, 0)
+	var current strings.Builder
+	inQuote := false
+	escaped := false
+	for _, r := range text {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && inQuote {
+			current.WriteRune(r)
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			inQuote = !inQuote
+			current.WriteRune(r)
+			continue
+		}
+		if r == ',' && !inQuote {
+			args = append(args, strings.TrimSpace(current.String()))
+			current.Reset()
+			continue
+		}
+		current.WriteRune(r)
+	}
+	if inQuote {
+		return nil, fmt.Errorf("字符串参数缺少结束双引号")
+	}
+	args = append(args, strings.TrimSpace(current.String()))
+	for _, arg := range args {
+		if arg == "" {
+			return nil, fmt.Errorf("参数中包含空值")
+		}
+	}
+	return args, nil
+}
+
+func unquoteCodeTestArg(arg string) (string, error) {
+	arg = strings.TrimSpace(arg)
+	if len(arg) >= 2 && strings.HasPrefix(arg, `"`) && strings.HasSuffix(arg, `"`) {
+		value, err := strconv.Unquote(arg)
+		if err != nil {
+			return "", err
+		}
+		return value, nil
+	}
+	return arg, nil
+}
+
+func parseCodeTestInt(args []string, index int, name string) (int, error) {
+	if index >= len(args) {
+		return 0, fmt.Errorf("缺少参数 %s", name)
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(args[index]))
+	if err != nil {
+		return 0, fmt.Errorf("%s 必须是整数", name)
+	}
+	return value, nil
+}
+
+func parseCodeTestFloat(args []string, index int, name string) (float32, error) {
+	if index >= len(args) {
+		return 0, fmt.Errorf("缺少参数 %s", name)
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(args[index]), 32)
+	if err != nil {
+		return 0, fmt.Errorf("%s 必须是数字", name)
+	}
+	return float32(value), nil
+}
+
+func parseCodeTestString(args []string, index int, name string) (string, error) {
+	if index >= len(args) {
+		return "", fmt.Errorf("缺少参数 %s", name)
+	}
+	value, err := unquoteCodeTestArg(args[index])
+	if err != nil {
+		return "", fmt.Errorf("%s 字符串格式错误", name)
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("%s 不能为空", name)
+	}
+	return value, nil
+}
+
+func validateCodeTestArgCount(functionName string, args []string) error {
+	switch normalizeImagesFunctionName(functionName) {
+	case "CmpColor":
+		if len(args) != 4 && len(args) != 5 {
+			return fmt.Errorf("CmpColor 参数应为 5 个：x, y, colorStr, sim, displayId")
+		}
+	default:
+		if len(args) != 7 && len(args) != 8 {
+			return fmt.Errorf("%s 参数应为 8 个：x1, y1, x2, y2, colors/colorStr, sim, dir, displayId", normalizeImagesFunctionName(functionName))
+		}
+	}
+	return nil
+}
+
+func runCodeTestForImage(img image.Image, functionName, paramsText string) string {
+	if img == nil {
+		return "请先截图或导入图片"
+	}
+
+	functionName = normalizeImagesFunctionName(functionName)
+	args, err := splitCodeTestArgs(paramsText)
+	if err != nil {
+		return "参数错误：" + err.Error()
+	}
+	if err := validateCodeTestArgCount(functionName, args); err != nil {
+		return "参数错误：" + err.Error()
+	}
+
+	switch functionName {
+	case "FindColor":
+		x1, err := parseCodeTestInt(args, 0, "x1")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		y1, err := parseCodeTestInt(args, 1, "y1")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		x2, err := parseCodeTestInt(args, 2, "x2")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		y2, err := parseCodeTestInt(args, 3, "y2")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		colorText, err := parseCodeTestString(args, 4, "colorStr")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		sim, err := parseCodeTestFloat(args, 5, "sim")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		dir, err := parseCodeTestInt(args, 6, "dir")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		x, y := findColorInImage(img, x1, y1, x2, y2, colorText, sim, dir)
+		return fmt.Sprintf("%d,%d", x, y)
+	case "FindMultiColorsAll":
+		x1, err := parseCodeTestInt(args, 0, "x1")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		y1, err := parseCodeTestInt(args, 1, "y1")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		x2, err := parseCodeTestInt(args, 2, "x2")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		y2, err := parseCodeTestInt(args, 3, "y2")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		colorsText, err := parseCodeTestString(args, 4, "colors")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		sim, err := parseCodeTestFloat(args, 5, "sim")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		dir, err := parseCodeTestInt(args, 6, "dir")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		return formatFindTestPoints(findMultiColorsAllInImage(img, x1, y1, x2, y2, colorsText, sim, dir))
+	case "CmpColor":
+		x, err := parseCodeTestInt(args, 0, "x")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		y, err := parseCodeTestInt(args, 1, "y")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		colorText, err := parseCodeTestString(args, 2, "colorStr")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		sim, err := parseCodeTestFloat(args, 3, "sim")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		if !image.Pt(x, y).In(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy())) {
+			return "false"
+		}
+		return strconv.FormatBool(testColorAlternativesMatch(imagePixelNRGBA(img, x, y), colorText, sim))
+	default:
+		x1, err := parseCodeTestInt(args, 0, "x1")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		y1, err := parseCodeTestInt(args, 1, "y1")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		x2, err := parseCodeTestInt(args, 2, "x2")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		y2, err := parseCodeTestInt(args, 3, "y2")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		colorsText, err := parseCodeTestString(args, 4, "colors")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		sim, err := parseCodeTestFloat(args, 5, "sim")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		dir, err := parseCodeTestInt(args, 6, "dir")
+		if err != nil {
+			return "参数错误：" + err.Error()
+		}
+		x, y := findMultiColorsInImage(img, x1, y1, x2, y2, colorsText, sim, dir)
+		return fmt.Sprintf("%d,%d", x, y)
+	}
+}
+
 func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) string {
 	return fmt.Sprintf("{%d,%d,%d,%d,\"%s\",%s,%d,0}", x1, y1, x2, y2, colorText, sim, dir)
 }
@@ -2551,6 +2829,75 @@ func showAPIFormatDialog(parent fyne.Window, selectedFunction string, saveConfig
 	formatDialog.Show()
 }
 
+func showCodeTestDialog(parent fyne.Window, selectedFunction, precisionText, directionText string) {
+	functions := []string{"FindMultiColors", "FindColor", "FindMultiColorsAll", "CmpColor"}
+	currentFunction := normalizeImagesFunctionName(selectedFunction)
+
+	exampleEntry := widget.NewMultiLineEntry()
+	exampleEntry.Wrapping = fyne.TextWrapWord
+	exampleEntry.SetMinRowsVisible(4)
+
+	inputEntry := widget.NewMultiLineEntry()
+	inputEntry.Wrapping = fyne.TextWrapWord
+	inputEntry.SetMinRowsVisible(5)
+	inputEntry.SetPlaceHolder("请输入函数参数，例如：0, 0, 0, 0, \"FFFFFF\", 0.9, 0, 0")
+
+	resultEntry := widget.NewMultiLineEntry()
+	resultEntry.Wrapping = fyne.TextWrapWord
+	resultEntry.SetMinRowsVisible(6)
+	resultEntry.SetPlaceHolder("代码测试结果将显示在这里...")
+
+	refreshExample := func(fillInput bool) {
+		example := codeTestExampleParams(currentFunction, precisionText, directionText)
+		exampleEntry.SetText(example)
+		if fillInput {
+			inputEntry.SetText(example)
+		}
+		resultEntry.SetText("")
+	}
+
+	methodSelect := widget.NewSelect(functions, func(value string) {
+		currentFunction = normalizeImagesFunctionName(value)
+		refreshExample(true)
+	})
+
+	var codeDialog *dialog.CustomDialog
+	cancelButton := widget.NewButton("取消", func() {
+		if codeDialog != nil {
+			codeDialog.Hide()
+		}
+	})
+	testButton := widget.NewButton("代码测试", func() {
+		var img image.Image
+		if imageViewer != nil {
+			img = imageViewer.image
+		}
+		resultEntry.SetText(runCodeTestForImage(img, currentFunction, inputEntry.Text))
+	})
+	testButton.Importance = widget.HighImportance
+
+	content := container.NewBorder(
+		nil,
+		container.NewHBox(layout.NewSpacer(), cancelButton, testButton),
+		nil,
+		nil,
+		container.NewVBox(
+			container.NewBorder(nil, nil, widget.NewLabel("测试函数"), nil, methodSelect),
+			container.NewBorder(nil, nil, widget.NewLabel("参数例子"), nil, exampleEntry),
+			container.NewBorder(nil, nil, widget.NewLabel("输入参数"), nil, inputEntry),
+			container.NewBorder(nil, nil, widget.NewLabel("查找结果"), nil, resultEntry),
+		),
+	)
+
+	codeDialog = dialog.NewCustomWithoutButtons("代码测试", content, parent)
+	codeDialog.Resize(fyne.NewSize(520, 430))
+	methodSelect.SetSelected(currentFunction)
+	if methodSelect.Selected == "" {
+		refreshExample(true)
+	}
+	codeDialog.Show()
+}
+
 func refreshImagesAPIFields() {
 	if updateImagesAPIFields != nil {
 		updateImagesAPIFields()
@@ -2563,7 +2910,7 @@ func normalizeImagesFunctionName(name string) string {
 		return "FindColor"
 	case "findmulticolors", "findmulticolor":
 		return "FindMultiColors"
-	case "findmulticolorsall":
+	case "findmulticolorsall", "findmulticolorall":
 		return "FindMultiColorsAll"
 	case "cmpcolor":
 		return "CmpColor"
@@ -5714,6 +6061,9 @@ func main() {
 			imageViewer.SetFindTestHighlights(highlights)
 		}
 	})
+	codeTestBtn := widget.NewButton("代码测试", func() {
+		showCodeTestDialog(w, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
+	})
 	saveCurrentConfig = func() {
 		saveUserConfigSilently(UserConfig{
 			Precision:     strings.TrimSpace(precisionEntry.Text),
@@ -5751,7 +6101,7 @@ func main() {
 					w.Clipboard().SetContent(paramsEntry.Text)
 				})), paramsEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
-				container.NewGridWithColumns(4, genBtn, findTestBtn, makeButton("代码测试"), makeButton("图片查找")),
+				container.NewGridWithColumns(4, genBtn, findTestBtn, codeTestBtn, makeButton("图片查找")),
 			)),
 			container.NewTabItem("点阵OCR", container.NewCenter(widget.NewLabel("点阵OCR布局待实现"))),
 			container.NewTabItem("光学OCR", container.NewCenter(widget.NewLabel("光学OCR布局待实现"))),
