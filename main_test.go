@@ -3,8 +3,11 @@ package main
 import (
 	"image"
 	"image/color"
+	"math/rand"
 	"testing"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
 	fynetest "fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 )
@@ -36,6 +39,284 @@ func assertImagePoints(t *testing.T, got, want []image.Point) {
 		if got[i] != want[i] {
 			t.Fatalf("point %d mismatch: want %v got %v", i, want[i], got[i])
 		}
+	}
+}
+
+func TestParsePickCount(t *testing.T) {
+	tests := []struct {
+		text string
+		want int
+	}{
+		{text: "20个", want: 20},
+		{text: "20", want: 20},
+		{text: "", want: defaultAutoPickCount},
+		{text: "abc", want: defaultAutoPickCount},
+		{text: "0个", want: 0},
+	}
+
+	for _, tt := range tests {
+		if got := parsePickCount(tt.text); got != tt.want {
+			t.Fatalf("parsePickCount(%q) mismatch: want %d got %d", tt.text, tt.want, got)
+		}
+	}
+}
+
+func TestAutoPickRandomPointsStayInRectAndUnique(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 20, 20))
+	rect := image.Rect(2, 3, 12, 13)
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        rect,
+		Count:       10,
+		Mode:        autoPickModeRandom,
+		MinDistance: 1,
+		Rand:        rand.New(rand.NewSource(1)),
+	})
+
+	if len(points) != 10 {
+		t.Fatalf("point count mismatch: want 10 got %d (%v)", len(points), points)
+	}
+	seen := make(map[image.Point]struct{}, len(points))
+	for _, point := range points {
+		if !point.In(rect) {
+			t.Fatalf("point out of rect: %v not in %v", point, rect)
+		}
+		if _, exists := seen[point]; exists {
+			t.Fatalf("duplicate point: %v in %v", point, points)
+		}
+		seen[point] = struct{}{}
+	}
+}
+
+func TestAutoPickContourPointsPreferBoundary(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 20, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 20; x++ {
+			if x < 10 {
+				img.SetNRGBA(x, y, color.NRGBA{A: 0xff})
+			} else {
+				img.SetNRGBA(x, y, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+			}
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 20, 10),
+		Count:       5,
+		Mode:        autoPickModeContour,
+		MinDistance: 2,
+	})
+
+	if len(points) == 0 {
+		t.Fatal("expected contour points, got none")
+	}
+	for _, point := range points {
+		if point.X < 9 || point.X > 10 {
+			t.Fatalf("contour point should be near boundary x=10, got %v in %v", point, points)
+		}
+	}
+}
+
+func TestAutoPickContourPointsPureColorDoesNotPanic(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 10, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff})
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 10, 10),
+		Count:       5,
+		Mode:        autoPickModeContour,
+		MinDistance: 2,
+	})
+
+	if len(points) != 0 {
+		t.Fatalf("expected no contour points for pure color image, got %v", points)
+	}
+}
+
+func TestNormalizePickRectClampsAndNormalizes(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 10, 8))
+
+	got := normalizePickRect(img, image.Rect(8, 6, -3, 2))
+	want := image.Rect(0, 2, 8, 6)
+
+	if got != want {
+		t.Fatalf("rect mismatch: want %v got %v", want, got)
+	}
+}
+
+func TestImageViewerAddPointsBatchRefreshesOnce(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	oldColorPoints := colorPoints
+	oldImageViewer := imageViewer
+	oldRefreshColorList := refreshColorList
+	oldDefaultOffset := defaultColorPointOffset
+	t.Cleanup(func() {
+		colorPoints = oldColorPoints
+		imageViewer = oldImageViewer
+		refreshColorList = oldRefreshColorList
+		defaultColorPointOffset = oldDefaultOffset
+	})
+
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	img.SetNRGBA(1, 1, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(2, 2, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+	viewer := NewImageViewer()
+	viewer.SetImage(img)
+	imageViewer = viewer
+	colorPoints = nil
+	defaultColorPointOffset = "ABCDEF"
+
+	refreshCount := 0
+	refreshColorList = func() {
+		refreshCount++
+	}
+
+	viewer.AddPoints([]image.Point{
+		image.Pt(1, 1),
+		image.Pt(2, 2),
+		image.Pt(9, 9),
+	})
+
+	if refreshCount != 1 {
+		t.Fatalf("refresh count mismatch: want 1 got %d", refreshCount)
+	}
+	if len(colorPoints) != 2 {
+		t.Fatalf("color point count mismatch: want 2 got %d", len(colorPoints))
+	}
+	if len(viewer.markPoints) != 2 {
+		t.Fatalf("mark point count mismatch: want 2 got %d", len(viewer.markPoints))
+	}
+	if colorPoints[0].ID != 0 || colorPoints[0].Position != "1, 1" || colorPoints[0].Color != "#112233" || colorPoints[0].Offset != "ABCDEF" {
+		t.Fatalf("first color point mismatch: %+v", colorPoints[0])
+	}
+	if colorPoints[1].ID != 1 || colorPoints[1].Position != "2, 2" || colorPoints[1].Color != "#445566" {
+		t.Fatalf("second color point mismatch: %+v", colorPoints[1])
+	}
+}
+
+func TestImageViewerReplacePointsClearsListAndKeepsRange(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	oldColorPoints := colorPoints
+	oldImageViewer := imageViewer
+	oldRefreshColorList := refreshColorList
+	oldRectCoordEntry := rectCoordEntry
+	t.Cleanup(func() {
+		colorPoints = oldColorPoints
+		imageViewer = oldImageViewer
+		refreshColorList = oldRefreshColorList
+		rectCoordEntry = oldRectCoordEntry
+	})
+
+	rectCoordEntry = widget.NewEntry()
+	rectCoordEntry.SetText("1,2,3,4")
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	img.SetNRGBA(3, 3, color.NRGBA{R: 0xaa, G: 0xbb, B: 0xcc, A: 0xff})
+	viewer := NewImageViewer()
+	viewer.SetImage(img)
+	viewer.markPoints = append(viewer.markPoints, MarkPoint{X: 1, Y: 1, Color: color.White})
+	viewer.markRects = append(viewer.markRects, MarkRect{
+		X1:    1,
+		Y1:    2,
+		X2:    3,
+		Y2:    4,
+		Color: color.RGBA{255, 0, 0, 255},
+	})
+	viewer.manualRectSelected = true
+	imageViewer = viewer
+	colorPoints = []ColorPoint{
+		{ID: 0, Position: "1, 1", Color: "#111111", Selected: true},
+		{ID: 1, Position: "2, 2", Color: "#222222", Selected: true},
+	}
+
+	refreshCount := 0
+	refreshColorList = func() {
+		refreshCount++
+	}
+
+	viewer.ReplacePoints([]image.Point{image.Pt(3, 3)})
+
+	if refreshCount != 1 {
+		t.Fatalf("refresh count mismatch: want 1 got %d", refreshCount)
+	}
+	if len(colorPoints) != 1 {
+		t.Fatalf("color point count mismatch: want 1 got %d", len(colorPoints))
+	}
+	if colorPoints[0].ID != 0 || colorPoints[0].Position != "3, 3" || colorPoints[0].Color != "#AABBCC" {
+		t.Fatalf("replacement color point mismatch: %+v", colorPoints[0])
+	}
+	if len(viewer.markPoints) != 1 || viewer.markPoints[0].X != 3 || viewer.markPoints[0].Y != 3 {
+		t.Fatalf("replacement mark points mismatch: %+v", viewer.markPoints)
+	}
+	if rectCoordEntry.Text != "1,2,3,4" {
+		t.Fatalf("range text was overwritten: got %q", rectCoordEntry.Text)
+	}
+	if len(viewer.markRects) != 1 || viewer.markRects[0].X1 != 1 || viewer.markRects[0].Y1 != 2 || viewer.markRects[0].X2 != 3 || viewer.markRects[0].Y2 != 4 {
+		t.Fatalf("range rect was overwritten: %+v", viewer.markRects)
+	}
+}
+
+func TestAutoPickRangeCallbackDoesNotOverwriteRangeSelection(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	oldRectCoordEntry := rectCoordEntry
+	oldImageViewer := imageViewer
+	t.Cleanup(func() {
+		rectCoordEntry = oldRectCoordEntry
+		imageViewer = oldImageViewer
+	})
+
+	rectCoordEntry = widget.NewEntry()
+	rectCoordEntry.SetText("1,2,3,4")
+	viewer := NewImageViewer()
+	viewer.SetImage(image.NewNRGBA(image.Rect(0, 0, 20, 20)))
+	viewer.markRects = append(viewer.markRects, MarkRect{
+		X1:    1,
+		Y1:    2,
+		X2:    3,
+		Y2:    4,
+		Color: color.RGBA{255, 0, 0, 255},
+	})
+	viewer.manualRectSelected = true
+	imageViewer = viewer
+
+	var callbackRect image.Rectangle
+	viewer.SetRangeSelectModeWithCallback(func(rect image.Rectangle) {
+		callbackRect = rect
+	})
+	viewer.mouseDownX = 5
+	viewer.mouseDownY = 5
+	viewer.isDragging = true
+	viewer.dragMode = imageDragRange
+	viewer.tempRect = &MarkRect{
+		X1:    5,
+		Y1:    5,
+		X2:    10,
+		Y2:    10,
+		Color: color.RGBA{255, 0, 0, 255},
+	}
+
+	viewer.MouseUp(&desktop.MouseEvent{
+		PointEvent: fyne.PointEvent{Position: fyne.NewPos(10, 10)},
+		Button:     desktop.MouseButtonPrimary,
+	})
+
+	if callbackRect != image.Rect(5, 5, 11, 11) {
+		t.Fatalf("callback rect mismatch: got %v", callbackRect)
+	}
+	if rectCoordEntry.Text != "1,2,3,4" {
+		t.Fatalf("range text was overwritten: got %q", rectCoordEntry.Text)
+	}
+	if len(viewer.markRects) != 1 || viewer.markRects[0].X1 != 1 || viewer.markRects[0].Y1 != 2 || viewer.markRects[0].X2 != 3 || viewer.markRects[0].Y2 != 4 {
+		t.Fatalf("range rect was overwritten: %+v", viewer.markRects)
 	}
 }
 
