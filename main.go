@@ -3616,9 +3616,11 @@ func (v *ImageViewer) MouseUp(e *desktop.MouseEvent) {
 	switch v.dragMode {
 	case imageDragRange:
 		if dist > 4 && v.tempRect != nil {
-			v.AddRect(v.tempRect.X1, v.tempRect.Y1, v.tempRect.X2, v.tempRect.Y2, v.tempRect.Color)
 			selectedRange = normalizePickRect(v.image, inclusivePickRect(v.tempRect.X1, v.tempRect.Y1, v.tempRect.X2, v.tempRect.Y2))
 			rangeSelectedCallback = v.onRangeSelected
+			if rangeSelectedCallback == nil {
+				v.AddRect(v.tempRect.X1, v.tempRect.Y1, v.tempRect.X2, v.tempRect.Y2, v.tempRect.Color)
+			}
 		}
 		v.onRangeSelected = nil
 		v.SetRangeSelectMode(false)

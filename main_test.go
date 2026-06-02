@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
 	fynetest "fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 )
@@ -146,6 +148,62 @@ func TestImageViewerAddPointsBatchRefreshesOnce(t *testing.T) {
 	}
 	if colorPoints[1].ID != 1 || colorPoints[1].Position != "2, 2" || colorPoints[1].Color != "#445566" {
 		t.Fatalf("second color point mismatch: %+v", colorPoints[1])
+	}
+}
+
+func TestAutoPickRangeCallbackDoesNotOverwriteRangeSelection(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	oldRectCoordEntry := rectCoordEntry
+	oldImageViewer := imageViewer
+	t.Cleanup(func() {
+		rectCoordEntry = oldRectCoordEntry
+		imageViewer = oldImageViewer
+	})
+
+	rectCoordEntry = widget.NewEntry()
+	rectCoordEntry.SetText("1,2,3,4")
+	viewer := NewImageViewer()
+	viewer.SetImage(image.NewNRGBA(image.Rect(0, 0, 20, 20)))
+	viewer.markRects = append(viewer.markRects, MarkRect{
+		X1:    1,
+		Y1:    2,
+		X2:    3,
+		Y2:    4,
+		Color: color.RGBA{255, 0, 0, 255},
+	})
+	viewer.manualRectSelected = true
+	imageViewer = viewer
+
+	var callbackRect image.Rectangle
+	viewer.SetRangeSelectModeWithCallback(func(rect image.Rectangle) {
+		callbackRect = rect
+	})
+	viewer.mouseDownX = 5
+	viewer.mouseDownY = 5
+	viewer.isDragging = true
+	viewer.dragMode = imageDragRange
+	viewer.tempRect = &MarkRect{
+		X1:    5,
+		Y1:    5,
+		X2:    10,
+		Y2:    10,
+		Color: color.RGBA{255, 0, 0, 255},
+	}
+
+	viewer.MouseUp(&desktop.MouseEvent{
+		PointEvent: fyne.PointEvent{Position: fyne.NewPos(10, 10)},
+		Button:     desktop.MouseButtonPrimary,
+	})
+
+	if callbackRect != image.Rect(5, 5, 11, 11) {
+		t.Fatalf("callback rect mismatch: got %v", callbackRect)
+	}
+	if rectCoordEntry.Text != "1,2,3,4" {
+		t.Fatalf("range text was overwritten: got %q", rectCoordEntry.Text)
+	}
+	if len(viewer.markRects) != 1 || viewer.markRects[0].X1 != 1 || viewer.markRects[0].Y1 != 2 || viewer.markRects[0].X2 != 3 || viewer.markRects[0].Y2 != 4 {
+		t.Fatalf("range rect was overwritten: %+v", viewer.markRects)
 	}
 }
 
