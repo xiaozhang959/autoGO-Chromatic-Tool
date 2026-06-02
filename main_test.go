@@ -42,6 +42,20 @@ func assertImagePoints(t *testing.T, got, want []image.Point) {
 	}
 }
 
+func distinctPointColorBuckets(t *testing.T, img image.Image, points []image.Point) map[int]bool {
+	t.Helper()
+
+	classes := make(map[int]bool)
+	for _, point := range points {
+		class, ok := pickColorBucketAt(img, point.X, point.Y)
+		if !ok {
+			t.Fatalf("point has no color bucket: %v", point)
+		}
+		classes[class] = true
+	}
+	return classes
+}
+
 func TestParsePickCount(t *testing.T) {
 	tests := []struct {
 		text string
@@ -137,6 +151,189 @@ func TestAutoPickContourPointsPureColorDoesNotPanic(t *testing.T) {
 
 	if len(points) != 0 {
 		t.Fatalf("expected no contour points for pure color image, got %v", points)
+	}
+}
+
+func TestAutoPickHighlightPointsPreferBrightRegion(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 20, 20))
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0x18, G: 0x18, B: 0x18, A: 0xff})
+		}
+	}
+	brightRect := image.Rect(6, 7, 14, 15)
+	for y := brightRect.Min.Y; y < brightRect.Max.Y; y++ {
+		for x := brightRect.Min.X; x < brightRect.Max.X; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0xf0, G: 0xf0, B: 0xf0, A: 0xff})
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 20, 20),
+		Count:       8,
+		Mode:        autoPickModeHighlight,
+		MinDistance: 2,
+	})
+
+	if len(points) == 0 {
+		t.Fatal("expected highlight points, got none")
+	}
+	for _, point := range points {
+		if !point.In(brightRect) {
+			t.Fatalf("highlight point should be inside bright region %v, got %v in %v", brightRect, point, points)
+		}
+	}
+}
+
+func TestAutoPickHighlightPointsPureDarkReturnsEmpty(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 10, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0x10, B: 0x10, A: 0xff})
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 10, 10),
+		Count:       5,
+		Mode:        autoPickModeHighlight,
+		MinDistance: 2,
+	})
+
+	if len(points) != 0 {
+		t.Fatalf("expected no highlight points for pure dark image, got %v", points)
+	}
+}
+
+func TestAutoPickHighSaturationPointsPreferColorfulRegion(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 24, 12))
+	for y := 0; y < 12; y++ {
+		for x := 0; x < 24; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff})
+		}
+	}
+
+	redRect := image.Rect(2, 2, 9, 9)
+	for y := redRect.Min.Y; y < redRect.Max.Y; y++ {
+		for x := redRect.Min.X; x < redRect.Max.X; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0xf0, G: 0x10, B: 0x10, A: 0xff})
+		}
+	}
+	whiteRect := image.Rect(14, 2, 21, 9)
+	for y := whiteRect.Min.Y; y < whiteRect.Max.Y; y++ {
+		for x := whiteRect.Min.X; x < whiteRect.Max.X; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 24, 12),
+		Count:       6,
+		Mode:        autoPickModeHighSaturation,
+		MinDistance: 2,
+	})
+
+	if len(points) == 0 {
+		t.Fatal("expected high saturation points, got none")
+	}
+	for _, point := range points {
+		if !point.In(redRect) {
+			t.Fatalf("high saturation point should be inside colorful region %v, got %v in %v", redRect, point, points)
+		}
+	}
+}
+
+func TestAutoPickHighSaturationPointsIgnoreTransparentPixels(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 10, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0xff, A: 0})
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 10, 10),
+		Count:       5,
+		Mode:        autoPickModeHighSaturation,
+		MinDistance: 2,
+	})
+
+	if len(points) != 0 {
+		t.Fatalf("expected no high saturation points for transparent image, got %v", points)
+	}
+}
+
+func TestAutoPickColorClassRandomPointsCoverMainColors(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 24, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 24; x++ {
+			switch {
+			case x < 8:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0xf0, G: 0x10, B: 0x10, A: 0xff})
+			case x < 16:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0xf0, B: 0x10, A: 0xff})
+			default:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0x10, B: 0xf0, A: 0xff})
+			}
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 24, 10),
+		Count:       6,
+		Mode:        autoPickModeColorClassRandom,
+		MinDistance: 1,
+		Rand:        rand.New(rand.NewSource(2)),
+	})
+
+	if len(points) != 6 {
+		t.Fatalf("point count mismatch: want 6 got %d (%v)", len(points), points)
+	}
+	classes := distinctPointColorBuckets(t, img, points)
+	if len(classes) != 3 {
+		t.Fatalf("expected points to cover 3 color classes, got %d (%v)", len(classes), points)
+	}
+}
+
+func TestAutoPickColorClassContourPointsPreferColorBoundaries(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 24, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 24; x++ {
+			switch {
+			case x < 8:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0xf0, G: 0x10, B: 0x10, A: 0xff})
+			case x < 16:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0xf0, B: 0x10, A: 0xff})
+			default:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0x10, B: 0xf0, A: 0xff})
+			}
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 24, 10),
+		Count:       6,
+		Mode:        autoPickModeColorClassContour,
+		MinDistance: 1,
+	})
+
+	if len(points) == 0 {
+		t.Fatal("expected color class contour points, got none")
+	}
+	for _, point := range points {
+		if point.X != 7 && point.X != 8 && point.X != 15 && point.X != 16 {
+			t.Fatalf("color class contour point should be on color boundary, got %v in %v", point, points)
+		}
+	}
+	classes := distinctPointColorBuckets(t, img, points)
+	if len(classes) < 2 {
+		t.Fatalf("expected contour points to cover multiple color classes, got %d (%v)", len(classes), points)
 	}
 }
 
