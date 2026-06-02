@@ -2558,6 +2558,64 @@ func runCodeTestForImage(img image.Image, functionName, paramsText string) strin
 	}
 }
 
+func parseCodeTestPointsResult(result string) []image.Point {
+	lines := strings.Split(result, "\n")
+	points := make([]image.Point, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "{")
+		line = strings.TrimSuffix(line, "}")
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		x, errX := strconv.Atoi(fields[0])
+		y, errY := strconv.Atoi(fields[1])
+		if errX == nil && errY == nil && x >= 0 && y >= 0 {
+			points = append(points, image.Pt(x, y))
+		}
+	}
+	return points
+}
+
+func codeTestHighlightPointsFromResult(functionName, paramsText, result string) []image.Point {
+	result = strings.TrimSpace(result)
+	if result == "" || strings.HasPrefix(result, "参数错误：") || strings.HasPrefix(result, "请先") {
+		return nil
+	}
+
+	switch normalizeImagesFunctionName(functionName) {
+	case "FindMultiColorsAll":
+		return parseCodeTestPointsResult(result)
+	case "CmpColor":
+		if result != "true" {
+			return nil
+		}
+		args, err := splitCodeTestArgs(paramsText)
+		if err != nil {
+			return nil
+		}
+		x, err := parseCodeTestInt(args, 0, "x")
+		if err != nil {
+			return nil
+		}
+		y, err := parseCodeTestInt(args, 1, "y")
+		if err != nil {
+			return nil
+		}
+		if x < 0 || y < 0 {
+			return nil
+		}
+		return []image.Point{image.Pt(x, y)}
+	default:
+		x, y, ok := parsePointPosition(result)
+		if !ok || x < 0 || y < 0 {
+			return nil
+		}
+		return []image.Point{image.Pt(x, y)}
+	}
+}
+
 func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) string {
 	return fmt.Sprintf("{%d,%d,%d,%d,\"%s\",%s,%d,0}", x1, y1, x2, y2, colorText, sim, dir)
 }
@@ -2847,37 +2905,40 @@ func showCodeTestDialog(parent fyne.Window, selectedFunction, precisionText, dir
 	resultEntry.SetMinRowsVisible(6)
 	resultEntry.SetPlaceHolder("代码测试结果将显示在这里...")
 
-	refreshExample := func(fillInput bool) {
+	refreshExample := func() {
 		example := codeTestExampleParams(currentFunction, precisionText, directionText)
 		exampleEntry.SetText(example)
-		if fillInput {
-			inputEntry.SetText(example)
-		}
 		resultEntry.SetText("")
 	}
 
 	methodSelect := widget.NewSelect(functions, func(value string) {
 		currentFunction = normalizeImagesFunctionName(value)
-		refreshExample(true)
+		refreshExample()
 	})
 
 	var codeDialog *dialog.CustomDialog
-	cancelButton := widget.NewButton("取消", func() {
+	closeDialog := func() {
 		if codeDialog != nil {
 			codeDialog.Hide()
 		}
-	})
+	}
+	topCloseButton := widget.NewButton("关闭", closeDialog)
+	cancelButton := widget.NewButton("取消", closeDialog)
 	testButton := widget.NewButton("代码测试", func() {
 		var img image.Image
 		if imageViewer != nil {
 			img = imageViewer.image
 		}
-		resultEntry.SetText(runCodeTestForImage(img, currentFunction, inputEntry.Text))
+		result := runCodeTestForImage(img, currentFunction, inputEntry.Text)
+		resultEntry.SetText(result)
+		if imageViewer != nil {
+			imageViewer.SetFindTestHighlights(codeTestHighlightPointsFromResult(currentFunction, inputEntry.Text, result))
+		}
 	})
 	testButton.Importance = widget.HighImportance
 
 	content := container.NewBorder(
-		nil,
+		container.NewBorder(nil, nil, widget.NewLabel("代码测试"), topCloseButton),
 		container.NewHBox(layout.NewSpacer(), cancelButton, testButton),
 		nil,
 		nil,
@@ -2893,7 +2954,7 @@ func showCodeTestDialog(parent fyne.Window, selectedFunction, precisionText, dir
 	codeDialog.Resize(fyne.NewSize(520, 430))
 	methodSelect.SetSelected(currentFunction)
 	if methodSelect.Selected == "" {
-		refreshExample(true)
+		refreshExample()
 	}
 	codeDialog.Show()
 }

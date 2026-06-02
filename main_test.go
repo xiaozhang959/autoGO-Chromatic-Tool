@@ -361,3 +361,50 @@ func TestRunCodeTestForImageCmpColor(t *testing.T) {
 		t.Fatalf("code test cmp mismatch: got %s", got)
 	}
 }
+
+func TestCodeTestHighlightPointsFromResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		function string
+		params   string
+		result   string
+		want     []image.Point
+	}{
+		{
+			name:     "FindMultiColors",
+			function: "FindMultiColors",
+			result:   "2,3",
+			want:     []image.Point{image.Pt(2, 3)},
+		},
+		{
+			name:     "FindMultiColors not found",
+			function: "FindMultiColors",
+			result:   "-1,-1",
+		},
+		{
+			name:     "FindMultiColorsAll",
+			function: "FindMultiColorsAll",
+			result:   "[\n    {1 1}\n    {3 2}\n]",
+			want:     []image.Point{image.Pt(1, 1), image.Pt(3, 2)},
+		},
+		{
+			name:     "CmpColor",
+			function: "CmpColor",
+			params:   `2, 3, "AABBCC-000000", 1.0, 0`,
+			result:   "true",
+			want:     []image.Point{image.Pt(2, 3)},
+		},
+		{
+			name:     "error result",
+			function: "FindColor",
+			result:   "参数错误：x1 必须是整数",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := codeTestHighlightPointsFromResult(tt.function, tt.params, tt.result)
+			assertImagePoints(t, got, tt.want)
+		})
+	}
+}
