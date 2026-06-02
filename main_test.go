@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
+	"math/rand"
 	"testing"
 
 	fynetest "fyne.io/fyne/v2/test"
@@ -36,6 +37,115 @@ func assertImagePoints(t *testing.T, got, want []image.Point) {
 		if got[i] != want[i] {
 			t.Fatalf("point %d mismatch: want %v got %v", i, want[i], got[i])
 		}
+	}
+}
+
+func TestParsePickCount(t *testing.T) {
+	tests := []struct {
+		text string
+		want int
+	}{
+		{text: "20个", want: 20},
+		{text: "20", want: 20},
+		{text: "", want: defaultAutoPickCount},
+		{text: "abc", want: defaultAutoPickCount},
+		{text: "0个", want: 0},
+	}
+
+	for _, tt := range tests {
+		if got := parsePickCount(tt.text); got != tt.want {
+			t.Fatalf("parsePickCount(%q) mismatch: want %d got %d", tt.text, tt.want, got)
+		}
+	}
+}
+
+func TestAutoPickRandomPointsStayInRectAndUnique(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 20, 20))
+	rect := image.Rect(2, 3, 12, 13)
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        rect,
+		Count:       10,
+		Mode:        autoPickModeRandom,
+		MinDistance: 1,
+		Rand:        rand.New(rand.NewSource(1)),
+	})
+
+	if len(points) != 10 {
+		t.Fatalf("point count mismatch: want 10 got %d (%v)", len(points), points)
+	}
+	seen := make(map[image.Point]struct{}, len(points))
+	for _, point := range points {
+		if !point.In(rect) {
+			t.Fatalf("point out of rect: %v not in %v", point, rect)
+		}
+		if _, exists := seen[point]; exists {
+			t.Fatalf("duplicate point: %v in %v", point, points)
+		}
+		seen[point] = struct{}{}
+	}
+}
+
+func TestNormalizePickRectClampsAndNormalizes(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 10, 8))
+
+	got := normalizePickRect(img, image.Rect(8, 6, -3, 2))
+	want := image.Rect(0, 2, 8, 6)
+
+	if got != want {
+		t.Fatalf("rect mismatch: want %v got %v", want, got)
+	}
+}
+
+func TestImageViewerAddPointsBatchRefreshesOnce(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	oldColorPoints := colorPoints
+	oldImageViewer := imageViewer
+	oldRefreshColorList := refreshColorList
+	oldDefaultOffset := defaultColorPointOffset
+	t.Cleanup(func() {
+		colorPoints = oldColorPoints
+		imageViewer = oldImageViewer
+		refreshColorList = oldRefreshColorList
+		defaultColorPointOffset = oldDefaultOffset
+	})
+
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	img.SetNRGBA(1, 1, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(2, 2, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+	viewer := NewImageViewer()
+	viewer.SetImage(img)
+	imageViewer = viewer
+	colorPoints = nil
+	defaultColorPointOffset = "ABCDEF"
+
+	refreshCount := 0
+	refreshColorList = func() {
+		refreshCount++
+	}
+
+	viewer.AddPoints([]image.Point{
+		image.Pt(1, 1),
+		image.Pt(2, 2),
+		image.Pt(9, 9),
+	})
+
+	if refreshCount != 1 {
+		t.Fatalf("refresh count mismatch: want 1 got %d", refreshCount)
+	}
+	if len(colorPoints) != 2 {
+		t.Fatalf("color point count mismatch: want 2 got %d", len(colorPoints))
+	}
+	if len(viewer.markPoints) != 2 {
+		t.Fatalf("mark point count mismatch: want 2 got %d", len(viewer.markPoints))
+	}
+	if colorPoints[0].ID != 0 || colorPoints[0].Position != "1, 1" || colorPoints[0].Color != "#112233" || colorPoints[0].Offset != "ABCDEF" {
+		t.Fatalf("first color point mismatch: %+v", colorPoints[0])
+	}
+	if colorPoints[1].ID != 1 || colorPoints[1].Position != "2, 2" || colorPoints[1].Color != "#445566" {
+		t.Fatalf("second color point mismatch: %+v", colorPoints[1])
 	}
 }
 

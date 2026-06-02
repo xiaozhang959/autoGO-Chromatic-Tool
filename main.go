@@ -1318,6 +1318,7 @@ type ImageViewer struct {
 	onMouseUp          func(x, y int)
 	onRightClick       func(x, y int)
 	onRangeModeChanged func(enabled bool)
+	onRangeSelected    func(rect image.Rectangle)
 	getGridParams      func() (cols, rows, spacing int, hasParams bool) // 获取点阵参数的回调
 	scrollContainer    *container.Scroll                                // 滚动容器引用
 	magnifier          *MagnifierWidget                                 // 放大镜引用
@@ -3389,11 +3390,17 @@ func (v *ImageViewer) SetRangeSelectMode(enabled bool) {
 	if !enabled {
 		v.tempRect = nil
 		v.dragMode = imageDragNone
+		v.onRangeSelected = nil
 	}
 	if v.onRangeModeChanged != nil {
 		v.onRangeModeChanged(enabled)
 	}
 	v.Refresh()
+}
+
+func (v *ImageViewer) SetRangeSelectModeWithCallback(callback func(image.Rectangle)) {
+	v.onRangeSelected = callback
+	v.SetRangeSelectMode(true)
 }
 
 func (v *ImageViewer) hideContextMenu() {
@@ -3604,11 +3611,16 @@ func (v *ImageViewer) MouseUp(e *desktop.MouseEvent) {
 	// 计算按下和弹起位置的距离
 	dist := distance(v.mouseDownX, v.mouseDownY, mouseX, mouseY)
 
+	var rangeSelectedCallback func(image.Rectangle)
+	var selectedRange image.Rectangle
 	switch v.dragMode {
 	case imageDragRange:
 		if dist > 4 && v.tempRect != nil {
 			v.AddRect(v.tempRect.X1, v.tempRect.Y1, v.tempRect.X2, v.tempRect.Y2, v.tempRect.Color)
+			selectedRange = normalizePickRect(v.image, inclusivePickRect(v.tempRect.X1, v.tempRect.Y1, v.tempRect.X2, v.tempRect.Y2))
+			rangeSelectedCallback = v.onRangeSelected
 		}
+		v.onRangeSelected = nil
 		v.SetRangeSelectMode(false)
 	case imageDragPoint:
 		if dist <= 4 {
@@ -3634,6 +3646,9 @@ func (v *ImageViewer) MouseUp(e *desktop.MouseEvent) {
 	// 调用回调函数
 	if v.onMouseUp != nil {
 		v.onMouseUp(mouseX, mouseY)
+	}
+	if rangeSelectedCallback != nil && !selectedRange.Empty() {
+		rangeSelectedCallback(selectedRange)
 	}
 }
 
@@ -4578,6 +4593,52 @@ func (v *ImageViewer) AddPoint(x, y int, c color.Color) {
 	v.updateBoundingBox()
 
 	v.Refresh() // 刷新视图以显示新点
+}
+
+func colorPointFromImage(img image.Image, p image.Point) (MarkPoint, ColorPoint, bool) {
+	hexColor, pixelColor, ok := colorHexAtImage(img, p.X, p.Y)
+	if !ok {
+		return MarkPoint{}, ColorPoint{}, false
+	}
+
+	return MarkPoint{
+			X:     p.X,
+			Y:     p.Y,
+			Color: getInverseColor(pixelColor),
+		}, ColorPoint{
+			Position: fmt.Sprintf("%d, %d", p.X, p.Y),
+			Color:    hexColor,
+			Offset:   defaultColorPointOffset,
+			Selected: true,
+		}, true
+}
+
+func (v *ImageViewer) AddPoints(points []image.Point) {
+	if v.image == nil || len(points) == 0 {
+		return
+	}
+
+	added := 0
+	for _, point := range points {
+		mark, item, ok := colorPointFromImage(v.image, point)
+		if !ok {
+			continue
+		}
+
+		item.ID = len(colorPoints)
+		v.markPoints = append(v.markPoints, mark)
+		colorPoints = append(colorPoints, item)
+		added++
+	}
+	if added == 0 {
+		return
+	}
+
+	v.updateBoundingBox()
+	if refreshColorList != nil {
+		refreshColorList()
+	}
+	v.Refresh()
 }
 
 // 批量添加NxN点阵的颜色点
@@ -5825,6 +5886,72 @@ func main() {
 			saveCurrentConfig()
 		}
 	}
+	startAutoPick := func() {
+		if imageViewer == nil || imageViewer.image == nil {
+			dialog.ShowInformation("提示", "请先加载或截图后再自动取色", w)
+			return
+		}
+
+		mode := strings.TrimSpace(pickModeSelect.Selected)
+		if mode == "" {
+			mode = autoPickModeRandom
+		}
+		if mode != autoPickModeRandom {
+			dialog.ShowInformation("提示", fmt.Sprintf("当前仅已实现「%s」模式", autoPickModeRandom), w)
+			return
+		}
+
+		count := parsePickCount(pickCountEntry.Text)
+		if count <= 0 {
+			dialog.ShowInformation("提示", "取色个数需要大于 0", w)
+			return
+		}
+
+		viewer := imageViewer
+		viewer.SetRangeSelectModeWithCallback(func(rect image.Rectangle) {
+			if imageViewer != viewer || viewer.image == nil {
+				dialog.ShowInformation("自动取色", "当前图像已切换，请重新框选", w)
+				return
+			}
+
+			rect = normalizePickRect(viewer.image, rect)
+			if rect.Empty() {
+				dialog.ShowInformation("自动取色", "选择的取色区域无效", w)
+				return
+			}
+
+			message := fmt.Sprintf(
+				"确认在区域 %d,%d,%d,%d 内按「%s」生成 %d 个取色点？",
+				rect.Min.X, rect.Min.Y, rect.Max.X-1, rect.Max.Y-1, mode, count,
+			)
+			dialog.NewCustomConfirm("自动取色", "确认", "取消", widget.NewLabel(message), func(confirmed bool) {
+				if !confirmed {
+					return
+				}
+				if imageViewer != viewer || viewer.image == nil {
+					dialog.ShowInformation("自动取色", "当前图像已切换，请重新框选", w)
+					return
+				}
+
+				points := autoPickPoints(autoPickRequest{
+					Image: viewer.image,
+					Rect:  rect,
+					Count: count,
+					Mode:  mode,
+				})
+				if len(points) == 0 {
+					dialog.ShowInformation("自动取色", "未生成取色点，请尝试扩大选区或降低取色个数", w)
+					return
+				}
+				viewer.AddPoints(points)
+			}, w).Show()
+		})
+	}
+	autoPickBtn := widget.NewButton("自动取色 (CTRL+A)", startAutoPick)
+	autoPickBtn.Importance = widget.MediumImportance
+	w.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyA, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) {
+		startAutoPick()
+	})
 	applyRangeCheck := widget.NewCheck("选取后应用范围", func(bool) {
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
@@ -5852,7 +5979,7 @@ func main() {
 		originalSizeBtn,
 		makeButton("抓取节点"),
 		clearFindMarksBtn,
-		makeButton("自动取色 (CTRL+A)"),
+		autoPickBtn,
 		pickModeSelect,
 		container.NewBorder(nil, nil, widget.NewLabel("取色个数"), nil, pickCountEntry),
 		applyRangeCheck,
