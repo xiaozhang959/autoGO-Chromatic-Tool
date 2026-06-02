@@ -240,6 +240,34 @@ func TestFindTestHighlightRectsUsesLargerBox(t *testing.T) {
 	}
 }
 
+func TestNearestColorPointIndex(t *testing.T) {
+	points := []ColorPoint{
+		{Position: "10, 10"},
+		{Position: "20, 20"},
+		{Position: "bad"},
+	}
+
+	if got := nearestColorPointIndex(points, 18, 19, 12); got != 1 {
+		t.Fatalf("nearest point mismatch: got %d", got)
+	}
+	if got := nearestColorPointIndex(points, 40, 40, 12); got != -1 {
+		t.Fatalf("out of range point mismatch: got %d", got)
+	}
+}
+
+func TestLinkedPointHighlightRects(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 60, 60))
+
+	rects := linkedPointHighlightRects(img, []image.Point{image.Pt(30, 30)})
+
+	if len(rects) != 1 {
+		t.Fatalf("rect count mismatch: got %d", len(rects))
+	}
+	if rects[0].X1 != 16 || rects[0].Y1 != 16 || rects[0].X2 != 45 || rects[0].Y2 != 45 {
+		t.Fatalf("linked rect mismatch: got %+v", rects[0])
+	}
+}
+
 func TestRunImageFindTestHighlightPointsFindMultiColorsAll(t *testing.T) {
 	withColorPointsForTest(t, []ColorPoint{
 		{Position: "0, 0", Color: "#112233", Offset: "000000", Selected: true},
