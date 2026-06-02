@@ -58,7 +58,6 @@ func ensureCapDexOnDevice(deviceID string) {
 
 	// 执行 adb push
 	log.Printf("正在向设备 %s 推送 cap.dex...", deviceID)
-	adbExec("-s", deviceID, "push", capDexPath, "/data/local/tmp/cap.dex")
-	log.Printf("cap.dex 推送完成: %s", deviceID)
+	output := adbExec("-s", deviceID, "push", capDexPath, "/data/local/tmp/cap.dex")
+	log.Printf("cap.dex 推送完成: %s output=%q", deviceID, logPreview(output, 500))
 }
-
