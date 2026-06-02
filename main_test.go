@@ -89,6 +89,57 @@ func TestAutoPickRandomPointsStayInRectAndUnique(t *testing.T) {
 	}
 }
 
+func TestAutoPickContourPointsPreferBoundary(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 20, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 20; x++ {
+			if x < 10 {
+				img.SetNRGBA(x, y, color.NRGBA{A: 0xff})
+			} else {
+				img.SetNRGBA(x, y, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+			}
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 20, 10),
+		Count:       5,
+		Mode:        autoPickModeContour,
+		MinDistance: 2,
+	})
+
+	if len(points) == 0 {
+		t.Fatal("expected contour points, got none")
+	}
+	for _, point := range points {
+		if point.X < 9 || point.X > 10 {
+			t.Fatalf("contour point should be near boundary x=10, got %v in %v", point, points)
+		}
+	}
+}
+
+func TestAutoPickContourPointsPureColorDoesNotPanic(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 10, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 0x80, G: 0x80, B: 0x80, A: 0xff})
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 10, 10),
+		Count:       5,
+		Mode:        autoPickModeContour,
+		MinDistance: 2,
+	})
+
+	if len(points) != 0 {
+		t.Fatalf("expected no contour points for pure color image, got %v", points)
+	}
+}
+
 func TestNormalizePickRectClampsAndNormalizes(t *testing.T) {
 	img := image.NewNRGBA(image.Rect(0, 0, 10, 8))
 

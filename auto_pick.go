@@ -4,6 +4,7 @@ import (
 	"image"
 	"math"
 	"math/rand"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,8 +12,15 @@ import (
 
 const (
 	autoPickModeRandom   = "随机取点"
+	autoPickModeContour  = "轮廓取点"
 	defaultAutoPickCount = 20
 )
+
+type autoPickCandidate struct {
+	Point image.Point
+	Score float64
+	Class int
+}
 
 type autoPickRequest struct {
 	Image       image.Image
@@ -37,8 +45,19 @@ func autoPickPoints(req autoPickRequest) []image.Point {
 	switch req.Mode {
 	case autoPickModeRandom:
 		return pickRandomPoints(rect, req.Count, minDistance, req.Rand)
+	case autoPickModeContour:
+		return pickContourPoints(req.Image, rect, req.Count, minDistance)
 	default:
 		return nil
+	}
+}
+
+func supportedAutoPickMode(mode string) bool {
+	switch mode {
+	case autoPickModeRandom, autoPickModeContour:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -191,4 +210,64 @@ func appendPickPoint(points *[]image.Point, seen map[image.Point]struct{}, p ima
 	seen[p] = struct{}{}
 	*points = append(*points, p)
 	return true
+}
+
+func pickContourPoints(img image.Image, rect image.Rectangle, count, minDistance int) []image.Point {
+	if img == nil || rect.Empty() || count <= 0 {
+		return nil
+	}
+
+	candidates := make([]autoPickCandidate, 0, rect.Dx()*rect.Dy())
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		for x := rect.Min.X; x < rect.Max.X; x++ {
+			left := pickLumaAt(img, max(rect.Min.X, x-1), y)
+			right := pickLumaAt(img, min(rect.Max.X-1, x+1), y)
+			top := pickLumaAt(img, x, max(rect.Min.Y, y-1))
+			bottom := pickLumaAt(img, x, min(rect.Max.Y-1, y+1))
+			score := math.Abs(right-left) + math.Abs(bottom-top)
+			if score <= 0 {
+				continue
+			}
+
+			candidates = append(candidates, autoPickCandidate{
+				Point: image.Pt(x, y),
+				Score: score,
+			})
+		}
+	}
+
+	return pickTopCandidates(candidates, count, minDistance)
+}
+
+func pickTopCandidates(candidates []autoPickCandidate, count, minDistance int) []image.Point {
+	if len(candidates) == 0 || count <= 0 {
+		return nil
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Score != candidates[j].Score {
+			return candidates[i].Score > candidates[j].Score
+		}
+		if candidates[i].Point.Y != candidates[j].Point.Y {
+			return candidates[i].Point.Y < candidates[j].Point.Y
+		}
+		return candidates[i].Point.X < candidates[j].Point.X
+	})
+
+	points := make([]image.Point, 0, min(count, len(candidates)))
+	for _, candidate := range candidates {
+		if len(points) >= count {
+			break
+		}
+		if !pointDistanceOK(points, candidate.Point, minDistance) {
+			continue
+		}
+		points = append(points, candidate.Point)
+	}
+	return points
+}
+
+func pickLumaAt(img image.Image, x, y int) float64 {
+	r, g, b, _ := img.At(x, y).RGBA()
+	return 0.299*float64(uint8(r>>8)) + 0.587*float64(uint8(g>>8)) + 0.114*float64(uint8(b>>8))
 }

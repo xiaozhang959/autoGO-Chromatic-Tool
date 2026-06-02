@@ -5898,8 +5898,8 @@ func main() {
 		if mode == "" {
 			mode = autoPickModeRandom
 		}
-		if mode != autoPickModeRandom {
-			dialog.ShowInformation("提示", fmt.Sprintf("当前仅已实现「%s」模式", autoPickModeRandom), w)
+		if !supportedAutoPickMode(mode) {
+			dialog.ShowInformation("提示", fmt.Sprintf("当前仅已实现「%s」和「%s」模式", autoPickModeRandom, autoPickModeContour), w)
 			return
 		}
 
