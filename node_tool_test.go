@@ -91,3 +91,24 @@ func TestSelectedXPath(t *testing.T) {
 		t.Fatalf("expected concat literal for mixed quotes, got %s", xpath)
 	}
 }
+
+func TestSmallestNodeAtPoint(t *testing.T) {
+	root := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 100, 100)}
+	container := &AndroidUINode{Number: 2, Depth: 1, Bounds: image.Rect(10, 10, 90, 90)}
+	button := &AndroidUINode{Number: 3, Depth: 2, Bounds: image.Rect(20, 20, 40, 40)}
+	tool := &AndroidNodeTool{
+		snapshot: &AndroidNodeSnapshot{
+			Nodes: []*AndroidUINode{root, container, button},
+		},
+	}
+
+	if got := tool.smallestNodeAtPoint(image.Pt(25, 25)); got != button {
+		t.Fatalf("expected smallest button node, got %#v", got)
+	}
+	if got := tool.smallestNodeAtPoint(image.Pt(95, 95)); got != root {
+		t.Fatalf("expected root node, got %#v", got)
+	}
+	if got := tool.smallestNodeAtPoint(image.Pt(120, 120)); got != nil {
+		t.Fatalf("expected nil outside nodes, got %#v", got)
+	}
+}

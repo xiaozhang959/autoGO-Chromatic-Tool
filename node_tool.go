@@ -44,6 +44,7 @@ type AndroidNodeTool struct {
 
 	getSelectedDevice func() string
 	getImageViewer    func() *ImageViewer
+	openNodeImage     func(image.Image, func(int, int)) *ImageViewer
 	onOpen            func()
 
 	root             fyne.CanvasObject
@@ -65,13 +66,16 @@ type AndroidNodeTool struct {
 	filteredNodes []*AndroidUINode
 	selectedNode  *AndroidUINode
 	attrRows      []androidNodeAttrRow
+	nodeViewer    *ImageViewer
+	syncingList   bool
 }
 
-func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImageViewer func() *ImageViewer) *AndroidNodeTool {
+func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImageViewer func() *ImageViewer, openNodeImage func(image.Image, func(int, int)) *ImageViewer) *AndroidNodeTool {
 	tool := &AndroidNodeTool{
 		window:            w,
 		getSelectedDevice: getSelectedDevice,
 		getImageViewer:    getImageViewer,
+		openNodeImage:     openNodeImage,
 		filteredNodes:     make([]*AndroidUINode, 0),
 		attrRows:          make([]androidNodeAttrRow, 0),
 	}
@@ -125,6 +129,9 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		},
 	)
 	tool.nodeList.OnSelected = func(id widget.ListItemID) {
+		if tool.syncingList {
+			return
+		}
 		if id < 0 || id >= len(tool.filteredNodes) {
 			return
 		}
@@ -247,9 +254,20 @@ func (t *AndroidNodeTool) Capture() {
 	}
 
 	t.setBusy(true)
-	t.setStatus("正在抓取节点...")
+	t.setStatus("正在截图并抓取节点...")
 
 	go func() {
+		capturedImg, captureErr := captureScreenWithADB(device)
+		if captureErr != nil {
+			fyne.Do(func() {
+				t.setBusy(false)
+				t.setStatus("抓取节点截图失败")
+				dialog.ShowError(fmt.Errorf("抓取节点截图失败: %v", captureErr), t.window)
+			})
+			return
+		}
+		capturedImg = convertToNRGBA(capturedImg)
+
 		snapshot, err := captureAndroidNodeSnapshot(device, t.simpleCheck.Checked)
 		fyne.Do(func() {
 			t.setBusy(false)
@@ -259,6 +277,11 @@ func (t *AndroidNodeTool) Capture() {
 				return
 			}
 
+			if t.openNodeImage != nil {
+				t.nodeViewer = t.openNodeImage(capturedImg, func(x, y int) {
+					t.selectNodeAtPoint(x, y)
+				})
+			}
 			t.setSnapshot(snapshot)
 		})
 	}()
@@ -286,6 +309,7 @@ func (t *AndroidNodeTool) setSnapshot(snapshot *AndroidNodeSnapshot) {
 	t.snapshot = snapshot
 	t.selectedNode = nil
 	t.attrRows = t.attrRows[:0]
+	t.updateNodeOverlay()
 	t.applySearch()
 
 	t.setStatus(fmt.Sprintf("已抓取 %d 个节点 · 设备: %s", len(snapshot.Nodes), snapshot.Device))
@@ -307,12 +331,12 @@ func (t *AndroidNodeTool) applySearch() {
 
 	if len(t.filteredNodes) > 0 {
 		t.selectNode(t.filteredNodes[0])
-		t.nodeList.Select(0)
 	} else {
 		t.selectedNode = nil
 		t.attrRows = t.attrRows[:0]
 		t.refreshSelector()
 		t.refreshLists()
+		t.clearSelectedNodeOverlay()
 		t.setStatus(fmt.Sprintf("没有匹配节点 · 总节点: %d", len(t.snapshot.Nodes)))
 	}
 }
@@ -338,9 +362,13 @@ func (t *AndroidNodeTool) selectRelative(offset int) {
 }
 
 func (t *AndroidNodeTool) selectNode(node *AndroidUINode) {
+	if node == nil {
+		return
+	}
 	t.selectedNode = node
 	t.attrRows = buildAndroidNodeAttrRows(node)
 	t.refreshSelector()
+	t.syncNodeListSelection(node)
 	t.refreshLists()
 	t.highlightSelectedNode()
 }
@@ -358,11 +386,107 @@ func (t *AndroidNodeTool) highlightSelectedNode() {
 	if t.selectedNode == nil {
 		return
 	}
-	viewer := t.getImageViewer()
+	viewer := t.activeNodeViewer()
 	if viewer == nil || viewer.image == nil {
 		return
 	}
 	viewer.SetNodeHighlightRect(t.selectedNode.Bounds)
+}
+
+func (t *AndroidNodeTool) clearSelectedNodeOverlay() {
+	viewer := t.activeNodeViewer()
+	if viewer == nil || viewer.image == nil {
+		return
+	}
+	viewer.SetNodeHighlightRect(image.Rectangle{})
+}
+
+func (t *AndroidNodeTool) activeNodeViewer() *ImageViewer {
+	if t.nodeViewer != nil {
+		return t.nodeViewer
+	}
+	if t.getImageViewer == nil {
+		return nil
+	}
+	return t.getImageViewer()
+}
+
+func (t *AndroidNodeTool) updateNodeOverlay() {
+	viewer := t.activeNodeViewer()
+	if viewer == nil || viewer.image == nil || t.snapshot == nil {
+		return
+	}
+
+	rects := make([]image.Rectangle, 0, len(t.snapshot.Nodes))
+	for _, node := range t.snapshot.Nodes {
+		if node == nil || node.Bounds.Empty() {
+			continue
+		}
+		rects = append(rects, node.Bounds)
+	}
+	viewer.SetNodeOverlayRects(rects)
+}
+
+func (t *AndroidNodeTool) syncNodeListSelection(node *AndroidUINode) {
+	if t.nodeList == nil || node == nil {
+		return
+	}
+
+	index := t.filteredNodeIndex(node)
+	if index < 0 {
+		return
+	}
+
+	t.syncingList = true
+	t.nodeList.Select(index)
+	t.syncingList = false
+}
+
+func (t *AndroidNodeTool) filteredNodeIndex(node *AndroidUINode) int {
+	for i, candidate := range t.filteredNodes {
+		if candidate == node {
+			return i
+		}
+	}
+	return -1
+}
+
+func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
+	node := t.smallestNodeAtPoint(image.Pt(x, y))
+	if node == nil {
+		return
+	}
+
+	if t.filteredNodeIndex(node) < 0 && t.snapshot != nil {
+		t.searchEntry.SetText("")
+		t.filteredNodes = append(t.filteredNodes[:0], t.snapshot.Nodes...)
+	}
+
+	t.selectNode(node)
+	t.setStatus(fmt.Sprintf("已选择节点 %03d · %s", node.Number, androidNodeSummary(node)))
+}
+
+func (t *AndroidNodeTool) smallestNodeAtPoint(point image.Point) *AndroidUINode {
+	if t.snapshot == nil {
+		return nil
+	}
+
+	var best *AndroidUINode
+	bestArea := 0
+	for _, node := range t.snapshot.Nodes {
+		if node == nil || node.Bounds.Empty() || !point.In(node.Bounds) {
+			continue
+		}
+		area := node.Bounds.Dx() * node.Bounds.Dy()
+		if area <= 0 {
+			continue
+		}
+		if best == nil || area < bestArea || (area == bestArea && node.Depth > best.Depth) {
+			best = node
+			bestArea = area
+		}
+	}
+	return best
 }
 
 func (t *AndroidNodeTool) setAllAttrRows(selected bool) {

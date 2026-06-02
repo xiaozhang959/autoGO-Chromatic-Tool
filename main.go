@@ -1337,6 +1337,8 @@ type ImageViewer struct {
 	markRects          []MarkRect  // 存储矩形标记
 	findTestRects      []MarkRect  // 存储找色测试结果高亮框
 	linkedPointRects   []MarkRect  // 存储图像点和列表联动高亮框
+	nodeOverlayRects   []MarkRect  // 存储节点工具全部节点框
+	nodeSelectedRects  []MarkRect  // 存储节点工具当前选中节点框
 	mouseDownX         int         // 鼠标按下时的X坐标
 	mouseDownY         int         // 鼠标按下时的Y坐标
 	isDragging         bool        // 是否正在拖动
@@ -3296,18 +3298,53 @@ func (v *ImageViewer) SetNodeHighlightRect(rect image.Rectangle) {
 
 	rect = rect.Intersect(v.image.Bounds())
 	if rect.Empty() {
-		v.ClearFindTestHighlights()
+		v.nodeSelectedRects = v.nodeSelectedRects[:0]
+		v.Refresh()
 		return
 	}
 
-	v.findTestRects = []MarkRect{{
+	v.nodeSelectedRects = []MarkRect{{
 		X1:    rect.Min.X,
 		Y1:    rect.Min.Y,
 		X2:    rect.Max.X,
 		Y2:    rect.Max.Y,
-		Color: color.NRGBA{0, 200, 255, 255},
+		Color: color.NRGBA{255, 170, 0, 255},
 	}}
 	v.Refresh()
+}
+
+func (v *ImageViewer) SetNodeOverlayRects(rects []image.Rectangle) {
+	if v == nil || v.image == nil {
+		return
+	}
+
+	bounds := v.image.Bounds()
+	v.nodeOverlayRects = v.nodeOverlayRects[:0]
+	for _, rect := range rects {
+		rect = rect.Intersect(bounds)
+		if rect.Empty() {
+			continue
+		}
+		v.nodeOverlayRects = append(v.nodeOverlayRects, MarkRect{
+			X1:    rect.Min.X,
+			Y1:    rect.Min.Y,
+			X2:    rect.Max.X,
+			Y2:    rect.Max.Y,
+			Color: color.NRGBA{0, 180, 255, 170},
+		})
+	}
+	v.Refresh()
+}
+
+func (v *ImageViewer) ClearNodeOverlay() {
+	if len(v.nodeOverlayRects) == 0 && len(v.nodeSelectedRects) == 0 {
+		return
+	}
+	v.nodeOverlayRects = v.nodeOverlayRects[:0]
+	v.nodeSelectedRects = v.nodeSelectedRects[:0]
+	if v.image != nil {
+		v.Refresh()
+	}
 }
 
 func (v *ImageViewer) SetLinkedPointHighlight(points []image.Point) {
@@ -3399,6 +3436,8 @@ func (v *ImageViewer) ClearMarks() {
 	v.markRects = v.markRects[:0]
 	v.findTestRects = v.findTestRects[:0]
 	v.linkedPointRects = v.linkedPointRects[:0]
+	v.nodeOverlayRects = v.nodeOverlayRects[:0]
+	v.nodeSelectedRects = v.nodeSelectedRects[:0]
 
 	// 重置手动框选标志
 	v.manualRectSelected = false
@@ -3915,6 +3954,8 @@ func (v *ImageViewer) CreateRenderer() fyne.WidgetRenderer {
 		rects:         []fyne.CanvasObject{},
 		findTestRects: []fyne.CanvasObject{},
 		linkedRects:   []fyne.CanvasObject{},
+		nodeRects:     []fyne.CanvasObject{},
+		nodeSelected:  []fyne.CanvasObject{},
 		tempRect:      tempRectObj,
 	}
 }
@@ -4141,6 +4182,8 @@ type imageViewerRenderer struct {
 	rects         []fyne.CanvasObject // 用于绘制矩形的对象
 	findTestRects []fyne.CanvasObject // 用于绘制找色测试结果高亮框的对象
 	linkedRects   []fyne.CanvasObject // 用于绘制图像点和列表联动高亮框的对象
+	nodeRects     []fyne.CanvasObject // 用于绘制节点工具全部节点框的对象
+	nodeSelected  []fyne.CanvasObject // 用于绘制节点工具选中节点框的对象
 	tempRect      fyne.CanvasObject   // 用于绘制临时矩形的对象
 }
 
@@ -4170,6 +4213,10 @@ func (r *imageViewerRenderer) Layout(size fyne.Size) {
 
 	// 调整图像点和列表联动高亮框的位置
 	r.updateLinkedRectsLayout()
+
+	// 调整节点工具覆盖框的位置
+	r.updateNodeRectsLayout()
+	r.updateNodeSelectedLayout()
 }
 
 func (r *imageViewerRenderer) Refresh() {
@@ -4180,6 +4227,8 @@ func (r *imageViewerRenderer) Refresh() {
 	r.updateRects()
 	r.updateFindTestRects()
 	r.updateLinkedRects()
+	r.updateNodeRects()
+	r.updateNodeSelectedRects()
 	r.updateTempRect() // 更新临时矩形
 
 	// 确保我们有所有的对象
@@ -4187,7 +4236,9 @@ func (r *imageViewerRenderer) Refresh() {
 	allObjects = append(allObjects, r.points...)
 	allObjects = append(allObjects, r.rects...)
 	allObjects = append(allObjects, r.findTestRects...)
+	allObjects = append(allObjects, r.nodeRects...)
 	allObjects = append(allObjects, r.linkedRects...)
+	allObjects = append(allObjects, r.nodeSelected...)
 	if r.viewer.contextMenu != nil {
 		allObjects = append(allObjects, r.viewer.contextMenu)
 	}
@@ -4198,6 +4249,8 @@ func (r *imageViewerRenderer) Refresh() {
 	r.updateRectsLayout()
 	r.updateFindTestRectsLayout()
 	r.updateLinkedRectsLayout()
+	r.updateNodeRectsLayout()
+	r.updateNodeSelectedLayout()
 
 	// 刷新所有点和矩形
 	for _, p := range r.points {
@@ -4210,6 +4263,12 @@ func (r *imageViewerRenderer) Refresh() {
 		rect.Refresh()
 	}
 	for _, rect := range r.linkedRects {
+		rect.Refresh()
+	}
+	for _, rect := range r.nodeRects {
+		rect.Refresh()
+	}
+	for _, rect := range r.nodeSelected {
 		rect.Refresh()
 	}
 	r.tempRect.Refresh()
@@ -4333,6 +4392,44 @@ func (r *imageViewerRenderer) updateLinkedRectsLayout() {
 	}
 }
 
+func (r *imageViewerRenderer) updateNodeRectsLayout() {
+	r.updateMarkRectObjectsLayout(r.nodeRects, r.viewer.nodeOverlayRects)
+}
+
+func (r *imageViewerRenderer) updateNodeSelectedLayout() {
+	r.updateMarkRectObjectsLayout(r.nodeSelected, r.viewer.nodeSelectedRects)
+}
+
+func (r *imageViewerRenderer) updateMarkRectObjectsLayout(objects []fyne.CanvasObject, markRects []MarkRect) {
+	if r.viewer.image == nil {
+		return
+	}
+
+	bounds := r.viewer.image.Bounds()
+	scale := r.viewer.currentZoomScale()
+	for i, rect := range objects {
+		if i >= len(markRects) {
+			continue
+		}
+		markRect := markRects[i]
+
+		x := float32(min(markRect.X1, markRect.X2)-bounds.Min.X) * scale
+		y := float32(min(markRect.Y1, markRect.Y2)-bounds.Min.Y) * scale
+		width := float32(abs(markRect.X2-markRect.X1)) * scale
+		height := float32(abs(markRect.Y2-markRect.Y1)) * scale
+
+		if width < 1 {
+			width = 1
+		}
+		if height < 1 {
+			height = 1
+		}
+
+		rect.Move(fyne.NewPos(x, y))
+		rect.Resize(fyne.NewSize(width, height))
+	}
+}
+
 // 更新点标记（添加新点，移除旧点）
 func (r *imageViewerRenderer) updatePoints() {
 	// 清除现有点
@@ -4449,6 +4546,47 @@ func (r *imageViewerRenderer) updateLinkedRects() {
 
 		r.linkedRects = append(r.linkedRects, rect)
 	}
+}
+
+func (r *imageViewerRenderer) updateNodeRects() {
+	r.nodeRects = r.markRectCanvasObjects(r.viewer.nodeOverlayRects, 1)
+}
+
+func (r *imageViewerRenderer) updateNodeSelectedRects() {
+	r.nodeSelected = r.markRectCanvasObjects(r.viewer.nodeSelectedRects, 3)
+}
+
+func (r *imageViewerRenderer) markRectCanvasObjects(markRects []MarkRect, strokeWidth float32) []fyne.CanvasObject {
+	if r.viewer.image == nil {
+		return nil
+	}
+
+	objects := make([]fyne.CanvasObject, 0, len(markRects))
+	bounds := r.viewer.image.Bounds()
+	scale := r.viewer.currentZoomScale()
+	for _, markRect := range markRects {
+		rect := canvas.NewRectangle(markRect.Color)
+		rect.StrokeWidth = strokeWidth
+		rect.StrokeColor = markRect.Color
+		rect.FillColor = color.RGBA{0, 0, 0, 0}
+
+		x := float32(min(markRect.X1, markRect.X2)-bounds.Min.X) * scale
+		y := float32(min(markRect.Y1, markRect.Y2)-bounds.Min.Y) * scale
+		width := float32(abs(markRect.X2-markRect.X1)) * scale
+		height := float32(abs(markRect.Y2-markRect.Y1)) * scale
+
+		if width < 1 {
+			width = 1
+		}
+		if height < 1 {
+			height = 1
+		}
+
+		rect.Move(fyne.NewPos(x, y))
+		rect.Resize(fyne.NewSize(width, height))
+		objects = append(objects, rect)
+	}
+	return objects
 }
 
 // 更新临时矩形
@@ -4580,16 +4718,18 @@ func max(a, b int) int {
 // 创建新的图像查看器
 func NewImageViewer() *ImageViewer {
 	viewer := &ImageViewer{
-		displayImage:     canvas.NewImageFromImage(nil),
-		markPoints:       make([]MarkPoint, 0),
-		markRects:        make([]MarkRect, 0),
-		findTestRects:    make([]MarkRect, 0),
-		linkedPointRects: make([]MarkRect, 0),
-		tempRect:         nil, // 初始化为nil，表示没有临时矩形
-		rotationDegrees:  0,   // 初始化旋转角度为0
-		zoomScale:        1,
-		lastMouseX:       -1, // 初始化为-1，确保第一次移动会被检测到
-		lastMouseY:       -1,
+		displayImage:      canvas.NewImageFromImage(nil),
+		markPoints:        make([]MarkPoint, 0),
+		markRects:         make([]MarkRect, 0),
+		findTestRects:     make([]MarkRect, 0),
+		linkedPointRects:  make([]MarkRect, 0),
+		nodeOverlayRects:  make([]MarkRect, 0),
+		nodeSelectedRects: make([]MarkRect, 0),
+		tempRect:          nil, // 初始化为nil，表示没有临时矩形
+		rotationDegrees:   0,   // 初始化旋转角度为0
+		zoomScale:         1,
+		lastMouseX:        -1, // 初始化为-1，确保第一次移动会被检测到
+		lastMouseY:        -1,
 		onMouseMove: func(x, y int) {
 			//fmt.Printf("鼠标移动: X=%d, Y=%d\n", x, y)
 		},
@@ -5299,6 +5439,64 @@ func main() {
 			v.FitToView()
 		})
 	}
+	openNodeImageTab := func(img image.Image, onNodeClick func(x, y int)) *ImageViewer {
+		if img == nil {
+			return nil
+		}
+
+		// 保存当前标签页的数据
+		saveCurrentTabData()
+
+		newImageViewer := NewImageViewer()
+		newMagnifier := NewMagnifierWidget()
+		newImgContainer := container.New(&topLeftLayout{}, newImageViewer)
+		newScrollContainer := container.NewScroll(newImgContainer)
+
+		newImageViewer.scrollContainer = newScrollContainer
+		newImageViewer.magnifier = newMagnifier
+		configureImageViewer(newImageViewer)
+		newImageViewer.onMouseUp = func(x, y int) {
+			if onNodeClick == nil {
+				return
+			}
+			if distance(newImageViewer.mouseDownX, newImageViewer.mouseDownY, x, y) > 4 {
+				return
+			}
+			onNodeClick(x, y)
+		}
+		newImageViewer.SetImage(img)
+
+		newScrollWithMagnifier := container.NewStack(newScrollContainer, newMagnifier)
+		tabCounter++
+		tabName := "节点 " + time.Now().Format("15:04:05")
+		newTab := container.NewTabItem(tabName, newScrollWithMagnifier)
+
+		tabDataMap[newTab] = &TabData{
+			colorPoints:        make([]ColorPoint, 0),
+			markRects:          make([]MarkRect, 0),
+			manualRectSelected: false,
+			imageViewer:        newImageViewer,
+			generatedCode:      "",
+		}
+
+		tabs.Append(newTab)
+		tabs.Select(newTab)
+		currentTab = newTab
+		imageViewer = newImageViewer
+		fitImageToView(newImageViewer)
+
+		colorPoints = make([]ColorPoint, 0)
+		if rectCoordEntry != nil {
+			rectCoordEntry.SetText(defaultRangeText)
+		}
+		if codeDisplayEntry != nil {
+			codeDisplayEntry.SetText("")
+		}
+		if refreshColorList != nil {
+			refreshColorList()
+		}
+		return newImageViewer
+	}
 
 	// 创建左侧工具栏按钮 - 使用带动画的截图按钮
 	var screenshotBtn *AnimatedScreenshotButton
@@ -5866,7 +6064,7 @@ func main() {
 		return selectedDevice
 	}, func() *ImageViewer {
 		return imageViewer
-	})
+	}, openNodeImageTab)
 	nodeTool.SetOnOpen(func() {
 		if rightTabs != nil && nodeTabItem != nil {
 			rightTabs.Select(nodeTabItem)
