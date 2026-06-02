@@ -2028,9 +2028,9 @@ func formatFindTestPoints(points []image.Point) string {
 
 	parts := make([]string, 0, len(points))
 	for _, point := range points {
-		parts = append(parts, fmt.Sprintf("{%d %d}", point.X, point.Y))
+		parts = append(parts, fmt.Sprintf("    {%d %d}", point.X, point.Y))
 	}
-	return "[" + strings.Join(parts, " ") + "]"
+	return "[\n" + strings.Join(parts, "\n") + "\n]"
 }
 
 func runImageCmpColorTest(img image.Image, precisionText string) bool {

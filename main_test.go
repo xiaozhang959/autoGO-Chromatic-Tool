@@ -179,7 +179,7 @@ func TestRunImageFindTestResultFindMultiColorsAll(t *testing.T) {
 
 	got := runImageFindTestResult(img, "FindMultiColorsAll", "1.0", "0: 从左到右，从上到下")
 
-	want := "[{1 1} {3 2}]"
+	want := "[\n    {1 1}\n    {3 2}\n]"
 	if got != want {
 		t.Fatalf("find all result mismatch:\nwant: %s\n got: %s", want, got)
 	}
