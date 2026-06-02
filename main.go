@@ -1894,6 +1894,70 @@ func sampleAPIFormatValues(functionName string) map[string]string {
 	}
 }
 
+func entryCursorByteIndex(text string, row, column int) int {
+	if row < 0 {
+		row = 0
+	}
+	if column < 0 {
+		column = 0
+	}
+
+	currentRow := 0
+	currentColumn := 0
+	for index, r := range text {
+		if currentRow == row && currentColumn == column {
+			return index
+		}
+		if r == '\n' {
+			if currentRow == row {
+				return index
+			}
+			currentRow++
+			currentColumn = 0
+			continue
+		}
+		if currentRow == row {
+			currentColumn++
+		}
+	}
+	return len(text)
+}
+
+func rowColumnFromByteIndex(text string, byteIndex int) (int, int) {
+	if byteIndex < 0 {
+		byteIndex = 0
+	}
+
+	row := 0
+	column := 0
+	for index, r := range text {
+		if index >= byteIndex {
+			break
+		}
+		if r == '\n' {
+			row++
+			column = 0
+			continue
+		}
+		column++
+	}
+	return row, column
+}
+
+func insertTextAtEntryCursor(entry *widget.Entry, text string) {
+	if entry == nil || text == "" {
+		return
+	}
+
+	insertIndex := entryCursorByteIndex(entry.Text, entry.CursorRow, entry.CursorColumn)
+	newText := entry.Text[:insertIndex] + text + entry.Text[insertIndex:]
+	newRow, newColumn := rowColumnFromByteIndex(newText, insertIndex+len(text))
+	entry.SetText(newText)
+	entry.CursorRow = newRow
+	entry.CursorColumn = newColumn
+	entry.Refresh()
+}
+
 func showAPIFormatDialog(parent fyne.Window, selectedFunction string, saveConfig func()) {
 	functions := []string{"FindMultiColors", "FindColor", "FindMultiColorsAll", "CmpColor"}
 	localTemplates := copyAPIFormatTemplates(normalizeAPIFormatTemplates(apiFormatTemplates))
@@ -1904,14 +1968,12 @@ func showAPIFormatDialog(parent fyne.Window, selectedFunction string, saveConfig
 	templateEntry.Wrapping = fyne.TextWrapWord
 	templateEntry.SetMinRowsVisible(8)
 
-	previewEntry := widget.NewMultiLineEntry()
-	previewEntry.Wrapping = fyne.TextWrapWord
-	previewEntry.SetMinRowsVisible(7)
-	previewEntry.Disable()
+	previewLabel := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Monospace: true})
+	previewLabel.Wrapping = fyne.TextWrapWord
 
 	refreshPreview := func() {
 		localTemplates[currentFunction] = templateEntry.Text
-		previewEntry.SetText(applyFormatTemplate(templateEntry.Text, sampleAPIFormatValues(currentFunction)))
+		previewLabel.SetText(applyFormatTemplate(templateEntry.Text, sampleAPIFormatValues(currentFunction)))
 	}
 	templateEntry.OnChanged = func(string) {
 		refreshPreview()
@@ -1929,7 +1991,8 @@ func showAPIFormatDialog(parent fyne.Window, selectedFunction string, saveConfig
 		label := widget.NewLabel(placeholder.description)
 		label.Wrapping = fyne.TextTruncate
 		placeholderButtons.Add(container.NewBorder(nil, nil, widget.NewButton(token, func() {
-			templateEntry.SetText(templateEntry.Text + token)
+			insertTextAtEntryCursor(templateEntry, token)
+			parent.Canvas().Focus(templateEntry)
 		}), nil, label))
 	}
 
@@ -1946,7 +2009,7 @@ func showAPIFormatDialog(parent fyne.Window, selectedFunction string, saveConfig
 	)
 
 	templateBlock := container.NewBorder(widget.NewLabel("模板内容"), nil, nil, nil, templateEntry)
-	previewBlock := container.NewBorder(widget.NewLabel("实时预览"), nil, nil, nil, previewEntry)
+	previewBlock := container.NewBorder(widget.NewLabel("实时预览"), nil, nil, nil, container.NewVScroll(container.NewPadded(previewLabel)))
 	rightSplit := container.NewVSplit(templateBlock, previewBlock)
 	rightSplit.Offset = 0.55
 

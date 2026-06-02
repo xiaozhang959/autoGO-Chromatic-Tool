@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	fynetest "fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
+)
 
 func withColorPointsForTest(t *testing.T, points []ColorPoint) {
 	t.Helper()
@@ -94,5 +99,24 @@ func TestBuildImagesAPICodeUsesCustomFormatTemplate(t *testing.T) {
 	want := `call({0,0,0,0,"081029-202020,187,-21,1c3a6d-202020",0.9,0,0}) params=0, 0, 0, 0, "081029-202020,187,-21,1c3a6d-202020", 0.9, 0, 0`
 	if code != want {
 		t.Fatalf("custom code mismatch:\nwant: %s\n got: %s", want, code)
+	}
+}
+
+func TestInsertTextAtEntryCursor(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	entry := widget.NewMultiLineEntry()
+	entry.SetText("first\nsecond")
+	entry.CursorRow = 1
+	entry.CursorColumn = 3
+
+	insertTextAtEntryCursor(entry, "[参数]")
+
+	want := "first\nsec[参数]ond"
+	if entry.Text != want {
+		t.Fatalf("entry text mismatch:\nwant: %s\n got: %s", want, entry.Text)
+	}
+	if entry.CursorRow != 1 || entry.CursorColumn != 7 {
+		t.Fatalf("cursor mismatch: row=%d column=%d", entry.CursorRow, entry.CursorColumn)
 	}
 }
