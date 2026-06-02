@@ -26,6 +26,19 @@ func withColorPointsForTest(t *testing.T, points []ColorPoint) {
 	apiFormatTemplates = defaultAPIFormatTemplates()
 }
 
+func assertImagePoints(t *testing.T, got, want []image.Point) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("point count mismatch: want %d got %d (%v)", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("point %d mismatch: want %v got %v", i, want[i], got[i])
+		}
+	}
+}
+
 func TestBuildImagesAPICodeColorExportUsesOfficialParamOrder(t *testing.T) {
 	withColorPointsForTest(t, []ColorPoint{
 		{Position: "10, 20", Color: "#081029", Offset: "202020", Selected: true},
@@ -197,4 +210,55 @@ func TestRunImageFindTestResultCmpColor(t *testing.T) {
 	if got != "true" {
 		t.Fatalf("cmp color result mismatch: got %s", got)
 	}
+}
+
+func TestRunImageFindTestHighlightPointsFindColor(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "0, 0", Color: "#AABBCC", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(4, 1, color.NRGBA{R: 0xaa, G: 0xbb, B: 0xcc, A: 0xff})
+
+	got := runImageFindTestHighlightPoints(img, "FindColor", "1.0", "0: 从左到右，从上到下")
+
+	assertImagePoints(t, got, []image.Point{image.Pt(4, 1)})
+}
+
+func TestRunImageFindTestHighlightPointsFindMultiColorsAll(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "0, 0", Color: "#112233", Offset: "000000", Selected: true},
+		{Position: "1, 0", Color: "#445566", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(1, 1, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(2, 1, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+	img.SetNRGBA(3, 2, color.NRGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	img.SetNRGBA(4, 2, color.NRGBA{R: 0x44, G: 0x55, B: 0x66, A: 0xff})
+
+	got := runImageFindTestHighlightPoints(img, "FindMultiColorsAll", "1.0", "0: 从左到右，从上到下")
+
+	assertImagePoints(t, got, []image.Point{image.Pt(1, 1), image.Pt(3, 2)})
+}
+
+func TestRunImageFindTestHighlightPointsCmpColor(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "2, 3", Color: "#AABBCC", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+	img.SetNRGBA(2, 3, color.NRGBA{R: 0xaa, G: 0xbb, B: 0xcc, A: 0xff})
+
+	got := runImageFindTestHighlightPoints(img, "CmpColor", "1.0", "0: 从左到右，从上到下")
+
+	assertImagePoints(t, got, []image.Point{image.Pt(2, 3)})
+}
+
+func TestRunImageFindTestHighlightPointsNotFound(t *testing.T) {
+	withColorPointsForTest(t, []ColorPoint{
+		{Position: "0, 0", Color: "#AABBCC", Offset: "000000", Selected: true},
+	})
+	img := image.NewNRGBA(image.Rect(0, 0, 6, 6))
+
+	got := runImageFindTestHighlightPoints(img, "FindColor", "1.0", "0: 从左到右，从上到下")
+
+	assertImagePoints(t, got, nil)
 }
