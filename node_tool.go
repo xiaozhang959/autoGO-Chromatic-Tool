@@ -63,43 +63,55 @@ func newCompactNodeToolAttrRow(selected, name, value, finder fyne.CanvasObject) 
 	return container.NewBorder(nil, nil, selectedBox, finderBox, main)
 }
 
-type androidNodeAttrRowView struct {
-	*fyne.Container
-
-	selectedText *widget.Label
-	nameText     *widget.Label
-	valueText    *widget.Label
-	finderText   *widget.Label
+type androidNodeAttrToggleRow struct {
+	widget.BaseWidget
+	content  *fyne.Container
+	onTapped func()
 }
 
-func newAndroidNodeAttrRowView() *androidNodeAttrRowView {
-	view := &androidNodeAttrRowView{
-		selectedText: newCompactNodeToolText(""),
-		nameText:     newCompactNodeToolText(""),
-		valueText:    newCompactNodeToolText(""),
-		finderText:   newCompactNodeToolText(""),
+func newAndroidNodeAttrToggleRow(content *fyne.Container, onTapped func()) *androidNodeAttrToggleRow {
+	row := &androidNodeAttrToggleRow{
+		content:  content,
+		onTapped: onTapped,
 	}
-	view.selectedText.Alignment = fyne.TextAlignCenter
-	view.Container = newCompactNodeToolAttrRow(view.selectedText, view.nameText, view.valueText, view.finderText)
-	return view
+	row.ExtendBaseWidget(row)
+	return row
 }
 
-func (v *androidNodeAttrRowView) setAttr(attr androidNodeAttrRow) {
-	selected := "☐"
-	if attr.Selected {
-		selected = "☑"
+func (r *androidNodeAttrToggleRow) Tapped(*fyne.PointEvent) {
+	if r.onTapped != nil {
+		r.onTapped()
 	}
-	setCompactNodeToolText(v.selectedText, selected)
-	setCompactNodeToolText(v.nameText, attr.Name)
-	setCompactNodeToolText(v.valueText, trimMiddle(attr.Value, 28))
-	setCompactNodeToolText(v.finderText, attr.Finder)
 }
 
-func (v *androidNodeAttrRowView) clear() {
-	setCompactNodeToolText(v.selectedText, "")
-	setCompactNodeToolText(v.nameText, "")
-	setCompactNodeToolText(v.valueText, "")
-	setCompactNodeToolText(v.finderText, "")
+func (r *androidNodeAttrToggleRow) CreateRenderer() fyne.WidgetRenderer {
+	return &androidNodeAttrToggleRowRenderer{
+		row:     r,
+		objects: []fyne.CanvasObject{r.content},
+	}
+}
+
+type androidNodeAttrToggleRowRenderer struct {
+	row     *androidNodeAttrToggleRow
+	objects []fyne.CanvasObject
+}
+
+func (r *androidNodeAttrToggleRowRenderer) Destroy() {}
+
+func (r *androidNodeAttrToggleRowRenderer) Layout(size fyne.Size) {
+	r.row.content.Resize(size)
+}
+
+func (r *androidNodeAttrToggleRowRenderer) MinSize() fyne.Size {
+	return r.row.content.MinSize()
+}
+
+func (r *androidNodeAttrToggleRowRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *androidNodeAttrToggleRowRenderer) Refresh() {
+	r.row.content.Refresh()
 }
 
 type AndroidNodeTool struct {
@@ -116,7 +128,7 @@ type AndroidNodeTool struct {
 	searchEntry      *widget.Entry
 	statusLabel      *widget.Label
 	nodeTree         *widget.Tree
-	attrList         *widget.List
+	attrList         *fyne.Container
 	selectorEntry    *widget.Entry
 	copySelectorBtn  *widget.Button
 	copyAttrsBtn     *widget.Button
@@ -217,32 +229,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		tool.selectNode(node)
 	}
 
-	tool.attrList = widget.NewList(
-		func() int {
-			return len(tool.attrRows)
-		},
-		func() fyne.CanvasObject {
-			return newAndroidNodeAttrRowView()
-		},
-		func(id widget.ListItemID, item fyne.CanvasObject) {
-			row := item.(*androidNodeAttrRowView)
-			if id < 0 || id >= len(tool.attrRows) {
-				row.clear()
-				return
-			}
-			row.setAttr(tool.attrRows[id])
-		},
-	)
-	tool.attrList.HideSeparators = true
-	tool.attrList.OnSelected = func(id widget.ListItemID) {
-		if id < 0 || id >= len(tool.attrRows) {
-			return
-		}
-		tool.attrRows[id].Selected = !tool.attrRows[id].Selected
-		tool.refreshSelector()
-		tool.attrList.Unselect(id)
-		tool.attrList.RefreshItem(id)
-	}
+	tool.attrList = container.NewVBox()
 
 	tool.selectAllBtn = widget.NewButton("全部勾选", func() {
 		tool.setAllAttrRows(true)
@@ -283,7 +270,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		nodeHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 230),
 		attrHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.attrList), 180),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tool.attrList)), 180),
 		container.NewGridWithColumns(3, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn),
 		container.NewBorder(nil, nil, widget.NewLabel("选择器"), container.NewHBox(tool.copyAttrsBtn, tool.copySelectorBtn), tool.selectorEntry),
 	)
@@ -439,9 +426,45 @@ func (t *AndroidNodeTool) refreshLists() {
 	if t.nodeTree != nil {
 		t.nodeTree.Refresh()
 	}
-	if t.attrList != nil {
-		t.attrList.Refresh()
+	t.rebuildAttrList()
+}
+
+func (t *AndroidNodeTool) rebuildAttrList() {
+	if t.attrList == nil {
+		return
 	}
+
+	t.attrList.RemoveAll()
+	for i, attr := range t.attrRows {
+		index := i
+		rowContent := newAndroidNodeAttrRowContent(attr)
+		t.attrList.Add(newAndroidNodeAttrToggleRow(rowContent, func() {
+			if index < 0 || index >= len(t.attrRows) {
+				return
+			}
+			t.attrRows[index].Selected = !t.attrRows[index].Selected
+			t.refreshSelector()
+			t.rebuildAttrList()
+		}))
+	}
+	t.attrList.Refresh()
+}
+
+func newAndroidNodeAttrRowContent(attr androidNodeAttrRow) *fyne.Container {
+	selected := "☐"
+	if attr.Selected {
+		selected = "☑"
+	}
+
+	selectedText := newCompactNodeToolText(selected)
+	selectedText.Alignment = fyne.TextAlignCenter
+
+	return newCompactNodeToolAttrRow(
+		selectedText,
+		newCompactNodeToolText(attr.Name),
+		newCompactNodeToolText(trimMiddle(attr.Value, 28)),
+		newCompactNodeToolText(attr.Finder),
+	)
 }
 
 func (t *AndroidNodeTool) highlightSelectedNode() {
@@ -611,9 +634,7 @@ func (t *AndroidNodeTool) setAllAttrRows(selected bool) {
 		t.attrRows[i].Selected = selected
 	}
 	t.refreshSelector()
-	if t.attrList != nil {
-		t.attrList.Refresh()
-	}
+	t.rebuildAttrList()
 }
 
 func (t *AndroidNodeTool) refreshSelector() {
