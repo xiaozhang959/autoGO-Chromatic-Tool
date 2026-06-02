@@ -1045,11 +1045,15 @@ func (r *colorCheckRenderer) Destroy() {}
 
 // 获取所有连接的ADB设备（包括虚拟屏）
 func getADBDevices() ([]string, error) {
+	log.Printf("[device] 开始获取设备列表，adb=%q", adb)
+
 	// 解析输出
 	devicesOutput, err := adbExecCombined("devices")
 	if err != nil {
+		log.Printf("[device] adb devices 失败: err=%v output=%q", err, logPreview(devicesOutput, 1000))
 		return nil, fmt.Errorf("adb devices 失败: %v", adbErrorWithOutput(err, devicesOutput))
 	}
+	log.Printf("[device] adb devices 输出: %q", logPreview(devicesOutput, 1000))
 
 	lines := strings.Split(devicesOutput, "\n")
 	var baseDevices []string
@@ -1057,7 +1061,11 @@ func getADBDevices() ([]string, error) {
 	// 跳过第一行（标题行）
 	for i := 1; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
-		if line == "" || strings.Contains(line, "offline") {
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "offline") {
+			log.Printf("[device] 跳过 offline 设备行: %q", line)
 			continue
 		}
 
@@ -1066,8 +1074,14 @@ func getADBDevices() ([]string, error) {
 		if len(parts) >= 1 && parts[0] != "" {
 			deviceID := parts[0]
 			baseDevices = append(baseDevices, deviceID)
+			if len(parts) >= 2 {
+				log.Printf("[device] 发现设备: id=%s state=%s raw=%q", deviceID, parts[1], line)
+			} else {
+				log.Printf("[device] 发现设备: id=%s raw=%q", deviceID, line)
+			}
 		}
 	}
+	log.Printf("[device] 基础设备数量: %d", len(baseDevices))
 
 	// 构建最终设备列表（包含虚拟屏）
 	var devices []string
@@ -1081,12 +1095,14 @@ func getADBDevices() ([]string, error) {
 
 		// 尝试获取虚拟屏ID
 		virtualDisplays := getVirtualDisplays(deviceID)
+		log.Printf("[device] 设备 %s 虚拟屏: %v", deviceID, virtualDisplays)
 		for _, displayID := range virtualDisplays {
 			// 添加虚拟屏格式：设备ID[虚拟屏ID]
 			devices = append(devices, fmt.Sprintf("%s[%s]", deviceID, displayID))
 		}
 	}
 
+	log.Printf("[device] 最终设备列表: %v", devices)
 	return devices, nil
 }
 
@@ -1094,10 +1110,12 @@ func getADBDevices() ([]string, error) {
 func getVirtualDisplays(deviceID string) []string {
 	// 执行命令获取虚拟屏ID
 	output := adbExec("-s", deviceID, "shell", "app_process", "-Djava.class.path=/data/local/tmp/cap.dex", "/", "com.autogo.vdm.Main", "1")
+	log.Printf("[device] 获取虚拟屏输出: device=%s output=%q", deviceID, logPreview(output, 500))
 
 	// 如果输出为空或包含错误信息，返回空列表
 	if output == "" || strings.Contains(output, "Error") || strings.Contains(output, "error") ||
 		strings.Contains(output, "Exception") || strings.Contains(output, "not found") {
+		log.Printf("[device] 设备 %s 无可用虚拟屏或获取失败", deviceID)
 		return nil
 	}
 
@@ -1193,13 +1211,14 @@ func updateDeviceList() {
 	// 获取新设备列表
 	devices, err := getADBDevices()
 	if err != nil {
+		log.Printf("[device] 更新设备列表失败: %v", err)
 		// 错误处理
 		fyne.Do(func() {
 			// 先清空选项列表和选择
 			deviceSelect.Options = []string{}
 			deviceSelect.Selected = "" // 直接设置 Selected 字段
 			deviceSelect.SetSelected("")
-			deviceSelect.PlaceHolder = "获取设备失败"
+			deviceSelect.PlaceHolder = "获取设备失败（见日志）"
 			deviceSelect.Refresh()
 		})
 		return
@@ -1207,6 +1226,7 @@ func updateDeviceList() {
 
 	// 无设备情况处理
 	if len(devices) == 0 {
+		log.Printf("[device] 未发现已连接设备")
 		fyne.Do(func() {
 			// 先清空选项列表和选择
 			deviceSelect.Options = []string{}
@@ -1241,6 +1261,7 @@ func updateDeviceList() {
 
 	// 只有当列表变化或需要更新选择时才更新UI
 	if listChanged || !deviceStillExists {
+		log.Printf("[device] 更新下拉设备列表: devices=%v current=%q keepCurrent=%v", devices, currentSelectedDevice, deviceStillExists)
 		fyne.Do(func() {
 			// 更新设备列表
 			deviceSelect.Options = devices
@@ -5050,6 +5071,9 @@ func (r *magnifierRenderer) Objects() []fyne.CanvasObject {
 func (r *magnifierRenderer) Destroy() {}
 
 func main() {
+	setupAppLogging()
+	log.Printf("应用启动，adb=%q", adb)
+
 	// 释放嵌入的 cap.dex 到临时目录
 	extractCapDex()
 

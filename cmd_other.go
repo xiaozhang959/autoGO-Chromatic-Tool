@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -38,6 +39,9 @@ func runADBCommand(combined bool, str ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), adbCommandTimeout)
 	defer cancel()
 
+	start := time.Now()
+	log.Printf("[adb] start path=%q args=%q combined=%v", adb, str, combined)
+
 	cmd := exec.CommandContext(ctx, adb, str...)
 	var output []byte
 	var err error
@@ -48,12 +52,16 @@ func runADBCommand(combined bool, str ...string) (string, error) {
 	}
 
 	text := strings.TrimRight(string(output), "\r\n")
+	elapsed := time.Since(start)
 	if ctx.Err() == context.DeadlineExceeded {
+		log.Printf("[adb] timeout path=%q args=%q elapsed=%s output=%q", adb, str, elapsed, logPreview(text, 500))
 		return text, fmt.Errorf("adb 命令超时（%s）", adbCommandTimeout)
 	}
 	if err != nil {
+		log.Printf("[adb] failed path=%q args=%q elapsed=%s err=%v output=%q", adb, str, elapsed, err, logPreview(text, 500))
 		return text, err
 	}
+	log.Printf("[adb] ok path=%q args=%q elapsed=%s output=%q", adb, str, elapsed, logPreview(text, 500))
 	return text, nil
 }
 
