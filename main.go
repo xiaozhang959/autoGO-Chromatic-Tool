@@ -5035,7 +5035,7 @@ func main() {
   • 右键点击：打开坐标/颜色/点位菜单
   • ↑ ↓ ← →  移动鼠标（1像素）
   • Space     标记当前位置
-  • Enter     生成代码
+  • Enter     复制代码
 
 🎨 功能说明
   • 找色模式：多点找色（颜色匹配）
@@ -5049,7 +5049,7 @@ func main() {
   • 没有主动框选区域的时候会根据标记点自动生成区域
   • 放大镜会实时显示鼠标位置的像素放大图
   • 右侧表格显示所有取色点信息
-  • 点击「生成」按钮获取代码
+  • 点击「复制代码」按钮获取代码
   • 标签页右侧有关闭按钮（❌）
 `
 
@@ -5568,8 +5568,8 @@ func main() {
 		}
 	}
 
-	genBtn := widget.NewButtonWithIcon("生成", theme.DocumentCreateIcon(), generateCodeFunc)
-	genBtn.Importance = widget.HighImportance
+	copyCodeBtn := widget.NewButtonWithIcon("复制代码", theme.ContentCopyIcon(), generateCodeFunc)
+	copyCodeBtn.Importance = widget.HighImportance
 
 	// 设置全局触发生成代码函数，供键盘快捷键使用
 	triggerGenerateCode = generateCodeFunc
@@ -6181,7 +6181,7 @@ func main() {
 					w.Clipboard().SetContent(paramsEntry.Text)
 				})), paramsEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
-				container.NewGridWithColumns(4, genBtn, findTestBtn, codeTestBtn, makeButton("图片查找")),
+				container.NewGridWithColumns(4, copyCodeBtn, findTestBtn, codeTestBtn, makeButton("图片查找")),
 			)),
 			container.NewTabItem("点阵OCR", container.NewCenter(widget.NewLabel("点阵OCR布局待实现"))),
 			container.NewTabItem("光学OCR", container.NewCenter(widget.NewLabel("光学OCR布局待实现"))),
