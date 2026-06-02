@@ -42,6 +42,20 @@ func assertImagePoints(t *testing.T, got, want []image.Point) {
 	}
 }
 
+func distinctPointColorBuckets(t *testing.T, img image.Image, points []image.Point) map[int]bool {
+	t.Helper()
+
+	classes := make(map[int]bool)
+	for _, point := range points {
+		class, ok := pickColorBucketAt(img, point.X, point.Y)
+		if !ok {
+			t.Fatalf("point has no color bucket: %v", point)
+		}
+		classes[class] = true
+	}
+	return classes
+}
+
 func TestParsePickCount(t *testing.T) {
 	tests := []struct {
 		text string
@@ -250,6 +264,76 @@ func TestAutoPickHighSaturationPointsIgnoreTransparentPixels(t *testing.T) {
 
 	if len(points) != 0 {
 		t.Fatalf("expected no high saturation points for transparent image, got %v", points)
+	}
+}
+
+func TestAutoPickColorClassRandomPointsCoverMainColors(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 24, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 24; x++ {
+			switch {
+			case x < 8:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0xf0, G: 0x10, B: 0x10, A: 0xff})
+			case x < 16:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0xf0, B: 0x10, A: 0xff})
+			default:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0x10, B: 0xf0, A: 0xff})
+			}
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 24, 10),
+		Count:       6,
+		Mode:        autoPickModeColorClassRandom,
+		MinDistance: 1,
+		Rand:        rand.New(rand.NewSource(2)),
+	})
+
+	if len(points) != 6 {
+		t.Fatalf("point count mismatch: want 6 got %d (%v)", len(points), points)
+	}
+	classes := distinctPointColorBuckets(t, img, points)
+	if len(classes) != 3 {
+		t.Fatalf("expected points to cover 3 color classes, got %d (%v)", len(classes), points)
+	}
+}
+
+func TestAutoPickColorClassContourPointsPreferColorBoundaries(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 24, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 24; x++ {
+			switch {
+			case x < 8:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0xf0, G: 0x10, B: 0x10, A: 0xff})
+			case x < 16:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0xf0, B: 0x10, A: 0xff})
+			default:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x10, G: 0x10, B: 0xf0, A: 0xff})
+			}
+		}
+	}
+
+	points := autoPickPoints(autoPickRequest{
+		Image:       img,
+		Rect:        image.Rect(0, 0, 24, 10),
+		Count:       6,
+		Mode:        autoPickModeColorClassContour,
+		MinDistance: 1,
+	})
+
+	if len(points) == 0 {
+		t.Fatal("expected color class contour points, got none")
+	}
+	for _, point := range points {
+		if point.X != 7 && point.X != 8 && point.X != 15 && point.X != 16 {
+			t.Fatalf("color class contour point should be on color boundary, got %v in %v", point, points)
+		}
+	}
+	classes := distinctPointColorBuckets(t, img, points)
+	if len(classes) < 2 {
+		t.Fatalf("expected contour points to cover multiple color classes, got %d (%v)", len(classes), points)
 	}
 }
 

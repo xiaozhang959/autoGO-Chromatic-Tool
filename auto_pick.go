@@ -11,17 +11,24 @@ import (
 )
 
 const (
-	autoPickModeRandom         = "随机取点"
-	autoPickModeContour        = "轮廓取点"
-	autoPickModeHighlight      = "高亮取点"
-	autoPickModeHighSaturation = "高饱和取点"
-	defaultAutoPickCount       = 20
+	autoPickModeRandom            = "随机取点"
+	autoPickModeContour           = "轮廓取点"
+	autoPickModeHighlight         = "高亮取点"
+	autoPickModeHighSaturation    = "高饱和取点"
+	autoPickModeColorClassContour = "颜色分类轮廓"
+	autoPickModeColorClassRandom  = "颜色分类随机"
+	defaultAutoPickCount          = 20
 )
 
 type autoPickCandidate struct {
 	Point image.Point
 	Score float64
 	Class int
+}
+
+type colorBucketStat struct {
+	Class int
+	Count int
 }
 
 type autoPickRequest struct {
@@ -53,6 +60,10 @@ func autoPickPoints(req autoPickRequest) []image.Point {
 		return pickHighlightPoints(req.Image, rect, req.Count, minDistance)
 	case autoPickModeHighSaturation:
 		return pickHighSaturationPoints(req.Image, rect, req.Count, minDistance)
+	case autoPickModeColorClassContour:
+		return pickColorClassContourPoints(req.Image, rect, req.Count, minDistance)
+	case autoPickModeColorClassRandom:
+		return pickColorClassRandomPoints(req.Image, rect, req.Count, minDistance, req.Rand)
 	default:
 		return nil
 	}
@@ -60,7 +71,7 @@ func autoPickPoints(req autoPickRequest) []image.Point {
 
 func supportedAutoPickMode(mode string) bool {
 	switch mode {
-	case autoPickModeRandom, autoPickModeContour, autoPickModeHighlight, autoPickModeHighSaturation:
+	case autoPickModeRandom, autoPickModeContour, autoPickModeHighlight, autoPickModeHighSaturation, autoPickModeColorClassContour, autoPickModeColorClassRandom:
 		return true
 	default:
 		return false
@@ -303,11 +314,106 @@ func pickHighSaturationPoints(img image.Image, rect image.Rectangle, count, minD
 	return pickTopCandidates(candidates, count, minDistance)
 }
 
+func pickColorClassContourPoints(img image.Image, rect image.Rectangle, count, minDistance int) []image.Point {
+	if img == nil || rect.Empty() || count <= 0 {
+		return nil
+	}
+
+	stats := pickTopColorBuckets(img, rect, maxColorClassBuckets(count))
+	if len(stats) == 0 {
+		return nil
+	}
+
+	allowed := colorBucketSet(stats)
+	countByClass := colorBucketCountMap(stats)
+	candidatesByClass := make(map[int][]autoPickCandidate, len(stats))
+	allCandidates := make([]autoPickCandidate, 0)
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		for x := rect.Min.X; x < rect.Max.X; x++ {
+			class, ok := pickColorBucketAt(img, x, y)
+			if !ok || !allowed[class] || !colorBucketBoundaryAt(img, rect, x, y, class) {
+				continue
+			}
+
+			left := pickLumaAt(img, max(rect.Min.X, x-1), y)
+			right := pickLumaAt(img, min(rect.Max.X-1, x+1), y)
+			top := pickLumaAt(img, x, max(rect.Min.Y, y-1))
+			bottom := pickLumaAt(img, x, min(rect.Max.Y-1, y+1))
+			score := math.Abs(right-left) + math.Abs(bottom-top) + math.Log1p(float64(countByClass[class]))
+			candidate := autoPickCandidate{Point: image.Pt(x, y), Score: score, Class: class}
+			candidatesByClass[class] = append(candidatesByClass[class], candidate)
+			allCandidates = append(allCandidates, candidate)
+		}
+	}
+
+	quotas := colorClassQuotas(stats, count)
+	points := make([]image.Point, 0, count)
+	seen := make(map[image.Point]struct{}, count)
+	for _, stat := range stats {
+		targetCount := len(points) + quotas[stat.Class]
+		appendTopPickCandidates(&points, seen, candidatesByClass[stat.Class], targetCount, minDistance)
+	}
+	if len(points) < count {
+		appendTopPickCandidates(&points, seen, allCandidates, count, minDistance)
+	}
+	return points
+}
+
+func pickColorClassRandomPoints(img image.Image, rect image.Rectangle, count, minDistance int, rng *rand.Rand) []image.Point {
+	if img == nil || rect.Empty() || count <= 0 {
+		return nil
+	}
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+
+	stats := pickTopColorBuckets(img, rect, maxColorClassBuckets(count))
+	if len(stats) == 0 {
+		return nil
+	}
+
+	allowed := colorBucketSet(stats)
+	pointsByClass := make(map[int][]image.Point, len(stats))
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		for x := rect.Min.X; x < rect.Max.X; x++ {
+			class, ok := pickColorBucketAt(img, x, y)
+			if ok && allowed[class] {
+				pointsByClass[class] = append(pointsByClass[class], image.Pt(x, y))
+			}
+		}
+	}
+
+	quotas := colorClassQuotas(stats, count)
+	points := make([]image.Point, 0, count)
+	seen := make(map[image.Point]struct{}, count)
+	for _, stat := range stats {
+		appendRandomPickPoints(&points, seen, pointsByClass[stat.Class], quotas[stat.Class], minDistance, rng)
+	}
+	if len(points) < count {
+		for _, stat := range stats {
+			appendScanPickPoints(&points, seen, pointsByClass[stat.Class], count, minDistance)
+			if len(points) >= count {
+				break
+			}
+		}
+	}
+	return points
+}
+
 func pickTopCandidates(candidates []autoPickCandidate, count, minDistance int) []image.Point {
 	if len(candidates) == 0 || count <= 0 {
 		return nil
 	}
 
+	sortAutoPickCandidates(candidates)
+
+	points := make([]image.Point, 0, min(count, len(candidates)))
+	seen := make(map[image.Point]struct{}, count)
+	appendTopPickCandidates(&points, seen, candidates, count, minDistance)
+	return points
+}
+
+func sortAutoPickCandidates(candidates []autoPickCandidate) {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].Score != candidates[j].Score {
 			return candidates[i].Score > candidates[j].Score
@@ -317,18 +423,20 @@ func pickTopCandidates(candidates []autoPickCandidate, count, minDistance int) [
 		}
 		return candidates[i].Point.X < candidates[j].Point.X
 	})
+}
 
-	points := make([]image.Point, 0, min(count, len(candidates)))
+func appendTopPickCandidates(points *[]image.Point, seen map[image.Point]struct{}, candidates []autoPickCandidate, targetCount, minDistance int) {
+	sortAutoPickCandidates(candidates)
 	for _, candidate := range candidates {
-		if len(points) >= count {
+		if len(*points) >= targetCount {
 			break
 		}
-		if !pointDistanceOK(points, candidate.Point, minDistance) {
+		if _, exists := seen[candidate.Point]; exists || !pointDistanceOK(*points, candidate.Point, minDistance) {
 			continue
 		}
-		points = append(points, candidate.Point)
+		seen[candidate.Point] = struct{}{}
+		*points = append(*points, candidate.Point)
 	}
-	return points
 }
 
 func pickLumaAt(img image.Image, x, y int) float64 {
@@ -374,4 +482,153 @@ func pickLocalLumaContrast(img image.Image, rect image.Rectangle, x, y int) floa
 		return 0
 	}
 	return math.Abs(center - total/float64(count))
+}
+
+func maxColorClassBuckets(count int) int {
+	if count <= 0 {
+		return 0
+	}
+	if count < 6 {
+		return count
+	}
+	return 6
+}
+
+func pickTopColorBuckets(img image.Image, rect image.Rectangle, maxBuckets int) []colorBucketStat {
+	if img == nil || rect.Empty() || maxBuckets <= 0 {
+		return nil
+	}
+
+	counts := make(map[int]int)
+	for y := rect.Min.Y; y < rect.Max.Y; y++ {
+		for x := rect.Min.X; x < rect.Max.X; x++ {
+			class, ok := pickColorBucketAt(img, x, y)
+			if ok {
+				counts[class]++
+			}
+		}
+	}
+
+	stats := make([]colorBucketStat, 0, len(counts))
+	for class, count := range counts {
+		stats = append(stats, colorBucketStat{Class: class, Count: count})
+	}
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].Count != stats[j].Count {
+			return stats[i].Count > stats[j].Count
+		}
+		return stats[i].Class < stats[j].Class
+	})
+	if len(stats) > maxBuckets {
+		stats = stats[:maxBuckets]
+	}
+	return stats
+}
+
+func pickColorBucketAt(img image.Image, x, y int) (int, bool) {
+	r, g, b, a := img.At(x, y).RGBA()
+	if uint8(a>>8) < 32 {
+		return 0, false
+	}
+
+	rBucket := int(uint8(r>>8)) / 32
+	gBucket := int(uint8(g>>8)) / 32
+	bBucket := int(uint8(b>>8)) / 32
+	return rBucket<<6 | gBucket<<3 | bBucket, true
+}
+
+func colorBucketSet(stats []colorBucketStat) map[int]bool {
+	set := make(map[int]bool, len(stats))
+	for _, stat := range stats {
+		set[stat.Class] = true
+	}
+	return set
+}
+
+func colorBucketCountMap(stats []colorBucketStat) map[int]int {
+	counts := make(map[int]int, len(stats))
+	for _, stat := range stats {
+		counts[stat.Class] = stat.Count
+	}
+	return counts
+}
+
+func colorClassQuotas(stats []colorBucketStat, total int) map[int]int {
+	quotas := make(map[int]int, len(stats))
+	if len(stats) == 0 || total <= 0 {
+		return quotas
+	}
+
+	active := stats
+	if len(active) > total {
+		active = active[:total]
+	}
+	for _, stat := range active {
+		quotas[stat.Class] = 1
+	}
+
+	remaining := total - len(active)
+	for remaining > 0 {
+		for _, stat := range active {
+			if remaining == 0 {
+				break
+			}
+			quotas[stat.Class]++
+			remaining--
+		}
+	}
+	return quotas
+}
+
+func colorBucketBoundaryAt(img image.Image, rect image.Rectangle, x, y, class int) bool {
+	neighbors := [][2]int{
+		{x - 1, y},
+		{x + 1, y},
+		{x, y - 1},
+		{x, y + 1},
+	}
+	for _, neighbor := range neighbors {
+		nx, ny := neighbor[0], neighbor[1]
+		if nx < rect.Min.X || nx >= rect.Max.X || ny < rect.Min.Y || ny >= rect.Max.Y {
+			continue
+		}
+		neighborClass, ok := pickColorBucketAt(img, nx, ny)
+		if !ok || neighborClass != class {
+			return true
+		}
+	}
+	return false
+}
+
+func appendRandomPickPoints(points *[]image.Point, seen map[image.Point]struct{}, pool []image.Point, targetAdd, minDistance int, rng *rand.Rand) {
+	if targetAdd <= 0 || len(pool) == 0 {
+		return
+	}
+
+	targetCount := len(*points) + targetAdd
+	maxAttempts := max(targetAdd*80, len(pool)*2)
+	for attempts := 0; attempts < maxAttempts && len(*points) < targetCount; attempts++ {
+		p := pool[rng.Intn(len(pool))]
+		if _, exists := seen[p]; exists || !pointDistanceOK(*points, p, minDistance) {
+			continue
+		}
+		seen[p] = struct{}{}
+		*points = append(*points, p)
+	}
+	if len(*points) < targetCount {
+		appendScanPickPoints(points, seen, pool, targetCount, minDistance)
+	}
+}
+
+func appendScanPickPoints(points *[]image.Point, seen map[image.Point]struct{}, pool []image.Point, targetCount, minDistance int) {
+	for _, p := range pool {
+		if len(*points) >= targetCount {
+			return
+		}
+		if _, exists := seen[p]; exists || !pointDistanceOK(*points, p, minDistance) {
+			continue
+		}
+		seen[p] = struct{}{}
+		*points = append(*points, p)
+	}
 }

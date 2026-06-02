@@ -5915,7 +5915,7 @@ func main() {
 			mode = autoPickModeRandom
 		}
 		if !supportedAutoPickMode(mode) {
-			dialog.ShowInformation("提示", fmt.Sprintf("当前仅已实现「%s」、「%s」、「%s」和「%s」模式", autoPickModeRandom, autoPickModeContour, autoPickModeHighlight, autoPickModeHighSaturation), w)
+			dialog.ShowInformation("提示", fmt.Sprintf("当前仅已实现「%s」、「%s」、「%s」、「%s」、「%s」和「%s」模式", autoPickModeRandom, autoPickModeContour, autoPickModeHighlight, autoPickModeHighSaturation, autoPickModeColorClassContour, autoPickModeColorClassRandom), w)
 			return
 		}
 
