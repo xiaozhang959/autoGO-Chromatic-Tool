@@ -102,6 +102,9 @@ var (
 	// 代码显示框
 	codeDisplayEntry *widget.Entry
 
+	// 图色面板 API 字段刷新回调
+	updateImagesAPIFields func() string
+
 	// 点阵模式状态
 	gridModeEnabled  = false // 默认关闭点阵模式
 	gridColsValue    = 4
@@ -1766,6 +1769,35 @@ func apiMultiColorTemplate(points []ColorPoint) string {
 	return strings.Join(parts, ",")
 }
 
+func apiMultiColorParamsObject(x1, y1, x2, y2 int, points []ColorPoint, sim string, dir int) string {
+	if len(points) == 0 {
+		return ""
+	}
+
+	baseX, baseY, ok := parsePointPosition(points[0].Position)
+	if !ok {
+		return ""
+	}
+
+	parts := make([]string, 0, (len(points)-1)*3)
+	for _, point := range points[1:] {
+		x, y, ok := parsePointPosition(point.Position)
+		if !ok {
+			continue
+		}
+		parts = append(parts, strconv.Itoa(x-baseX), strconv.Itoa(y-baseY), colorPointValue(point))
+	}
+
+	return fmt.Sprintf("{%d,%d,%d,%d,\"%s\",\"%s\",%d,%s}",
+		x1, y1, x2, y2, colorPointValue(points[0]), strings.Join(parts, "|"), dir, sim)
+}
+
+func refreshImagesAPIFields() {
+	if updateImagesAPIFields != nil {
+		updateImagesAPIFields()
+	}
+}
+
 func normalizeImagesFunctionName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "findcolor":
@@ -1798,24 +1830,28 @@ func buildImagesAPICode(functionName, precisionText, directionText string) (stri
 	switch functionName {
 	case "FindColor":
 		colorText := apiColorAlternatives(points)
+		colorParams := fmt.Sprintf("{%d,%d,%d,%d,\"%s\",%d,%s}", x1, y1, x2, y2, colorText, dir, sim)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorText, params, fmt.Sprintf("x, y := images.FindColor(%s)", params)
+		return colorParams, params, fmt.Sprintf("x, y := images.FindColor(%s)", params)
 	case "FindMultiColorsAll":
 		colorText := apiMultiColorTemplate(points)
+		colorParams := apiMultiColorParamsObject(x1, y1, x2, y2, points, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorText, params, fmt.Sprintf("points := images.FindMultiColorsAll(%s)", params)
+		return colorParams, params, fmt.Sprintf("points := images.FindMultiColorsAll(%s)", params)
 	case "CmpColor":
 		x, y, ok := parsePointPosition(points[0].Position)
 		if !ok {
 			return "", "", ""
 		}
 		colorText := apiColorAlternatives(points)
+		colorParams := fmt.Sprintf("{%d,%d,\"%s\",%s}", x, y, colorText, sim)
 		params := fmt.Sprintf("%d, %d, \"%s\", %s, 0", x, y, colorText, sim)
-		return colorText, params, fmt.Sprintf("matched := images.CmpColor(%s)", params)
+		return colorParams, params, fmt.Sprintf("matched := images.CmpColor(%s)", params)
 	default:
 		colorText := apiMultiColorTemplate(points)
+		colorParams := apiMultiColorParamsObject(x1, y1, x2, y2, points, sim, dir)
 		params := fmt.Sprintf("%d, %d, %d, %d, \"%s\", %s, %d, 0", x1, y1, x2, y2, colorText, sim, dir)
-		return colorText, params, fmt.Sprintf("x, y := images.FindMultiColors(%s)", params)
+		return colorParams, params, fmt.Sprintf("x, y := images.FindMultiColors(%s)", params)
 	}
 }
 
@@ -3625,12 +3661,13 @@ func main() {
 
 	// 设置刷新表格的函数
 	refreshColorList = func() {
-		if tableContent != nil {
-			// 使用fyne.Do确保在主线程中执行UI更新
-			fyne.Do(func() {
+		// 使用fyne.Do确保在主线程中执行UI更新
+		fyne.Do(func() {
+			if tableContent != nil {
 				tableContent.Refresh()
-			})
-		}
+			}
+			refreshImagesAPIFields()
+		})
 	}
 
 	// 主题切换功能
@@ -3652,6 +3689,9 @@ func main() {
 
 	// 创建区域坐标显示控件
 	rectCoordEntry = widget.NewEntry()
+	rectCoordEntry.OnChanged = func(string) {
+		refreshImagesAPIFields()
+	}
 
 	// 创建偏色值输入控件
 	colorOffsetEntry = widget.NewEntry()
@@ -4089,8 +4129,6 @@ func main() {
 	codeDisplayEntry.Wrapping = fyne.TextWrapWord
 	codeDisplayEntry.TextStyle = fyne.TextStyle{Monospace: true}
 
-	var updateImagesAPIFields func() string
-
 	// 创建生成代码的函数
 	generateCodeFunc := func() {
 		// 生成代码并复制到剪贴板
@@ -4429,11 +4467,12 @@ func main() {
 	}
 
 	updateTableSelection = func() {
-		if tableContent != nil {
-			fyne.Do(func() {
+		fyne.Do(func() {
+			if tableContent != nil {
 				tableContent.Refresh()
-			})
-		}
+			}
+			refreshImagesAPIFields()
+		})
 	}
 
 	tableContent = widget.NewList(
@@ -4598,6 +4637,7 @@ func main() {
 
 	precisionEntry := makeEntry(userConfig.Precision)
 	precisionEntry.OnChanged = func(string) {
+		refreshImagesAPIFields()
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
 		}
@@ -4672,13 +4712,11 @@ func main() {
 				container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, functionSelect),
 				container.NewBorder(nil, nil, widget.NewLabel("方向"), nil, directionSelect),
 				container.NewBorder(nil, nil, widget.NewLabel("颜色"), widget.NewButton("复制颜色", func() {
-					updateImagesAPIFields()
 					w.Clipboard().SetContent(colorEntry.Text)
 				}), colorEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(widget.NewButton("格式", func() {
 					updateImagesAPIFields()
 				}), widget.NewButton("复制参数", func() {
-					updateImagesAPIFields()
 					w.Clipboard().SetContent(paramsEntry.Text)
 				})), paramsEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
