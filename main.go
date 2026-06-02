@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -71,6 +72,9 @@ var (
 	headerBgColor      = color.NRGBA{30, 30, 30, 255}    // 表头深色背景
 	lightHeaderBgColor = color.NRGBA{220, 220, 220, 255} // 表头浅色背景
 	transparent        = color.NRGBA{0, 0, 0, 0}         // 透明色
+	findTestMarkColor  = color.NRGBA{255, 0, 255, 255}   // 找色测试结果高亮色
+	linkedPointColor   = color.NRGBA{255, 215, 0, 255}   // 图像点和列表联动高亮色
+	linkedRowBgColor   = color.NRGBA{255, 215, 0, 110}   // 图像点和列表联动行背景色
 
 	// 主题状态变量 - 初始值会在程序启动时根据系统主题设置
 	isDarkTheme = false
@@ -281,6 +285,7 @@ type ClickableTableRow struct {
 	background    *canvas.Rectangle
 	content       *fyne.Container
 	onTapped      func()
+	onDoubleTap   func()
 	id            int
 	isHighlighted bool
 }
@@ -294,6 +299,9 @@ var tableContent *widget.List
 var tableHeader *fyne.Container
 var headerBg *canvas.Rectangle
 var idHeader, posHeader, colorHeader, statusHeader *canvas.Text
+var linkedColorPointIndex = -1
+var linkedColorPointFlashVisible bool
+var linkedColorPointFlashSeq uint64
 
 func defaultUserConfig() UserConfig {
 	return UserConfig{
@@ -619,6 +627,18 @@ func (r *commitEntryRenderer) displayText() string {
 
 func (r *ClickableTableRow) TappedSecondary(*fyne.PointEvent) {
 	// 右键点击，可以实现其他功能
+}
+
+func (r *ClickableTableRow) Tapped(*fyne.PointEvent) {
+	if r.onTapped != nil {
+		r.onTapped()
+	}
+}
+
+func (r *ClickableTableRow) DoubleTapped(*fyne.PointEvent) {
+	if r.onDoubleTap != nil {
+		r.onDoubleTap()
+	}
 }
 
 func (r *ClickableTableRow) CreateRenderer() fyne.WidgetRenderer {
@@ -1226,11 +1246,17 @@ const (
 )
 
 const (
-	minImageZoom       float32 = 0.1
-	maxImageZoom       float32 = 8
-	zoomStepMultiplier float32 = 1.1
-	maxRightMenuPoints         = 20
-	defaultRangeText           = "0,0,0,0"
+	minImageZoom              float32 = 0.1
+	maxImageZoom              float32 = 8
+	zoomStepMultiplier        float32 = 1.1
+	maxRightMenuPoints                = 20
+	defaultRangeText                  = "0,0,0,0"
+	findTestMarkRadius                = 10
+	linkedPointHitRadius              = 12
+	linkedPointMarkRadius             = 14
+	linkedPointFlashCount             = 10
+	linkedPointFlashInterval          = 140 * time.Millisecond
+	linkedPointHoldAfterFlash         = 3 * time.Second
 )
 
 // 自定义图像查看器，支持显示图像和鼠标事件跟踪
@@ -1244,6 +1270,8 @@ type ImageViewer struct {
 	contextMenu        fyne.CanvasObject
 	markPoints         []MarkPoint // 存储点标记
 	markRects          []MarkRect  // 存储矩形标记
+	findTestRects      []MarkRect  // 存储找色测试结果高亮框
+	linkedPointRects   []MarkRect  // 存储图像点和列表联动高亮框
 	mouseDownX         int         // 鼠标按下时的X坐标
 	mouseDownY         int         // 鼠标按下时的Y坐标
 	isDragging         bool        // 是否正在拖动
@@ -1327,6 +1355,8 @@ func saveCurrentTabData() {
 
 // 恢复标签页数据
 func restoreTabData(tab *container.TabItem) {
+	clearLinkedColorPointVisual()
+
 	tabData, exists := tabDataMap[tab]
 	if !exists || tabData.imageViewer == nil {
 		// 如果是欢迎页或没有数据，清空
@@ -1401,6 +1431,121 @@ func parsePointPosition(pos string) (int, int, bool) {
 		return 0, 0, false
 	}
 	return x, y, true
+}
+
+func colorPointImagePoint(index int) (image.Point, bool) {
+	if index < 0 || index >= len(colorPoints) {
+		return image.Point{}, false
+	}
+	x, y, ok := parsePointPosition(colorPoints[index].Position)
+	if !ok {
+		return image.Point{}, false
+	}
+	return image.Pt(x, y), true
+}
+
+func nearestColorPointIndex(points []ColorPoint, x, y, radius int) int {
+	bestIndex := -1
+	bestDistance := float64(radius + 1)
+	for i, point := range points {
+		pointX, pointY, ok := parsePointPosition(point.Position)
+		if !ok {
+			continue
+		}
+		dist := distance(x, y, pointX, pointY)
+		if dist <= float64(radius) && dist < bestDistance {
+			bestDistance = dist
+			bestIndex = i
+		}
+	}
+	return bestIndex
+}
+
+func linkedColorPointRowBackground(id int) color.Color {
+	if id >= 0 && id < len(colorPoints) && id == linkedColorPointIndex && linkedColorPointFlashVisible {
+		return linkedRowBgColor
+	}
+	return transparent
+}
+
+func setLinkedColorPointVisual(index int, visible bool) {
+	if index < 0 || index >= len(colorPoints) {
+		linkedColorPointIndex = -1
+		linkedColorPointFlashVisible = false
+		if imageViewer != nil {
+			imageViewer.ClearLinkedPointHighlight()
+		}
+		if tableContent != nil {
+			tableContent.Refresh()
+		}
+		return
+	}
+
+	linkedColorPointIndex = index
+	linkedColorPointFlashVisible = visible
+	if imageViewer != nil {
+		if point, ok := colorPointImagePoint(index); ok && visible {
+			imageViewer.SetLinkedPointHighlight([]image.Point{point})
+		} else {
+			imageViewer.ClearLinkedPointHighlight()
+		}
+	}
+	if tableContent != nil {
+		tableContent.Refresh()
+	}
+}
+
+func clearLinkedColorPointVisual() {
+	atomic.AddUint64(&linkedColorPointFlashSeq, 1)
+	setLinkedColorPointVisual(-1, false)
+}
+
+func activateLinkedColorPoint(index int) {
+	if index < 0 || index >= len(colorPoints) {
+		return
+	}
+
+	seq := atomic.AddUint64(&linkedColorPointFlashSeq, 1)
+	setLinkedColorPointVisual(index, true)
+	if tableContent != nil {
+		tableContent.Select(widget.ListItemID(index))
+		tableContent.ScrollTo(widget.ListItemID(index))
+	}
+
+	go func() {
+		for i := 0; i < linkedPointFlashCount; i++ {
+			visible := i%2 == 0
+			fyne.Do(func() {
+				if atomic.LoadUint64(&linkedColorPointFlashSeq) == seq {
+					setLinkedColorPointVisual(index, visible)
+				}
+			})
+			time.Sleep(linkedPointFlashInterval)
+		}
+
+		fyne.Do(func() {
+			if atomic.LoadUint64(&linkedColorPointFlashSeq) == seq {
+				setLinkedColorPointVisual(index, true)
+			}
+		})
+		time.Sleep(linkedPointHoldAfterFlash)
+		fyne.Do(func() {
+			if atomic.LoadUint64(&linkedColorPointFlashSeq) == seq {
+				setLinkedColorPointVisual(-1, false)
+			}
+		})
+	}()
+}
+
+func refreshLinkedColorPointVisual() {
+	if linkedColorPointIndex < 0 {
+		return
+	}
+	if linkedColorPointIndex >= len(colorPoints) {
+		clearLinkedColorPointVisual()
+		return
+	}
+	setLinkedColorPointVisual(linkedColorPointIndex, linkedColorPointFlashVisible)
 }
 
 func colorHexAtImage(img image.Image, x, y int) (string, color.Color, bool) {
@@ -1517,6 +1662,7 @@ func syncImageViewerMarksFromColorPoints() {
 	if !imageViewer.manualRectSelected {
 		imageViewer.updateBoundingBox()
 	}
+	refreshLinkedColorPointVisual()
 	imageViewer.Refresh()
 }
 
@@ -2033,24 +2179,39 @@ func formatFindTestPoints(points []image.Point) string {
 	return "[\n" + strings.Join(parts, "\n") + "\n]"
 }
 
-func runImageCmpColorTest(img image.Image, precisionText string) bool {
+func runImageCmpColorTestPoint(img image.Image, precisionText string) (image.Point, bool) {
 	if img == nil {
-		return false
+		return image.Point{}, false
 	}
 
 	points := selectedColorPoints()
 	if len(points) == 0 {
-		return false
+		return image.Point{}, false
 	}
 
 	x, y, ok := parsePointPosition(points[0].Position)
 	if !ok {
-		return false
+		return image.Point{}, false
 	}
 	if !image.Pt(x, y).In(image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy())) {
-		return false
+		return image.Point{}, false
 	}
-	return testColorAlternativesMatch(imagePixelNRGBA(img, x, y), apiColorAlternatives(points), parseSimilarityValue(precisionText))
+	if !testColorAlternativesMatch(imagePixelNRGBA(img, x, y), apiColorAlternatives(points), parseSimilarityValue(precisionText)) {
+		return image.Point{}, false
+	}
+	return image.Pt(x, y), true
+}
+
+func runImageCmpColorTest(img image.Image, precisionText string) bool {
+	_, matched := runImageCmpColorTestPoint(img, precisionText)
+	return matched
+}
+
+func foundPointHighlights(x, y int) []image.Point {
+	if x < 0 || y < 0 {
+		return nil
+	}
+	return []image.Point{image.Pt(x, y)}
 }
 
 func runImageFindTest(img image.Image, functionName, precisionText, directionText string) (int, int) {
@@ -2081,27 +2242,42 @@ func runImageFindTest(img image.Image, functionName, precisionText, directionTex
 }
 
 func runImageFindTestResult(img image.Image, functionName, precisionText, directionText string) string {
+	result, _ := runImageFindTestResultAndHighlights(img, functionName, precisionText, directionText)
+	return result
+}
+
+func runImageFindTestHighlightPoints(img image.Image, functionName, precisionText, directionText string) []image.Point {
+	_, points := runImageFindTestResultAndHighlights(img, functionName, precisionText, directionText)
+	return points
+}
+
+func runImageFindTestResultAndHighlights(img image.Image, functionName, precisionText, directionText string) (string, []image.Point) {
 	functionName = normalizeImagesFunctionName(functionName)
 	if functionName == "CmpColor" {
-		return strconv.FormatBool(runImageCmpColorTest(img, precisionText))
+		point, matched := runImageCmpColorTestPoint(img, precisionText)
+		if matched {
+			return "true", []image.Point{point}
+		}
+		return "false", nil
 	}
 
 	if img == nil || len(selectedColorPoints()) == 0 {
 		if functionName == "FindMultiColorsAll" {
-			return "[]"
+			return "[]", nil
 		}
-		return "-1,-1"
+		return "-1,-1", nil
 	}
 
 	sim := parseSimilarityValue(precisionText)
 	dir := directionValue(directionText)
 	x1, y1, x2, y2 := regionValuesFromEntry()
 	if functionName == "FindMultiColorsAll" {
-		return formatFindTestPoints(findMultiColorsAllInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(selectedColorPoints()), sim, dir))
+		points := findMultiColorsAllInImage(img, x1, y1, x2, y2, apiMultiColorTemplate(selectedColorPoints()), sim, dir)
+		return formatFindTestPoints(points), points
 	}
 
 	x, y := runImageFindTest(img, functionName, precisionText, directionText)
-	return fmt.Sprintf("%d,%d", x, y)
+	return fmt.Sprintf("%d,%d", x, y), foundPointHighlights(x, y)
 }
 
 func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) string {
@@ -2592,6 +2768,70 @@ func (v *ImageViewer) AddRect(x1, y1, x2, y2 int, c color.Color) {
 	v.Refresh() // 刷新视图以显示新矩形
 }
 
+func highlightRectsForPoints(img image.Image, points []image.Point, radius int, c color.Color) []MarkRect {
+	if img == nil || len(points) == 0 {
+		return nil
+	}
+
+	bounds := image.Rect(0, 0, img.Bounds().Dx(), img.Bounds().Dy())
+	rects := make([]MarkRect, 0, len(points))
+	for _, point := range points {
+		if !point.In(bounds) {
+			continue
+		}
+		rects = append(rects, MarkRect{
+			X1:    max(bounds.Min.X, point.X-radius),
+			Y1:    max(bounds.Min.Y, point.Y-radius),
+			X2:    min(bounds.Max.X, point.X+radius+1),
+			Y2:    min(bounds.Max.Y, point.Y+radius+1),
+			Color: c,
+		})
+	}
+	return rects
+}
+
+func findTestHighlightRects(img image.Image, points []image.Point) []MarkRect {
+	return highlightRectsForPoints(img, points, findTestMarkRadius, findTestMarkColor)
+}
+
+func linkedPointHighlightRects(img image.Image, points []image.Point) []MarkRect {
+	return highlightRectsForPoints(img, points, linkedPointMarkRadius, linkedPointColor)
+}
+
+func (v *ImageViewer) SetFindTestHighlights(points []image.Point) {
+	v.findTestRects = findTestHighlightRects(v.image, points)
+	if v.image != nil {
+		v.Refresh()
+	}
+}
+
+func (v *ImageViewer) ClearFindTestHighlights() {
+	if len(v.findTestRects) == 0 {
+		return
+	}
+	v.findTestRects = v.findTestRects[:0]
+	if v.image != nil {
+		v.Refresh()
+	}
+}
+
+func (v *ImageViewer) SetLinkedPointHighlight(points []image.Point) {
+	v.linkedPointRects = linkedPointHighlightRects(v.image, points)
+	if v.image != nil {
+		v.Refresh()
+	}
+}
+
+func (v *ImageViewer) ClearLinkedPointHighlight() {
+	if len(v.linkedPointRects) == 0 {
+		return
+	}
+	v.linkedPointRects = v.linkedPointRects[:0]
+	if v.image != nil {
+		v.Refresh()
+	}
+}
+
 // 更新区域坐标为所有点的外包围盒
 func (v *ImageViewer) updateBoundingBox() {
 	// 如果是手动框选的区域，不自动更新
@@ -2656,8 +2896,14 @@ func (v *ImageViewer) updateBoundingBox() {
 
 // 清除所有标记
 func (v *ImageViewer) ClearMarks() {
+	atomic.AddUint64(&linkedColorPointFlashSeq, 1)
+	linkedColorPointIndex = -1
+	linkedColorPointFlashVisible = false
+
 	v.markPoints = v.markPoints[:0]
 	v.markRects = v.markRects[:0]
+	v.findTestRects = v.findTestRects[:0]
+	v.linkedPointRects = v.linkedPointRects[:0]
 
 	// 重置手动框选标志
 	v.manualRectSelected = false
@@ -2950,6 +3196,22 @@ func (v *ImageViewer) MouseUp(e *desktop.MouseEvent) {
 	}
 }
 
+func (v *ImageViewer) DoubleTapped(e *fyne.PointEvent) {
+	if v.image == nil {
+		return
+	}
+
+	mouseX, mouseY, ok := v.imagePositionFromView(e.Position)
+	if !ok {
+		return
+	}
+
+	index := nearestColorPointIndex(colorPoints, mouseX, mouseY, linkedPointHitRadius)
+	if index >= 0 {
+		activateLinkedColorPoint(index)
+	}
+}
+
 // 实现TappedSecondary接口方法，处理右键点击
 func (v *ImageViewer) TappedSecondary(e *fyne.PointEvent) {
 	if v.image == nil || v.window == nil {
@@ -3049,6 +3311,8 @@ func (v *ImageViewer) SetImage(img image.Image) {
 	v.originalImage = img // 保存原始图像
 	v.rotationDegrees = 0 // 重置旋转角度
 	v.zoomScale = 1
+	v.findTestRects = v.findTestRects[:0]
+	v.linkedPointRects = v.linkedPointRects[:0]
 	v.displayImage.Image = img
 	v.Refresh()
 }
@@ -3134,11 +3398,13 @@ func (v *ImageViewer) CreateRenderer() fyne.WidgetRenderer {
 	tempRectObj.Hide()                             // 初始时隐藏
 
 	return &imageViewerRenderer{
-		viewer:   v,
-		objects:  []fyne.CanvasObject{v.displayImage, tempRectObj},
-		points:   []fyne.CanvasObject{},
-		rects:    []fyne.CanvasObject{},
-		tempRect: tempRectObj,
+		viewer:        v,
+		objects:       []fyne.CanvasObject{v.displayImage, tempRectObj},
+		points:        []fyne.CanvasObject{},
+		rects:         []fyne.CanvasObject{},
+		findTestRects: []fyne.CanvasObject{},
+		linkedRects:   []fyne.CanvasObject{},
+		tempRect:      tempRectObj,
 	}
 }
 
@@ -3358,11 +3624,13 @@ func (v *ImageViewer) ImageSize() (int, int) {
 
 // 图像查看器渲染器
 type imageViewerRenderer struct {
-	viewer   *ImageViewer
-	objects  []fyne.CanvasObject
-	points   []fyne.CanvasObject // 用于绘制点的对象
-	rects    []fyne.CanvasObject // 用于绘制矩形的对象
-	tempRect fyne.CanvasObject   // 用于绘制临时矩形的对象
+	viewer        *ImageViewer
+	objects       []fyne.CanvasObject
+	points        []fyne.CanvasObject // 用于绘制点的对象
+	rects         []fyne.CanvasObject // 用于绘制矩形的对象
+	findTestRects []fyne.CanvasObject // 用于绘制找色测试结果高亮框的对象
+	linkedRects   []fyne.CanvasObject // 用于绘制图像点和列表联动高亮框的对象
+	tempRect      fyne.CanvasObject   // 用于绘制临时矩形的对象
 }
 
 func (r *imageViewerRenderer) MinSize() fyne.Size {
@@ -3385,6 +3653,12 @@ func (r *imageViewerRenderer) Layout(size fyne.Size) {
 
 	// 调整矩形标记的位置
 	r.updateRectsLayout()
+
+	// 调整找色测试高亮框的位置
+	r.updateFindTestRectsLayout()
+
+	// 调整图像点和列表联动高亮框的位置
+	r.updateLinkedRectsLayout()
 }
 
 func (r *imageViewerRenderer) Refresh() {
@@ -3393,12 +3667,16 @@ func (r *imageViewerRenderer) Refresh() {
 	// 更新点标记和矩形标记
 	r.updatePoints()
 	r.updateRects()
+	r.updateFindTestRects()
+	r.updateLinkedRects()
 	r.updateTempRect() // 更新临时矩形
 
 	// 确保我们有所有的对象
 	allObjects := []fyne.CanvasObject{r.viewer.displayImage, r.tempRect}
 	allObjects = append(allObjects, r.points...)
 	allObjects = append(allObjects, r.rects...)
+	allObjects = append(allObjects, r.findTestRects...)
+	allObjects = append(allObjects, r.linkedRects...)
 	if r.viewer.contextMenu != nil {
 		allObjects = append(allObjects, r.viewer.contextMenu)
 	}
@@ -3407,12 +3685,20 @@ func (r *imageViewerRenderer) Refresh() {
 	// 强制刷新所有点和矩形的大小和位置
 	r.updatePointsLayout()
 	r.updateRectsLayout()
+	r.updateFindTestRectsLayout()
+	r.updateLinkedRectsLayout()
 
 	// 刷新所有点和矩形
 	for _, p := range r.points {
 		p.Refresh()
 	}
 	for _, rect := range r.rects {
+		rect.Refresh()
+	}
+	for _, rect := range r.findTestRects {
+		rect.Refresh()
+	}
+	for _, rect := range r.linkedRects {
 		rect.Refresh()
 	}
 	r.tempRect.Refresh()
@@ -3477,6 +3763,65 @@ func (r *imageViewerRenderer) updateRectsLayout() {
 	}
 }
 
+func (r *imageViewerRenderer) updateFindTestRectsLayout() {
+	// 如果没有图像，不做任何事
+	if r.viewer.image == nil {
+		return
+	}
+
+	bounds := r.viewer.image.Bounds()
+	scale := r.viewer.currentZoomScale()
+	for i, rect := range r.findTestRects {
+		if i < len(r.viewer.findTestRects) {
+			markRect := r.viewer.findTestRects[i]
+
+			x := float32(min(markRect.X1, markRect.X2)-bounds.Min.X) * scale
+			y := float32(min(markRect.Y1, markRect.Y2)-bounds.Min.Y) * scale
+			width := float32(abs(markRect.X2-markRect.X1)) * scale
+			height := float32(abs(markRect.Y2-markRect.Y1)) * scale
+
+			if width < 1 {
+				width = 1
+			}
+			if height < 1 {
+				height = 1
+			}
+
+			rect.Move(fyne.NewPos(x, y))
+			rect.Resize(fyne.NewSize(width, height))
+		}
+	}
+}
+
+func (r *imageViewerRenderer) updateLinkedRectsLayout() {
+	if r.viewer.image == nil {
+		return
+	}
+
+	bounds := r.viewer.image.Bounds()
+	scale := r.viewer.currentZoomScale()
+	for i, rect := range r.linkedRects {
+		if i < len(r.viewer.linkedPointRects) {
+			markRect := r.viewer.linkedPointRects[i]
+
+			x := float32(min(markRect.X1, markRect.X2)-bounds.Min.X) * scale
+			y := float32(min(markRect.Y1, markRect.Y2)-bounds.Min.Y) * scale
+			width := float32(abs(markRect.X2-markRect.X1)) * scale
+			height := float32(abs(markRect.Y2-markRect.Y1)) * scale
+
+			if width < 1 {
+				width = 1
+			}
+			if height < 1 {
+				height = 1
+			}
+
+			rect.Move(fyne.NewPos(x, y))
+			rect.Resize(fyne.NewSize(width, height))
+		}
+	}
+}
+
 // 更新点标记（添加新点，移除旧点）
 func (r *imageViewerRenderer) updatePoints() {
 	// 清除现有点
@@ -3532,6 +3877,66 @@ func (r *imageViewerRenderer) updateRects() {
 		rect.Resize(fyne.NewSize(width, height))
 
 		r.rects = append(r.rects, rect)
+	}
+}
+
+func (r *imageViewerRenderer) updateFindTestRects() {
+	r.findTestRects = make([]fyne.CanvasObject, 0, len(r.viewer.findTestRects))
+
+	bounds := r.viewer.image.Bounds()
+	scale := r.viewer.currentZoomScale()
+	for _, markRect := range r.viewer.findTestRects {
+		rect := canvas.NewRectangle(markRect.Color)
+		rect.StrokeWidth = 2
+		rect.StrokeColor = markRect.Color
+		rect.FillColor = color.RGBA{0, 0, 0, 0}
+
+		x := float32(min(markRect.X1, markRect.X2)-bounds.Min.X) * scale
+		y := float32(min(markRect.Y1, markRect.Y2)-bounds.Min.Y) * scale
+		width := float32(abs(markRect.X2-markRect.X1)) * scale
+		height := float32(abs(markRect.Y2-markRect.Y1)) * scale
+
+		if width < 1 {
+			width = 1
+		}
+		if height < 1 {
+			height = 1
+		}
+
+		rect.Move(fyne.NewPos(x, y))
+		rect.Resize(fyne.NewSize(width, height))
+
+		r.findTestRects = append(r.findTestRects, rect)
+	}
+}
+
+func (r *imageViewerRenderer) updateLinkedRects() {
+	r.linkedRects = make([]fyne.CanvasObject, 0, len(r.viewer.linkedPointRects))
+
+	bounds := r.viewer.image.Bounds()
+	scale := r.viewer.currentZoomScale()
+	for _, markRect := range r.viewer.linkedPointRects {
+		rect := canvas.NewRectangle(markRect.Color)
+		rect.StrokeWidth = 3
+		rect.StrokeColor = markRect.Color
+		rect.FillColor = color.RGBA{0, 0, 0, 0}
+
+		x := float32(min(markRect.X1, markRect.X2)-bounds.Min.X) * scale
+		y := float32(min(markRect.Y1, markRect.Y2)-bounds.Min.Y) * scale
+		width := float32(abs(markRect.X2-markRect.X1)) * scale
+		height := float32(abs(markRect.Y2-markRect.Y1)) * scale
+
+		if width < 1 {
+			width = 1
+		}
+		if height < 1 {
+			height = 1
+		}
+
+		rect.Move(fyne.NewPos(x, y))
+		rect.Resize(fyne.NewSize(width, height))
+
+		r.linkedRects = append(r.linkedRects, rect)
 	}
 }
 
@@ -3664,14 +4069,16 @@ func max(a, b int) int {
 // 创建新的图像查看器
 func NewImageViewer() *ImageViewer {
 	viewer := &ImageViewer{
-		displayImage:    canvas.NewImageFromImage(nil),
-		markPoints:      make([]MarkPoint, 0),
-		markRects:       make([]MarkRect, 0),
-		tempRect:        nil, // 初始化为nil，表示没有临时矩形
-		rotationDegrees: 0,   // 初始化旋转角度为0
-		zoomScale:       1,
-		lastMouseX:      -1, // 初始化为-1，确保第一次移动会被检测到
-		lastMouseY:      -1,
+		displayImage:     canvas.NewImageFromImage(nil),
+		markPoints:       make([]MarkPoint, 0),
+		markRects:        make([]MarkRect, 0),
+		findTestRects:    make([]MarkRect, 0),
+		linkedPointRects: make([]MarkRect, 0),
+		tempRect:         nil, // 初始化为nil，表示没有临时矩形
+		rotationDegrees:  0,   // 初始化旋转角度为0
+		zoomScale:        1,
+		lastMouseX:       -1, // 初始化为-1，确保第一次移动会被检测到
+		lastMouseY:       -1,
 		onMouseMove: func(x, y int) {
 			//fmt.Printf("鼠标移动: X=%d, Y=%d\n", x, y)
 		},
@@ -4958,6 +5365,12 @@ func main() {
 			imageViewer.ShowOriginalSize()
 		}
 	})
+	clearFindMarksBtn := widget.NewButton("清除查找标记", func() {
+		if imageViewer != nil {
+			imageViewer.ClearFindTestHighlights()
+		}
+	})
+	clearFindMarksBtn.Importance = widget.MediumImportance
 
 	pickModeSelect := widget.NewSelect([]string{
 		"随机取点",
@@ -5005,7 +5418,7 @@ func main() {
 		resetZoomBtn,
 		originalSizeBtn,
 		makeButton("抓取节点"),
-		makeButton("清除查找标记"),
+		clearFindMarksBtn,
 		makeButton("自动取色 (CTRL+A)"),
 		pickModeSelect,
 		container.NewBorder(nil, nil, widget.NewLabel("取色个数"), nil, pickCountEntry),
@@ -5056,6 +5469,7 @@ func main() {
 
 	updateTableSelection = func() {
 		fyne.Do(func() {
+			refreshLinkedColorPointVisual()
 			if tableContent != nil {
 				tableContent.Refresh()
 			}
@@ -5113,9 +5527,15 @@ func main() {
 			idxText.Color = textColor
 			rgbText.Color = textColor
 			idxText.Text = strconv.Itoa(id + 1)
+			row.id = id
+			row.onDoubleTap = nil
+			row.background.FillColor = linkedColorPointRowBackground(id)
 
 			if id < len(colorPoints) {
 				point := colorPoints[id]
+				row.onDoubleTap = func() {
+					activateLinkedColorPoint(id)
+				}
 				coordEntry.Enable()
 				coordEntry.onCommit = func(value string) {
 					commitColorPointPosition(id, value)
@@ -5159,6 +5579,7 @@ func main() {
 				statusCheck.OnChanged = func(bool) {}
 			}
 
+			row.background.Refresh()
 			idxText.Refresh()
 			coordEntry.Refresh()
 			rgbText.Refresh()
@@ -5273,6 +5694,9 @@ func main() {
 		if strings.TrimSpace(resultEntry.Text) != "" {
 			resultEntry.SetText("")
 		}
+		if imageViewer != nil {
+			imageViewer.ClearFindTestHighlights()
+		}
 		return code
 	}
 	findTestBtn := widget.NewButton("找色测试", func() {
@@ -5284,7 +5708,11 @@ func main() {
 		if imageViewer != nil {
 			img = imageViewer.image
 		}
-		resultEntry.SetText(runImageFindTestResult(img, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected))
+		result, highlights := runImageFindTestResultAndHighlights(img, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
+		resultEntry.SetText(result)
+		if imageViewer != nil {
+			imageViewer.SetFindTestHighlights(highlights)
+		}
 	})
 	saveCurrentConfig = func() {
 		saveUserConfigSilently(UserConfig{
