@@ -17,9 +17,10 @@ import (
 )
 
 const androidNodeDumpPath = "/sdcard/window_dump.xml"
-const compactNodeToolAttrSelectWidth float32 = 24
+const compactNodeToolAttrSelectWidth float32 = 40
 const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 58
+const compactNodeToolAttrRowMinHeight float32 = 24
 
 type AndroidUINode struct {
 	Number   int
@@ -47,6 +48,13 @@ func newCompactNodeToolText(value string) *widget.Label {
 	text := widget.NewLabel(value)
 	text.SizeName = theme.SizeNameCaptionText
 	text.Truncation = fyne.TextTruncateClip
+	text.Wrapping = fyne.TextWrapOff
+	return text
+}
+
+func newNodeTreeToolText() *widget.Label {
+	text := widget.NewLabel("")
+	text.SizeName = theme.SizeNameCaptionText
 	text.Wrapping = fyne.TextWrapOff
 	return text
 }
@@ -99,11 +107,14 @@ type androidNodeAttrToggleRowRenderer struct {
 func (r *androidNodeAttrToggleRowRenderer) Destroy() {}
 
 func (r *androidNodeAttrToggleRowRenderer) Layout(size fyne.Size) {
+	r.row.content.Move(fyne.NewPos(0, 0))
 	r.row.content.Resize(size)
 }
 
 func (r *androidNodeAttrToggleRowRenderer) MinSize() fyne.Size {
-	return r.row.content.MinSize()
+	min := r.row.content.MinSize()
+	min.Height = fyne.Max(min.Height, compactNodeToolAttrRowMinHeight)
+	return min
 }
 
 func (r *androidNodeAttrToggleRowRenderer) Objects() []fyne.CanvasObject {
@@ -196,7 +207,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 			return uid == "" || len(tool.treeChildren[uid]) > 0
 		},
 		func(bool) fyne.CanvasObject {
-			return container.NewHBox(newCompactNodeToolText(""))
+			return container.NewHBox(newNodeTreeToolText())
 		},
 		func(uid widget.TreeNodeID, branch bool, item fyne.CanvasObject) {
 			row := item.(*fyne.Container)
@@ -451,9 +462,9 @@ func (t *AndroidNodeTool) rebuildAttrList() {
 }
 
 func newAndroidNodeAttrRowContent(attr androidNodeAttrRow) *fyne.Container {
-	selected := "☐"
+	selected := "[ ]"
 	if attr.Selected {
-		selected = "☑"
+		selected = "[x]"
 	}
 
 	selectedText := newCompactNodeToolText(selected)
