@@ -122,6 +122,15 @@ var (
 	adb              = findADBPath()
 )
 
+var pickModeOptions = []string{
+	"随机取点",
+	"轮廓取点",
+	"高亮取点",
+	"骨骼取点",
+	"颜色分类轮廓",
+	"颜色分类随机",
+}
+
 func initialWindowSize(widthRatio, heightRatio float32) fyne.Size {
 	const (
 		fallbackWidth  = 1000
@@ -338,6 +347,15 @@ func defaultUserConfig() UserConfig {
 	}
 }
 
+func validPickMode(mode string) bool {
+	for _, option := range pickModeOptions {
+		if mode == option {
+			return true
+		}
+	}
+	return false
+}
+
 func userConfigPath() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -357,7 +375,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 	if strings.TrimSpace(config.PickCount) == "" {
 		config.PickCount = defaults.PickCount
 	}
-	if strings.TrimSpace(config.PickMode) == "" {
+	if !validPickMode(config.PickMode) {
 		config.PickMode = defaults.PickMode
 	}
 	if strings.TrimSpace(config.FunctionMode) == "" {
@@ -5795,15 +5813,7 @@ func main() {
 	})
 	clearFindMarksBtn.Importance = widget.MediumImportance
 
-	pickModeSelect := widget.NewSelect([]string{
-		"随机取点",
-		"轮廓取点",
-		"重要取点",
-		"最高和点",
-		"最高和取点",
-		"颜色分类轮廓",
-		"颜色分类随机",
-	}, func(string) {
+	pickModeSelect := widget.NewSelect(pickModeOptions, func(string) {
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
 		}
