@@ -453,6 +453,10 @@ func (t *AndroidNodeTool) rebuildAttrList() {
 			if index < 0 || index >= len(t.attrRows) {
 				return
 			}
+			if !androidNodeAttrSelectable(t.attrRows[index]) {
+				t.setStatus(fmt.Sprintf("%s 不能生成 XPath 选择器", t.attrRows[index].Name))
+				return
+			}
 			t.attrRows[index].Selected = !t.attrRows[index].Selected
 			t.refreshSelector()
 			t.rebuildAttrList()
@@ -463,7 +467,9 @@ func (t *AndroidNodeTool) rebuildAttrList() {
 
 func newAndroidNodeAttrRowContent(attr androidNodeAttrRow) *fyne.Container {
 	selected := "[ ]"
-	if attr.Selected {
+	if !androidNodeAttrSelectable(attr) {
+		selected = "[-]"
+	} else if attr.Selected {
 		selected = "[x]"
 	}
 
@@ -476,6 +482,10 @@ func newAndroidNodeAttrRowContent(attr androidNodeAttrRow) *fyne.Container {
 		newCompactNodeToolText(trimMiddle(attr.Value, 28)),
 		newCompactNodeToolText(attr.Finder),
 	)
+}
+
+func androidNodeAttrSelectable(attr androidNodeAttrRow) bool {
+	return attr.Value != "" && androidNodeFinderToXMLAttr(attr.Finder) != ""
 }
 
 func (t *AndroidNodeTool) highlightSelectedNode() {
@@ -642,7 +652,7 @@ func (t *AndroidNodeTool) smallestNodeAtPoint(point image.Point) *AndroidUINode 
 
 func (t *AndroidNodeTool) setAllAttrRows(selected bool) {
 	for i := range t.attrRows {
-		t.attrRows[i].Selected = selected
+		t.attrRows[i].Selected = selected && androidNodeAttrSelectable(t.attrRows[i])
 	}
 	t.refreshSelector()
 	t.rebuildAttrList()
@@ -662,13 +672,10 @@ func (t *AndroidNodeTool) selectedXPath() string {
 
 	var parts []string
 	for _, row := range t.attrRows {
-		if !row.Selected || row.Value == "" {
+		if !row.Selected || !androidNodeAttrSelectable(row) {
 			continue
 		}
 		xmlAttr := androidNodeFinderToXMLAttr(row.Finder)
-		if xmlAttr == "" {
-			continue
-		}
 		parts = append(parts, fmt.Sprintf("[@%s=%s]", xmlAttr, xpathLiteral(row.Value)))
 	}
 	if len(parts) == 0 {
@@ -902,7 +909,8 @@ func buildAndroidNodeAttrRows(node *AndroidUINode) []androidNodeAttrRow {
 			continue
 		}
 
-		selected := value != "" && (name == "id" || name == "desc" || name == "text")
+		finder := finders[name]
+		selected := value != "" && (name == "id" || name == "desc" || name == "text") && androidNodeFinderToXMLAttr(finder) != ""
 		if selected {
 			hasStableSelection = true
 		}
@@ -910,13 +918,13 @@ func buildAndroidNodeAttrRows(node *AndroidUINode) []androidNodeAttrRow {
 			Selected: selected,
 			Name:     name,
 			Value:    value,
-			Finder:   finders[name],
+			Finder:   finder,
 		})
 	}
 
 	if !hasStableSelection {
 		for i := range rows {
-			if rows[i].Name == "class" && rows[i].Value != "" {
+			if rows[i].Name == "class" && androidNodeAttrSelectable(rows[i]) {
 				rows[i].Selected = true
 				break
 			}
