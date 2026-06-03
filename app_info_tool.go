@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -19,6 +21,122 @@ type AndroidAppInfo struct {
 	ActivityName string   `json:"activityName"`
 	Activities   []string `json:"activities"`
 }
+
+type appInfoCopyLabel struct {
+	widget.Label
+	onTapped func()
+}
+
+func newAppInfoCopyLabel(text string, onTapped func()) *appInfoCopyLabel {
+	label := &appInfoCopyLabel{onTapped: onTapped}
+	label.Text = text
+	label.Wrapping = fyne.TextWrapOff
+	label.ExtendBaseWidget(label)
+	return label
+}
+
+func (l *appInfoCopyLabel) Tapped(*fyne.PointEvent) {
+	if l.onTapped != nil {
+		l.onTapped()
+	}
+}
+
+func (l *appInfoCopyLabel) TappedSecondary(event *fyne.PointEvent) {
+	l.Tapped(event)
+}
+
+type appInfoDisplayBox struct {
+	widget.BaseWidget
+
+	label    *widget.Label
+	text     string
+	onTapped func()
+}
+
+func newAppInfoDisplayBox(onTapped func()) *appInfoDisplayBox {
+	box := &appInfoDisplayBox{
+		label:    widget.NewLabel("-"),
+		onTapped: onTapped,
+	}
+	box.label.Wrapping = fyne.TextWrapOff
+	box.label.Truncation = fyne.TextTruncateEllipsis
+	box.ExtendBaseWidget(box)
+	return box
+}
+
+func (b *appInfoDisplayBox) Text() string {
+	return b.text
+}
+
+func (b *appInfoDisplayBox) SetText(text string) {
+	b.text = strings.TrimSpace(text)
+	displayText := b.text
+	if displayText == "" {
+		displayText = "-"
+	}
+	b.label.SetText(displayText)
+	b.Refresh()
+}
+
+func (b *appInfoDisplayBox) Tapped(*fyne.PointEvent) {
+	if b.onTapped != nil {
+		b.onTapped()
+	}
+}
+
+func (b *appInfoDisplayBox) TappedSecondary(event *fyne.PointEvent) {
+	b.Tapped(event)
+}
+
+func (b *appInfoDisplayBox) CreateRenderer() fyne.WidgetRenderer {
+	bg := canvas.NewRectangle(theme.InputBackgroundColor())
+	bg.StrokeColor = theme.InputBorderColor()
+	bg.StrokeWidth = 1
+	return &appInfoDisplayBoxRenderer{
+		box:     b,
+		bg:      bg,
+		objects: []fyne.CanvasObject{bg, b.label},
+	}
+}
+
+type appInfoDisplayBoxRenderer struct {
+	box     *appInfoDisplayBox
+	bg      *canvas.Rectangle
+	objects []fyne.CanvasObject
+}
+
+func (r *appInfoDisplayBoxRenderer) Layout(size fyne.Size) {
+	r.bg.Resize(size)
+	padding := theme.InnerPadding()
+	labelSize := fyne.NewSize(size.Width-padding*2, size.Height-padding)
+	if labelSize.Width < 0 {
+		labelSize.Width = 0
+	}
+	if labelSize.Height < 0 {
+		labelSize.Height = 0
+	}
+	r.box.label.Move(fyne.NewPos(padding, padding/2))
+	r.box.label.Resize(labelSize)
+}
+
+func (r *appInfoDisplayBoxRenderer) MinSize() fyne.Size {
+	padding := theme.InnerPadding()
+	minSize := r.box.label.MinSize()
+	return fyne.NewSize(minSize.Width+padding*2, minSize.Height+padding)
+}
+
+func (r *appInfoDisplayBoxRenderer) Refresh() {
+	r.bg.FillColor = theme.InputBackgroundColor()
+	r.bg.StrokeColor = theme.InputBorderColor()
+	r.bg.Refresh()
+	r.box.label.Refresh()
+}
+
+func (r *appInfoDisplayBoxRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *appInfoDisplayBoxRenderer) Destroy() {}
 
 type AndroidAppInfoTool struct {
 	window fyne.Window
@@ -31,9 +149,9 @@ type AndroidAppInfoTool struct {
 	statusLabel *widget.Label
 	appList     *widget.List
 
-	nameEntry      *widget.Entry
-	packageEntry   *widget.Entry
-	launcherEntry  *widget.Entry
+	nameField      *appInfoDisplayBox
+	packageField   *appInfoDisplayBox
+	launcherField  *appInfoDisplayBox
 	activitiesList *widget.List
 
 	busy         bool
@@ -123,24 +241,27 @@ func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *Andr
 		tool.selectFilteredApp(id, false)
 	}
 
-	tool.nameEntry = widget.NewEntry()
-	tool.nameEntry.SetPlaceHolder("应用名称")
-	tool.packageEntry = widget.NewEntry()
-	tool.packageEntry.SetPlaceHolder("应用包名")
-	tool.launcherEntry = widget.NewEntry()
-	tool.launcherEntry.SetPlaceHolder("启动界面")
-
 	copyNameBtn := widget.NewButton("复制", func() {
-		tool.copyText("应用名称", tool.nameEntry.Text)
+		tool.copyText("应用名称", tool.nameField.Text())
 	})
 	copyPackageBtn := widget.NewButton("复制", func() {
-		tool.copyText("应用包名", tool.packageEntry.Text)
+		tool.copyText("应用包名", tool.packageField.Text())
 	})
 	copyLauncherBtn := widget.NewButton("复制", func() {
-		tool.copyText("启动界面", tool.launcherEntry.Text)
+		tool.copyText("界面名称", tool.launcherField.Text())
 	})
 	copyActivitiesBtn := widget.NewButton("复制全部", func() {
 		tool.copyText("其它界面", strings.Join(tool.selectedActivities, "\n"))
+	})
+
+	tool.nameField = newAppInfoDisplayBox(func() {
+		tool.copyText("应用名称", tool.nameField.Text())
+	})
+	tool.packageField = newAppInfoDisplayBox(func() {
+		tool.copyText("应用包名", tool.packageField.Text())
+	})
+	tool.launcherField = newAppInfoDisplayBox(func() {
+		tool.copyText("界面名称", tool.launcherField.Text())
 	})
 
 	tool.activitiesList = widget.NewList(
@@ -176,11 +297,19 @@ func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *Andr
 
 	detailPanel := container.NewVBox(
 		widget.NewLabel("应用详情"),
-		container.NewBorder(nil, nil, widget.NewLabel("名称"), copyNameBtn, tool.nameEntry),
-		container.NewBorder(nil, nil, widget.NewLabel("包名"), copyPackageBtn, tool.packageEntry),
-		container.NewBorder(nil, nil, widget.NewLabel("启动"), copyLauncherBtn, tool.launcherEntry),
-		container.NewBorder(nil, nil, nil, copyActivitiesBtn, widget.NewLabel("其它界面")),
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.activitiesList), 150),
+		container.NewBorder(nil, nil, newAppInfoCopyLabel("名称", func() {
+			tool.copyText("应用名称", tool.nameField.Text())
+		}), copyNameBtn, tool.nameField),
+		container.NewBorder(nil, nil, newAppInfoCopyLabel("包名", func() {
+			tool.copyText("应用包名", tool.packageField.Text())
+		}), copyPackageBtn, tool.packageField),
+		container.NewBorder(nil, nil, newAppInfoCopyLabel("界面", func() {
+			tool.copyText("界面名称", tool.launcherField.Text())
+		}), copyLauncherBtn, tool.launcherField),
+		container.NewBorder(nil, nil, nil, copyActivitiesBtn, newAppInfoCopyLabel("其它界面", func() {
+			tool.copyText("其它界面", strings.Join(tool.selectedActivities, "\n"))
+		})),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.activitiesList), 170),
 	)
 
 	tool.root = container.NewVBox(
@@ -293,14 +422,14 @@ func (t *AndroidAppInfoTool) selectFilteredApp(id int, updateList bool) {
 	t.selectedApp = app
 	t.selectedActivities = androidAppOtherActivities(app)
 
-	if t.nameEntry != nil {
-		t.nameEntry.SetText(app.Name)
+	if t.nameField != nil {
+		t.nameField.SetText(app.Name)
 	}
-	if t.packageEntry != nil {
-		t.packageEntry.SetText(app.PackageName)
+	if t.packageField != nil {
+		t.packageField.SetText(app.PackageName)
 	}
-	if t.launcherEntry != nil {
-		t.launcherEntry.SetText(app.ActivityName)
+	if t.launcherField != nil {
+		t.launcherField.SetText(app.ActivityName)
 	}
 	if t.activitiesList != nil {
 		t.activitiesList.Refresh()
@@ -316,14 +445,14 @@ func (t *AndroidAppInfoTool) clearSelectedApp() {
 	t.hasSelectedApp = false
 	t.selectedApp = AndroidAppInfo{}
 	t.selectedActivities = nil
-	if t.nameEntry != nil {
-		t.nameEntry.SetText("")
+	if t.nameField != nil {
+		t.nameField.SetText("")
 	}
-	if t.packageEntry != nil {
-		t.packageEntry.SetText("")
+	if t.packageField != nil {
+		t.packageField.SetText("")
 	}
-	if t.launcherEntry != nil {
-		t.launcherEntry.SetText("")
+	if t.launcherField != nil {
+		t.launcherField.SetText("")
 	}
 	if t.activitiesList != nil {
 		t.activitiesList.Refresh()
