@@ -55,7 +55,9 @@ func TestBuildAndroidNodeAttrRowsSelectsStableAttrs(t *testing.T) {
 
 	rows := buildAndroidNodeAttrRows(node)
 	selected := map[string]bool{}
+	methods := map[string]string{}
 	for _, row := range rows {
+		methods[row.Name] = row.Method
 		if row.Selected {
 			selected[row.Name] = true
 		}
@@ -68,6 +70,12 @@ func TestBuildAndroidNodeAttrRowsSelectsStableAttrs(t *testing.T) {
 	}
 	if selected["bounds"] {
 		t.Fatal("bounds should not be selected by default")
+	}
+	if methods["text"] != "Text" || methods["desc"] != "Desc" || methods["id"] != "Id" {
+		t.Fatalf("unexpected default methods: text=%q desc=%q id=%q", methods["text"], methods["desc"], methods["id"])
+	}
+	if methods["bounds"] != "Bounds" {
+		t.Fatalf("expected bounds default method Bounds, got %q", methods["bounds"])
 	}
 }
 
@@ -89,6 +97,80 @@ func TestSelectedXPath(t *testing.T) {
 	}
 	if !strings.Contains(xpath, "concat(") {
 		t.Fatalf("expected concat literal for mixed quotes, got %s", xpath)
+	}
+}
+
+func TestBuildAndroidNodeSelectorChain(t *testing.T) {
+	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "text", Value: "登录", Kind: androidNodeAttrString, Method: "TextContains"},
+		{Selected: true, Name: "clickable", Value: "true", Kind: androidNodeAttrBool, Method: "Clickable"},
+		{Selected: true, Name: "bounds", Value: "[10,20][80,60]", Kind: androidNodeAttrBounds, Method: "Bounds"},
+		{Selected: false, Name: "class", Value: "android.widget.Button", Kind: androidNodeAttrString, Method: "ClassName"},
+	}
+
+	chain, err := buildAndroidNodeSelectorChain(rows)
+	if err != nil {
+		t.Fatalf("buildAndroidNodeSelectorChain returned error: %v", err)
+	}
+	want := `.TextContains("登录").Clickable(true).Bounds(10, 20, 80, 60)`
+	if chain != want {
+		t.Fatalf("expected chain %s, got %s", want, chain)
+	}
+}
+
+func TestBuildAndroidNodeSelectorCodeUsesTemplate(t *testing.T) {
+	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "id", Value: "demo:id/login", Kind: androidNodeAttrString, Method: "Id"},
+	}
+
+	code, err := buildAndroidNodeSelectorCode(rows, androidNodeSelectorOptions{
+		DisplayID: "1",
+		Function:  androidNodeSelectorFuncWaitFor,
+		Template:  "acc := uiacc.New({displayId})\nobj := acc{params}.{call}",
+		Timeout:   "5000",
+	})
+	if err != nil {
+		t.Fatalf("buildAndroidNodeSelectorCode returned error: %v", err)
+	}
+	if !strings.Contains(code, "uiacc.New(1)") {
+		t.Fatalf("expected display id in code, got %s", code)
+	}
+	if !strings.Contains(code, `.Id("demo:id/login").WaitFor(5000)`) {
+		t.Fatalf("expected id wait chain in code, got %s", code)
+	}
+}
+
+func TestAndroidNodeMatchesAttrsUsesMethodSemantics(t *testing.T) {
+	node := &AndroidUINode{
+		Attrs: map[string]string{
+			"text":      "登录按钮",
+			"clickable": "true",
+			"bounds":    "[10,20][80,60]",
+		},
+	}
+	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "text", Value: "登录", XMLAttr: "text", Kind: androidNodeAttrString, Method: "TextContains"},
+		{Selected: true, Name: "clickable", Value: "true", XMLAttr: "clickable", Kind: androidNodeAttrBool, Method: "Clickable"},
+		{Selected: true, Name: "bounds", Value: "[0,0][100,100]", XMLAttr: "bounds", Kind: androidNodeAttrBounds, Method: "BoundsInside"},
+	}
+
+	matched, err := androidNodeMatchesAttrs(node, rows)
+	if err != nil {
+		t.Fatalf("androidNodeMatchesAttrs returned error: %v", err)
+	}
+	if !matched {
+		t.Fatal("expected node to match contains/bool/boundsInside selectors")
+	}
+}
+
+func TestAndroidNodeMatchesAttrsReportsInvalidRegex(t *testing.T) {
+	node := &AndroidUINode{Attrs: map[string]string{"text": "登录"}}
+	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "text", Value: "[", XMLAttr: "text", Kind: androidNodeAttrString, Method: "TextMatches"},
+	}
+
+	if _, err := androidNodeMatchesAttrs(node, rows); err == nil {
+		t.Fatal("expected invalid regex error")
 	}
 }
 

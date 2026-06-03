@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,13 @@ import (
 const androidNodeDumpPath = "/sdcard/window_dump.xml"
 const compactNodeToolAttrSelectWidth float32 = 40
 const compactNodeToolAttrNameWidth float32 = 68
-const compactNodeToolAttrFinderWidth float32 = 58
-const compactNodeToolAttrRowMinHeight float32 = 24
+const compactNodeToolAttrFinderWidth float32 = 118
+
+const androidNodeSelectorFuncFindOnce = "FindOnce"
+const androidNodeSelectorFuncFind = "Find"
+const androidNodeSelectorFuncWaitFor = "WaitFor"
+const androidNodeSelectorDefaultTimeout = "3000"
+const androidNodeSelectorDefaultTemplate = "acc := uiacc.New({displayId})\nobj := acc{chain}.{call}"
 
 type AndroidUINode struct {
 	Number   int
@@ -41,7 +47,57 @@ type androidNodeAttrRow struct {
 	Selected bool
 	Name     string
 	Value    string
-	Finder   string
+
+	Finder  string
+	XMLAttr string
+	Kind    androidNodeAttrKind
+	Method  string
+	Methods []string
+}
+
+type androidNodeAttrKind int
+
+const (
+	androidNodeAttrUnsupported androidNodeAttrKind = iota
+	androidNodeAttrString
+	androidNodeAttrBool
+	androidNodeAttrInt
+	androidNodeAttrBounds
+)
+
+type androidNodeAttrMeta struct {
+	Name    string
+	XMLAttr string
+	Finder  string
+	Kind    androidNodeAttrKind
+	Methods []string
+}
+
+var androidNodeAttrMetas = []androidNodeAttrMeta{
+	{Name: "depth", Kind: androidNodeAttrUnsupported},
+	{Name: "index", XMLAttr: "index", Finder: "index", Kind: androidNodeAttrInt, Methods: []string{"Index"}},
+	{Name: "drawingOrder", XMLAttr: "drawing-order", Finder: "drawing-order", Kind: androidNodeAttrInt, Methods: []string{"DrawingOrder"}},
+	{Name: "class", XMLAttr: "class", Finder: "class", Kind: androidNodeAttrString, Methods: []string{"ClassName", "ClassNameContains", "ClassNameStartsWith", "ClassNameEndsWith", "ClassNameMatches"}},
+	{Name: "package", XMLAttr: "package", Finder: "package", Kind: androidNodeAttrString, Methods: []string{"PackageName", "PackageNameContains", "PackageNameStartsWith", "PackageNameEndsWith", "PackageNameMatches"}},
+	{Name: "text", XMLAttr: "text", Finder: "text", Kind: androidNodeAttrString, Methods: []string{"Text", "TextContains", "TextStartsWith", "TextEndsWith", "TextMatches"}},
+	{Name: "desc", XMLAttr: "content-desc", Finder: "desc", Kind: androidNodeAttrString, Methods: []string{"Desc", "DescContains", "DescStartsWith", "DescEndsWith", "DescMatches"}},
+	{Name: "id", XMLAttr: "resource-id", Finder: "id", Kind: androidNodeAttrString, Methods: []string{"Id", "IdContains", "IdStartsWith", "IdEndsWith", "IdMatches"}},
+	{Name: "bounds", XMLAttr: "bounds", Kind: androidNodeAttrBounds, Methods: []string{"Bounds", "BoundsInside", "BoundsContains"}},
+	{Name: "checkable", XMLAttr: "checkable", Finder: "checkable", Kind: androidNodeAttrBool, Methods: []string{"Checkable"}},
+	{Name: "checked", XMLAttr: "checked", Finder: "checked", Kind: androidNodeAttrBool, Methods: []string{"Checked"}},
+	{Name: "clickable", XMLAttr: "clickable", Finder: "clickable", Kind: androidNodeAttrBool, Methods: []string{"Clickable"}},
+	{Name: "enabled", XMLAttr: "enabled", Finder: "enabled", Kind: androidNodeAttrBool, Methods: []string{"Enabled"}},
+	{Name: "focusable", XMLAttr: "focusable", Finder: "focusable", Kind: androidNodeAttrBool, Methods: []string{"Focusable"}},
+	{Name: "focused", XMLAttr: "focused", Finder: "focused", Kind: androidNodeAttrBool, Methods: []string{"Focused"}},
+	{Name: "scrollable", XMLAttr: "scrollable", Finder: "scrollable", Kind: androidNodeAttrBool, Methods: []string{"Scrollable"}},
+	{Name: "editable", XMLAttr: "editable", Finder: "editable", Kind: androidNodeAttrBool, Methods: []string{"Editable"}},
+	{Name: "longClickable", XMLAttr: "long-clickable", Finder: "long-clickable", Kind: androidNodeAttrBool, Methods: []string{"LongClickable"}},
+	{Name: "password", XMLAttr: "password", Finder: "password", Kind: androidNodeAttrBool, Methods: []string{"Password"}},
+	{Name: "selected", XMLAttr: "selected", Finder: "selected", Kind: androidNodeAttrBool, Methods: []string{"Selected"}},
+	{Name: "visible", XMLAttr: "visible", Finder: "visible", Kind: androidNodeAttrBool, Methods: []string{"Visible"}},
+	{Name: "multiLine", XMLAttr: "multi-line", Finder: "multi-line", Kind: androidNodeAttrBool, Methods: []string{"MultiLine"}},
+	{Name: "dismissable", XMLAttr: "dismissable", Finder: "dismissable", Kind: androidNodeAttrBool, Methods: []string{"Dismissable"}},
+	{Name: "contextClickable", XMLAttr: "context-clickable", Finder: "context-clickable", Kind: androidNodeAttrBool, Methods: []string{"ContextClickable"}},
 }
 
 func newCompactNodeToolText(value string) *widget.Label {
@@ -71,60 +127,6 @@ func newCompactNodeToolAttrRow(selected, name, value, finder fyne.CanvasObject) 
 	return container.NewBorder(nil, nil, selectedBox, finderBox, main)
 }
 
-type androidNodeAttrToggleRow struct {
-	widget.BaseWidget
-	content  *fyne.Container
-	onTapped func()
-}
-
-func newAndroidNodeAttrToggleRow(content *fyne.Container, onTapped func()) *androidNodeAttrToggleRow {
-	row := &androidNodeAttrToggleRow{
-		content:  content,
-		onTapped: onTapped,
-	}
-	row.ExtendBaseWidget(row)
-	return row
-}
-
-func (r *androidNodeAttrToggleRow) Tapped(*fyne.PointEvent) {
-	if r.onTapped != nil {
-		r.onTapped()
-	}
-}
-
-func (r *androidNodeAttrToggleRow) CreateRenderer() fyne.WidgetRenderer {
-	return &androidNodeAttrToggleRowRenderer{
-		row:     r,
-		objects: []fyne.CanvasObject{r.content},
-	}
-}
-
-type androidNodeAttrToggleRowRenderer struct {
-	row     *androidNodeAttrToggleRow
-	objects []fyne.CanvasObject
-}
-
-func (r *androidNodeAttrToggleRowRenderer) Destroy() {}
-
-func (r *androidNodeAttrToggleRowRenderer) Layout(size fyne.Size) {
-	r.row.content.Move(fyne.NewPos(0, 0))
-	r.row.content.Resize(size)
-}
-
-func (r *androidNodeAttrToggleRowRenderer) MinSize() fyne.Size {
-	min := r.row.content.MinSize()
-	min.Height = fyne.Max(min.Height, compactNodeToolAttrRowMinHeight)
-	return min
-}
-
-func (r *androidNodeAttrToggleRowRenderer) Objects() []fyne.CanvasObject {
-	return r.objects
-}
-
-func (r *androidNodeAttrToggleRowRenderer) Refresh() {
-	r.row.content.Refresh()
-}
-
 type AndroidNodeTool struct {
 	window fyne.Window
 
@@ -141,6 +143,8 @@ type AndroidNodeTool struct {
 	nodeTree         *widget.Tree
 	attrList         *fyne.Container
 	selectorEntry    *widget.Entry
+	selectorFunc     *widget.Select
+	selectorFormat   *widget.Entry
 	copySelectorBtn  *widget.Button
 	copyAttrsBtn     *widget.Button
 	selectAllBtn     *widget.Button
@@ -251,20 +255,48 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	tool.testSelectorBtn = widget.NewButton("查找测试", func() {
 		tool.testSelectedAttrs()
 	})
-	tool.copySelectorBtn = widget.NewButton("复制选择器", func() {
-		if tool.window != nil {
-			tool.window.Clipboard().SetContent(tool.selectorEntry.Text)
+	generateSelectorBtn := widget.NewButton("生成代码", func() {
+		code, err := tool.selectedSelectorCode()
+		if err != nil {
+			tool.selectorEntry.SetText("生成失败: " + err.Error())
+			tool.setStatus("生成代码失败: " + err.Error())
+			return
 		}
+		if strings.TrimSpace(code) == "" {
+			tool.setStatus("请先勾选至少一个有效属性")
+			return
+		}
+		tool.selectorEntry.SetText(code)
+		tool.setStatus("已生成 uiacc 代码")
 	})
-	tool.copyAttrsBtn = widget.NewButton("复制属性", func() {
-		if tool.window != nil {
-			tool.window.Clipboard().SetContent(tool.selectedAttrsText())
-		}
+	tool.copySelectorBtn = widget.NewButton("复制代码", func() {
+		tool.copySelectedSelectorCode()
+	})
+	tool.copyAttrsBtn = widget.NewButton("复制参数", func() {
+		tool.copySelectedSelectorParams()
 	})
 
+	tool.selectorFunc = widget.NewSelect([]string{
+		androidNodeSelectorFuncFindOnce,
+		androidNodeSelectorFuncFind,
+		androidNodeSelectorFuncWaitFor,
+	}, nil)
+	tool.selectorFunc.SetSelected(androidNodeSelectorFuncFindOnce)
+	tool.selectorFunc.OnChanged = func(string) {
+		tool.refreshSelector()
+	}
+
+	tool.selectorFormat = widget.NewMultiLineEntry()
+	tool.selectorFormat.SetPlaceHolder("输出格式，支持 {displayId} / {chain} / {params} / {function} / {call} / {timeout}")
+	tool.selectorFormat.SetMinRowsVisible(2)
+	tool.selectorFormat.SetText(androidNodeSelectorDefaultTemplate)
+	tool.selectorFormat.OnChanged = func(string) {
+		tool.refreshSelector()
+	}
+
 	tool.selectorEntry = widget.NewMultiLineEntry()
-	tool.selectorEntry.SetPlaceHolder("选择节点并勾选属性后生成 XPath 选择器")
-	tool.selectorEntry.SetMinRowsVisible(2)
+	tool.selectorEntry.SetPlaceHolder("选择节点并勾选属性后生成 AutoGo uiacc 代码")
+	tool.selectorEntry.SetMinRowsVisible(3)
 
 	nodeHeader := newCompactNodeToolText("节点树")
 	attrHeader := newCompactNodeToolAttrRow(
@@ -282,8 +314,10 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 230),
 		attrHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tool.attrList)), 180),
-		container.NewGridWithColumns(3, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn),
-		container.NewBorder(nil, nil, widget.NewLabel("选择器"), container.NewHBox(tool.copyAttrsBtn, tool.copySelectorBtn), tool.selectorEntry),
+		container.NewGridWithColumns(4, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn, generateSelectorBtn),
+		container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, tool.selectorFunc),
+		container.NewBorder(nil, nil, widget.NewLabel("格式"), tool.copyAttrsBtn, tool.selectorFormat),
+		container.NewBorder(nil, nil, widget.NewLabel("代码"), tool.copySelectorBtn, tool.selectorEntry),
 	)
 
 	return tool
@@ -448,44 +482,57 @@ func (t *AndroidNodeTool) rebuildAttrList() {
 	t.attrList.RemoveAll()
 	for i, attr := range t.attrRows {
 		index := i
-		rowContent := newAndroidNodeAttrRowContent(attr)
-		t.attrList.Add(newAndroidNodeAttrToggleRow(rowContent, func() {
-			if index < 0 || index >= len(t.attrRows) {
-				return
-			}
-			if !androidNodeAttrSelectable(t.attrRows[index]) {
-				t.setStatus(fmt.Sprintf("%s 不能生成 XPath 选择器", t.attrRows[index].Name))
-				return
-			}
-			t.attrRows[index].Selected = !t.attrRows[index].Selected
-			t.refreshSelector()
-			t.rebuildAttrList()
-		}))
+		t.attrList.Add(t.newAndroidNodeAttrRowContent(index, attr))
 	}
 	t.attrList.Refresh()
 }
 
-func newAndroidNodeAttrRowContent(attr androidNodeAttrRow) *fyne.Container {
-	selected := "[ ]"
-	if !androidNodeAttrSelectable(attr) {
-		selected = "[-]"
-	} else if attr.Selected {
-		selected = "[x]"
+func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNodeAttrRow) *fyne.Container {
+	selectable := androidNodeAttrSelectable(attr)
+	check := widget.NewCheck("", nil)
+	check.SetChecked(selectable && attr.Selected)
+	if !selectable {
+		check.Disable()
+	} else {
+		check.OnChanged = func(selected bool) {
+			if index < 0 || index >= len(t.attrRows) {
+				return
+			}
+			t.attrRows[index].Selected = selected
+			t.refreshSelector()
+		}
 	}
 
-	selectedText := newCompactNodeToolText(selected)
-	selectedText.Alignment = fyne.TextAlignCenter
+	methodSelect := widget.NewSelect(attr.Methods, nil)
+	if selectable && len(attr.Methods) > 0 {
+		methodSelect.SetSelected(attr.Method)
+		methodSelect.OnChanged = func(method string) {
+			if index < 0 || index >= len(t.attrRows) || method == "" {
+				return
+			}
+			t.attrRows[index].Method = method
+			t.refreshSelector()
+		}
+	} else {
+		methodSelect.Disable()
+	}
 
 	return newCompactNodeToolAttrRow(
-		selectedText,
+		check,
 		newCompactNodeToolText(attr.Name),
 		newCompactNodeToolText(trimMiddle(attr.Value, 28)),
-		newCompactNodeToolText(attr.Finder),
+		methodSelect,
 	)
 }
 
 func androidNodeAttrSelectable(attr androidNodeAttrRow) bool {
-	return attr.Value != "" && androidNodeFinderToXMLAttr(attr.Finder) != ""
+	if attr.Value == "" {
+		return false
+	}
+	if attr.Method != "" {
+		return attr.Kind != androidNodeAttrUnsupported
+	}
+	return androidNodeFinderToXMLAttr(attr.Finder) != ""
 }
 
 func (t *AndroidNodeTool) highlightSelectedNode() {
@@ -662,7 +709,73 @@ func (t *AndroidNodeTool) refreshSelector() {
 	if t.selectorEntry == nil {
 		return
 	}
-	t.selectorEntry.SetText(t.selectedXPath())
+	code, err := t.selectedSelectorCode()
+	if err != nil {
+		t.selectorEntry.SetText("生成失败: " + err.Error())
+		return
+	}
+	t.selectorEntry.SetText(code)
+}
+
+func (t *AndroidNodeTool) selectedSelectorCode() (string, error) {
+	selected := selectedAndroidNodeAttrRows(t.attrRows)
+	if len(selected) == 0 {
+		return "", nil
+	}
+	return buildAndroidNodeSelectorCode(selected, androidNodeSelectorOptions{
+		DisplayID: "0",
+		Function:  t.selectedSelectorFunction(),
+		Template:  t.selectedSelectorTemplate(),
+		Timeout:   androidNodeSelectorDefaultTimeout,
+	})
+}
+
+func (t *AndroidNodeTool) selectedSelectorFunction() string {
+	if t.selectorFunc == nil || strings.TrimSpace(t.selectorFunc.Selected) == "" {
+		return androidNodeSelectorFuncFindOnce
+	}
+	return strings.TrimSpace(t.selectorFunc.Selected)
+}
+
+func (t *AndroidNodeTool) selectedSelectorTemplate() string {
+	if t.selectorFormat == nil {
+		return androidNodeSelectorDefaultTemplate
+	}
+	return t.selectorFormat.Text
+}
+
+func (t *AndroidNodeTool) copySelectedSelectorCode() {
+	if t.window == nil {
+		return
+	}
+	code, err := t.selectedSelectorCode()
+	if err != nil {
+		t.setStatus("复制代码失败: " + err.Error())
+		return
+	}
+	if strings.TrimSpace(code) == "" {
+		t.setStatus("请先勾选至少一个有效属性")
+		return
+	}
+	t.window.Clipboard().SetContent(code)
+	t.setStatus("已复制 uiacc 代码")
+}
+
+func (t *AndroidNodeTool) copySelectedSelectorParams() {
+	if t.window == nil {
+		return
+	}
+	chain, err := buildAndroidNodeSelectorChain(selectedAndroidNodeAttrRows(t.attrRows))
+	if err != nil {
+		t.setStatus("复制参数失败: " + err.Error())
+		return
+	}
+	if strings.TrimSpace(chain) == "" {
+		t.setStatus("请先勾选至少一个有效属性")
+		return
+	}
+	t.window.Clipboard().SetContent(chain)
+	t.setStatus("已复制 uiacc 参数")
 }
 
 func (t *AndroidNodeTool) selectedXPath() string {
@@ -675,7 +788,13 @@ func (t *AndroidNodeTool) selectedXPath() string {
 		if !row.Selected || !androidNodeAttrSelectable(row) {
 			continue
 		}
-		xmlAttr := androidNodeFinderToXMLAttr(row.Finder)
+		xmlAttr := row.XMLAttr
+		if xmlAttr == "" {
+			xmlAttr = androidNodeFinderToXMLAttr(row.Finder)
+		}
+		if xmlAttr == "" {
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("[@%s=%s]", xmlAttr, xpathLiteral(row.Value)))
 	}
 	if len(parts) == 0 {
@@ -684,29 +803,13 @@ func (t *AndroidNodeTool) selectedXPath() string {
 	return "//*" + strings.Join(parts, "")
 }
 
-func (t *AndroidNodeTool) selectedAttrsText() string {
-	var lines []string
-	for _, row := range t.attrRows {
-		if !row.Selected || row.Value == "" {
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%s=%q", row.Name, row.Value))
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (t *AndroidNodeTool) testSelectedAttrs() {
 	if t.snapshot == nil || t.selectedNode == nil {
 		t.setStatus("请先抓取并选择节点")
 		return
 	}
 
-	selected := make([]androidNodeAttrRow, 0, len(t.attrRows))
-	for _, row := range t.attrRows {
-		if row.Selected && row.Value != "" {
-			selected = append(selected, row)
-		}
-	}
+	selected := selectedAndroidNodeAttrRows(t.attrRows)
 	if len(selected) == 0 {
 		t.setStatus("请先勾选至少一个有效属性")
 		return
@@ -714,7 +817,12 @@ func (t *AndroidNodeTool) testSelectedAttrs() {
 
 	matches := 0
 	for _, node := range t.snapshot.Nodes {
-		if androidNodeMatchesAttrs(node, selected) {
+		matched, err := androidNodeMatchesAttrs(node, selected)
+		if err != nil {
+			t.setStatus("查找测试失败: " + err.Error())
+			return
+		}
+		if matched {
 			matches++
 		}
 	}
@@ -854,71 +962,32 @@ func buildAndroidNodeAttrRows(node *AndroidUINode) []androidNodeAttrRow {
 		return nil
 	}
 
-	values := map[string]string{
-		"depth":         strconv.Itoa(node.Depth),
-		"index":         node.Attrs["index"],
-		"class":         node.Attrs["class"],
-		"package":       node.Attrs["package"],
-		"text":          node.Attrs["text"],
-		"desc":          node.Attrs["content-desc"],
-		"id":            node.Attrs["resource-id"],
-		"bounds":        node.Attrs["bounds"],
-		"checkable":     node.Attrs["checkable"],
-		"checked":       node.Attrs["checked"],
-		"clickable":     node.Attrs["clickable"],
-		"enabled":       node.Attrs["enabled"],
-		"focusable":     node.Attrs["focusable"],
-		"focused":       node.Attrs["focused"],
-		"scrollable":    node.Attrs["scrollable"],
-		"longClickable": node.Attrs["long-clickable"],
-		"password":      node.Attrs["password"],
-		"selected":      node.Attrs["selected"],
-	}
-	finders := map[string]string{
-		"depth":         "",
-		"index":         "index",
-		"class":         "class",
-		"package":       "package",
-		"text":          "text",
-		"desc":          "desc",
-		"id":            "id",
-		"bounds":        "",
-		"checkable":     "checkable",
-		"checked":       "checked",
-		"clickable":     "clickable",
-		"enabled":       "enabled",
-		"focusable":     "focusable",
-		"focused":       "focused",
-		"scrollable":    "scrollable",
-		"longClickable": "long-clickable",
-		"password":      "password",
-		"selected":      "selected",
-	}
-
-	preferred := []string{
-		"depth", "index", "class", "package", "text", "desc", "id", "bounds",
-		"checkable", "checked", "clickable", "enabled", "focusable", "focused",
-		"scrollable", "longClickable", "password", "selected",
-	}
-
-	rows := make([]androidNodeAttrRow, 0, len(preferred))
+	rows := make([]androidNodeAttrRow, 0, len(androidNodeAttrMetas))
 	hasStableSelection := false
-	for _, name := range preferred {
-		value := values[name]
-		if value == "" && name != "depth" {
+	for _, meta := range androidNodeAttrMetas {
+		value := androidNodeAttrValueByMeta(node, meta)
+		if value == "" && meta.Name != "depth" {
 			continue
 		}
 
-		finder := finders[name]
-		selected := value != "" && (name == "id" || name == "desc" || name == "text") && androidNodeFinderToXMLAttr(finder) != ""
+		methods := append([]string(nil), meta.Methods...)
+		method := ""
+		if len(methods) > 0 {
+			method = methods[0]
+		}
+		selected := value != "" && (meta.Name == "id" || meta.Name == "desc" || meta.Name == "text") && method != ""
 		if selected {
 			hasStableSelection = true
 		}
 		rows = append(rows, androidNodeAttrRow{
 			Selected: selected,
-			Name:     name,
+			Name:     meta.Name,
 			Value:    value,
-			Finder:   finder,
+			Finder:   meta.Finder,
+			XMLAttr:  meta.XMLAttr,
+			Kind:     meta.Kind,
+			Method:   method,
+			Methods:  methods,
 		})
 	}
 
@@ -1004,13 +1073,333 @@ func androidNodeMatches(node *AndroidUINode, keyword string) bool {
 	return false
 }
 
-func androidNodeMatchesAttrs(node *AndroidUINode, selected []androidNodeAttrRow) bool {
-	for _, row := range selected {
-		if androidNodeValueByFinder(node, row.Finder, row.Name) != row.Value {
-			return false
+func selectedAndroidNodeAttrRows(rows []androidNodeAttrRow) []androidNodeAttrRow {
+	selected := make([]androidNodeAttrRow, 0, len(rows))
+	for _, row := range rows {
+		if row.Selected && androidNodeAttrSelectable(row) {
+			selected = append(selected, row)
 		}
 	}
-	return true
+	return selected
+}
+
+type androidNodeSelectorOptions struct {
+	DisplayID string
+	Function  string
+	Template  string
+	Timeout   string
+}
+
+func buildAndroidNodeSelectorCode(rows []androidNodeAttrRow, options androidNodeSelectorOptions) (string, error) {
+	chain, err := buildAndroidNodeSelectorChain(rows)
+	if err != nil {
+		return "", err
+	}
+	if chain == "" {
+		return "", nil
+	}
+
+	function := normalizeAndroidNodeSelectorFunction(options.Function)
+	timeout := strings.TrimSpace(options.Timeout)
+	if timeout == "" {
+		timeout = androidNodeSelectorDefaultTimeout
+	}
+	displayID := strings.TrimSpace(options.DisplayID)
+	if displayID == "" {
+		displayID = "0"
+	}
+	template := options.Template
+	if strings.TrimSpace(template) == "" {
+		template = androidNodeSelectorDefaultTemplate
+	}
+	call := androidNodeSelectorCall(function, timeout)
+
+	return strings.NewReplacer(
+		"{displayId}", displayID,
+		"{chain}", chain,
+		"{params}", chain,
+		"{function}", function,
+		"{call}", call,
+		"{timeout}", timeout,
+	).Replace(template), nil
+}
+
+func buildAndroidNodeSelectorChain(rows []androidNodeAttrRow) (string, error) {
+	var parts []string
+	for _, row := range rows {
+		if !row.Selected || !androidNodeAttrSelectable(row) {
+			continue
+		}
+
+		method := androidNodeAttrMethod(row)
+		if method == "" {
+			return "", fmt.Errorf("%s 没有可用 uiacc 函数", row.Name)
+		}
+		args, err := androidNodeSelectorArgs(row, method)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, fmt.Sprintf(".%s(%s)", method, args))
+	}
+	return strings.Join(parts, ""), nil
+}
+
+func androidNodeSelectorArgs(row androidNodeAttrRow, method string) (string, error) {
+	switch androidNodeAttrKindForMethod(row, method) {
+	case androidNodeAttrString:
+		return strconv.Quote(row.Value), nil
+	case androidNodeAttrBool:
+		v, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(row.Value)))
+		if err != nil {
+			return "", fmt.Errorf("%s 布尔值无效: %q", row.Name, row.Value)
+		}
+		if v {
+			return "true", nil
+		}
+		return "false", nil
+	case androidNodeAttrInt:
+		v, err := strconv.Atoi(strings.TrimSpace(row.Value))
+		if err != nil {
+			return "", fmt.Errorf("%s 数值无效: %q", row.Name, row.Value)
+		}
+		return strconv.Itoa(v), nil
+	case androidNodeAttrBounds:
+		rect, err := parseAndroidBoundsStrict(row.Value)
+		if err != nil {
+			return "", fmt.Errorf("%s 边界值无效: %v", row.Name, err)
+		}
+		return fmt.Sprintf("%d, %d, %d, %d", rect.Min.X, rect.Min.Y, rect.Max.X, rect.Max.Y), nil
+	default:
+		return "", fmt.Errorf("%s 不支持生成 uiacc 选择器", row.Name)
+	}
+}
+
+func normalizeAndroidNodeSelectorFunction(function string) string {
+	switch strings.TrimSpace(function) {
+	case androidNodeSelectorFuncFind, androidNodeSelectorFuncWaitFor:
+		return strings.TrimSpace(function)
+	default:
+		return androidNodeSelectorFuncFindOnce
+	}
+}
+
+func androidNodeSelectorCall(function, timeout string) string {
+	switch normalizeAndroidNodeSelectorFunction(function) {
+	case androidNodeSelectorFuncFind:
+		return "Find()"
+	case androidNodeSelectorFuncWaitFor:
+		return fmt.Sprintf("WaitFor(%s)", timeout)
+	default:
+		return "FindOnce()"
+	}
+}
+
+func androidNodeMatchesAttrs(node *AndroidUINode, selected []androidNodeAttrRow) (bool, error) {
+	for _, row := range selected {
+		matched, err := androidNodeMatchesAttr(node, row)
+		if err != nil {
+			return false, err
+		}
+		if !matched {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func androidNodeMatchesAttr(node *AndroidUINode, row androidNodeAttrRow) (bool, error) {
+	method := androidNodeAttrMethod(row)
+	value := androidNodeValueByAttrRow(node, row)
+	switch androidNodeAttrKindForMethod(row, method) {
+	case androidNodeAttrString:
+		return androidNodeStringMatches(method, value, row.Value)
+	case androidNodeAttrBool:
+		left, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(value)))
+		if err != nil {
+			return false, nil
+		}
+		right, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(row.Value)))
+		if err != nil {
+			return false, fmt.Errorf("%s 布尔值无效: %q", row.Name, row.Value)
+		}
+		return left == right, nil
+	case androidNodeAttrInt:
+		left, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return false, nil
+		}
+		right, err := strconv.Atoi(strings.TrimSpace(row.Value))
+		if err != nil {
+			return false, fmt.Errorf("%s 数值无效: %q", row.Name, row.Value)
+		}
+		return left == right, nil
+	case androidNodeAttrBounds:
+		left, err := parseAndroidBoundsStrict(value)
+		if err != nil {
+			return false, nil
+		}
+		right, err := parseAndroidBoundsStrict(row.Value)
+		if err != nil {
+			return false, fmt.Errorf("%s 边界值无效: %v", row.Name, err)
+		}
+		return androidNodeBoundsMatches(method, left, right), nil
+	default:
+		return false, fmt.Errorf("%s 不支持查找测试", row.Name)
+	}
+}
+
+func androidNodeStringMatches(method, value, expected string) (bool, error) {
+	switch {
+	case strings.HasSuffix(method, "Contains"):
+		return strings.Contains(value, expected), nil
+	case strings.HasSuffix(method, "StartsWith"):
+		return strings.HasPrefix(value, expected), nil
+	case strings.HasSuffix(method, "EndsWith"):
+		return strings.HasSuffix(value, expected), nil
+	case strings.HasSuffix(method, "Matches"):
+		re, err := regexp.Compile(expected)
+		if err != nil {
+			return false, fmt.Errorf("%s 正则无效: %v", method, err)
+		}
+		return re.MatchString(value), nil
+	default:
+		return value == expected, nil
+	}
+}
+
+func androidNodeBoundsMatches(method string, value, expected image.Rectangle) bool {
+	switch method {
+	case "BoundsInside":
+		return value.Min.X >= expected.Min.X &&
+			value.Min.Y >= expected.Min.Y &&
+			value.Max.X <= expected.Max.X &&
+			value.Max.Y <= expected.Max.Y
+	case "BoundsContains":
+		return value.Min.X <= expected.Min.X &&
+			value.Min.Y <= expected.Min.Y &&
+			value.Max.X >= expected.Max.X &&
+			value.Max.Y >= expected.Max.Y
+	default:
+		return value == expected
+	}
+}
+
+func androidNodeAttrValueByMeta(node *AndroidUINode, meta androidNodeAttrMeta) string {
+	if node == nil {
+		return ""
+	}
+	if meta.Name == "depth" {
+		return strconv.Itoa(node.Depth)
+	}
+	if meta.XMLAttr == "" {
+		return ""
+	}
+	return node.Attrs[meta.XMLAttr]
+}
+
+func androidNodeValueByAttrRow(node *AndroidUINode, row androidNodeAttrRow) string {
+	if node == nil {
+		return ""
+	}
+	if row.Name == "depth" {
+		return strconv.Itoa(node.Depth)
+	}
+	if row.XMLAttr != "" {
+		return node.Attrs[row.XMLAttr]
+	}
+	return androidNodeValueByFinder(node, row.Finder, row.Name)
+}
+
+func androidNodeAttrMethod(row androidNodeAttrRow) string {
+	if row.Method != "" {
+		return row.Method
+	}
+	switch row.Finder {
+	case "text":
+		return "Text"
+	case "desc":
+		return "Desc"
+	case "id":
+		return "Id"
+	case "class":
+		return "ClassName"
+	case "package":
+		return "PackageName"
+	case "index":
+		return "Index"
+	case "drawing-order":
+		return "DrawingOrder"
+	case "checkable":
+		return "Checkable"
+	case "checked":
+		return "Checked"
+	case "clickable":
+		return "Clickable"
+	case "enabled":
+		return "Enabled"
+	case "focusable":
+		return "Focusable"
+	case "focused":
+		return "Focused"
+	case "scrollable":
+		return "Scrollable"
+	case "editable":
+		return "Editable"
+	case "long-clickable":
+		return "LongClickable"
+	case "password":
+		return "Password"
+	case "selected":
+		return "Selected"
+	case "visible":
+		return "Visible"
+	case "multi-line":
+		return "MultiLine"
+	case "dismissable":
+		return "Dismissable"
+	case "context-clickable":
+		return "ContextClickable"
+	default:
+		return ""
+	}
+}
+
+func androidNodeAttrKindForMethod(row androidNodeAttrRow, method string) androidNodeAttrKind {
+	if row.Kind != androidNodeAttrUnsupported {
+		return row.Kind
+	}
+	if method == "Index" || method == "DrawingOrder" {
+		return androidNodeAttrInt
+	}
+	if method == "Bounds" || method == "BoundsInside" || method == "BoundsContains" {
+		return androidNodeAttrBounds
+	}
+	if strings.HasPrefix(method, "Text") ||
+		strings.HasPrefix(method, "Desc") ||
+		strings.HasPrefix(method, "Id") ||
+		strings.HasPrefix(method, "ClassName") ||
+		strings.HasPrefix(method, "PackageName") {
+		return androidNodeAttrString
+	}
+	return androidNodeAttrBool
+}
+
+func parseAndroidBoundsStrict(value string) (image.Rectangle, error) {
+	cleaned := strings.NewReplacer("[", " ", "]", " ", ",", " ").Replace(value)
+	fields := strings.Fields(cleaned)
+	if len(fields) != 4 {
+		return image.Rectangle{}, fmt.Errorf("需要 4 个坐标，实际 %d 个", len(fields))
+	}
+
+	nums := make([]int, 4)
+	for i, field := range fields {
+		n, err := strconv.Atoi(field)
+		if err != nil {
+			return image.Rectangle{}, err
+		}
+		nums[i] = n
+	}
+	return image.Rect(nums[0], nums[1], nums[2], nums[3]), nil
 }
 
 func androidNodeValueByFinder(node *AndroidUINode, finder, name string) string {
@@ -1030,6 +1419,8 @@ func androidNodeValueByFinder(node *AndroidUINode, finder, name string) string {
 		return node.Attrs["package"]
 	case "index":
 		return node.Attrs["index"]
+	case "drawing-order":
+		return node.Attrs["drawing-order"]
 	default:
 		if name == "depth" {
 			return strconv.Itoa(node.Depth)
@@ -1052,10 +1443,16 @@ func androidNodeFinderToXMLAttr(finder string) string {
 		return "package"
 	case "index":
 		return "index"
-	case "checkable", "checked", "clickable", "enabled", "focusable", "focused", "scrollable", "password", "selected":
+	case "checkable", "checked", "clickable", "enabled", "focusable", "focused", "scrollable", "editable", "password", "selected", "visible", "dismissable":
 		return finder
+	case "drawing-order":
+		return "drawing-order"
 	case "long-clickable":
 		return "long-clickable"
+	case "multi-line":
+		return "multi-line"
+	case "context-clickable":
+		return "context-clickable"
 	default:
 		return ""
 	}
