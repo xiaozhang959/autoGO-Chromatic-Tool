@@ -83,6 +83,13 @@ func TestAndroidCapDexMainArgsUsesClasspathAppProcess(t *testing.T) {
 	assertStringSliceEqual(t, got, want)
 }
 
+func TestAndroidScreenshotTempPathsPreferDataLocalTmp(t *testing.T) {
+	assertStringSliceEqual(t, androidScreenshotTempPaths(), []string{
+		"/data/local/tmp/screenshot_temp.png",
+		"/sdcard/screenshot_temp.png",
+	})
+}
+
 func TestParseVirtualDisplayIDs(t *testing.T) {
 	output := "\n0\n2\nabc\n2\n 15 \n"
 	assertStringSliceEqual(t, parseVirtualDisplayIDs(output), []string{"2", "15"})

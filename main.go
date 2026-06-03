@@ -1302,31 +1302,10 @@ func isNumeric(s string) bool {
 }
 
 func captureScreenWithADB(deviceID string) (img image.Image, err error) {
-	deviceTempPath := "/sdcard/screenshot_temp.png"
-
 	baseDeviceID, virtualDisplayID := splitAndroidDeviceID(deviceID)
 	if baseDeviceID == "" {
 		return nil, fmt.Errorf("设备 ID 为空")
 	}
-
-	// 根据是否有虚拟屏ID选择截图方式
-	if virtualDisplayID != "" {
-		ensureCapDexOnDevice(baseDeviceID)
-		args := append([]string{"-s", baseDeviceID}, androidCapDexMainArgs("2", virtualDisplayID, deviceTempPath)...)
-		output, execErr := adbExecCombined(args...)
-		if execErr != nil {
-			return nil, fmt.Errorf("虚拟屏截图失败: %v", adbErrorWithOutput(execErr, output))
-		}
-	} else {
-		output, execErr := adbExecCombined("-s", baseDeviceID, "shell", "screencap", deviceTempPath)
-		if execErr != nil {
-			return nil, fmt.Errorf("截图失败: %v", adbErrorWithOutput(execErr, output))
-		}
-	}
-
-	defer func() {
-		go adbExec("-s", baseDeviceID, "shell", "rm", deviceTempPath)
-	}()
 
 	localTempFile, err := ioutil.TempFile("", "screenshot_*.png")
 	if err != nil {
@@ -1340,18 +1319,59 @@ func captureScreenWithADB(deviceID string) (img image.Image, err error) {
 	// 确保清理本地临时文件
 	defer os.Remove(localTempPath)
 
-	output, execErr := adbExecCombined("-s", baseDeviceID, "pull", deviceTempPath, localTempPath)
+	var failed []string
+	for _, deviceTempPath := range androidScreenshotTempPaths() {
+		if captureErr := captureScreenToDevicePath(baseDeviceID, virtualDisplayID, deviceTempPath); captureErr != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", deviceTempPath, captureErr))
+			continue
+		}
+
+		output, execErr := adbExecCombined("-s", baseDeviceID, "pull", deviceTempPath, localTempPath)
+		_, _ = adbExecCombined("-s", baseDeviceID, "shell", "rm", deviceTempPath)
+		if execErr != nil {
+			failed = append(failed, fmt.Sprintf("%s: 拉取截图失败: %v", deviceTempPath, adbErrorWithOutput(execErr, output)))
+			continue
+		}
+
+		data, readErr := ioutil.ReadFile(localTempPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("读取临时文件失败: %v", readErr)
+		}
+
+		// 解码图片
+		return png.Decode(bytes.NewReader(data))
+	}
+
+	if len(failed) == 0 {
+		return nil, fmt.Errorf("截图失败")
+	}
+	return nil, fmt.Errorf("截图失败，已尝试临时路径: %s", strings.Join(failed, "; "))
+}
+
+func androidScreenshotTempPaths() []string {
+	return []string{
+		"/data/local/tmp/screenshot_temp.png",
+		"/sdcard/screenshot_temp.png",
+	}
+}
+
+func captureScreenToDevicePath(baseDeviceID, virtualDisplayID, deviceTempPath string) error {
+	// 根据是否有虚拟屏ID选择截图方式
+	if virtualDisplayID != "" {
+		ensureCapDexOnDevice(baseDeviceID)
+		args := append([]string{"-s", baseDeviceID}, androidCapDexMainArgs("2", virtualDisplayID, deviceTempPath)...)
+		output, execErr := adbExecCombined(args...)
+		if execErr != nil {
+			return fmt.Errorf("虚拟屏截图失败: %v", adbErrorWithOutput(execErr, output))
+		}
+		return nil
+	}
+
+	output, execErr := adbExecCombined("-s", baseDeviceID, "shell", "screencap", deviceTempPath)
 	if execErr != nil {
-		return nil, fmt.Errorf("拉取截图失败: %v", adbErrorWithOutput(execErr, output))
+		return fmt.Errorf("截图失败: %v", adbErrorWithOutput(execErr, output))
 	}
-
-	data, err := ioutil.ReadFile(localTempPath)
-	if err != nil {
-		return nil, fmt.Errorf("读取临时文件失败: %v", err)
-	}
-
-	// 解码图片
-	return png.Decode(bytes.NewReader(data))
+	return nil
 }
 
 // 设备监控线程

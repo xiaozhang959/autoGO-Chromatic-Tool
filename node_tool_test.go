@@ -54,6 +54,13 @@ func TestCaptureAndroidNodeSnapshotRejectsVirtualDisplay(t *testing.T) {
 	}
 }
 
+func TestAndroidNodeDumpPathsPreferDataLocalTmp(t *testing.T) {
+	assertStringSliceEqual(t, androidNodeDumpPaths(), []string{
+		"/data/local/tmp/window_dump.xml",
+		"/sdcard/window_dump.xml",
+	})
+}
+
 func TestAndroidNodeSummaryUsesSingleLineText(t *testing.T) {
 	node := &AndroidUINode{
 		Number: 1,
