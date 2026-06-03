@@ -163,8 +163,9 @@ func (l *verticalOffsetLayout) Layout(objects []fyne.CanvasObject, size fyne.Siz
 
 type compactNodeToolRow struct {
 	widget.BaseWidget
-	content fyne.CanvasObject
-	height  float32
+	content  fyne.CanvasObject
+	height   float32
+	onTapped func()
 }
 
 func newCompactNodeToolRow(content fyne.CanvasObject, height float32) *compactNodeToolRow {
@@ -174,6 +175,12 @@ func newCompactNodeToolRow(content fyne.CanvasObject, height float32) *compactNo
 	}
 	row.ExtendBaseWidget(row)
 	return row
+}
+
+func (r *compactNodeToolRow) Tapped(*fyne.PointEvent) {
+	if r.onTapped != nil {
+		r.onTapped()
+	}
 }
 
 func (r *compactNodeToolRow) CreateRenderer() fyne.WidgetRenderer {
@@ -630,17 +637,33 @@ func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNo
 		methodSelect,
 	)
 	rowWithSeparator := container.NewBorder(nil, newCompactNodeToolAttrSeparator(), nil, nil, row)
-	return newCompactNodeToolRow(rowWithSeparator, compactNodeToolAttrRowHeight)
+	rowWidget := newCompactNodeToolRow(rowWithSeparator, compactNodeToolAttrRowHeight)
+	if selectable {
+		rowWidget.onTapped = func() {
+			t.toggleAttrRowSelection(index)
+		}
+	}
+	return rowWidget
 }
 
 func androidNodeAttrSelectable(attr androidNodeAttrRow) bool {
-	if attr.Value == "" {
-		return false
+	method := androidNodeAttrMethod(attr)
+	if method == "" {
+		return attr.Value != "" && androidNodeFinderToXMLAttr(attr.Finder) != ""
 	}
-	if attr.Method != "" {
-		return attr.Kind != androidNodeAttrUnsupported
+	return androidNodeAttrKindForMethod(attr, method) != androidNodeAttrUnsupported
+}
+
+func (t *AndroidNodeTool) toggleAttrRowSelection(index int) {
+	if index < 0 || index >= len(t.attrRows) {
+		return
 	}
-	return androidNodeFinderToXMLAttr(attr.Finder) != ""
+	if !androidNodeAttrSelectable(t.attrRows[index]) {
+		return
+	}
+	t.attrRows[index].Selected = !t.attrRows[index].Selected
+	t.refreshSelector()
+	t.rebuildAttrList()
 }
 
 func (t *AndroidNodeTool) highlightSelectedNode() {
@@ -1314,6 +1337,9 @@ func androidNodeMatchesAttrs(node *AndroidUINode, selected []androidNodeAttrRow)
 func androidNodeMatchesAttr(node *AndroidUINode, row androidNodeAttrRow) (bool, error) {
 	method := androidNodeAttrMethod(row)
 	value := androidNodeValueByAttrRow(node, row)
+	if row.Value == "" {
+		return value == "", nil
+	}
 	switch androidNodeAttrKindForMethod(row, method) {
 	case androidNodeAttrString:
 		return androidNodeStringMatches(method, value, row.Value)

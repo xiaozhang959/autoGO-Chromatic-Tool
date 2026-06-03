@@ -112,8 +112,17 @@ func TestBuildAndroidNodeAttrRowsIncludesUiaccMatchableAttrs(t *testing.T) {
 	if byName["visible"].Value != "true" {
 		t.Fatalf("expected missing visible to default true, got %q", byName["visible"].Value)
 	}
-	if androidNodeAttrSelectable(byName["drawingOrder"]) {
-		t.Fatal("empty drawingOrder should be listed but not selectable")
+	if !androidNodeAttrSelectable(byName["drawingOrder"]) {
+		t.Fatal("empty drawingOrder should be selectable for snapshot filtering")
+	}
+	if byName["desc"].Value != "" {
+		t.Fatalf("expected missing desc to stay empty, got %q", byName["desc"].Value)
+	}
+	if !androidNodeAttrSelectable(byName["desc"]) {
+		t.Fatal("empty desc should be selectable")
+	}
+	if !androidNodeAttrSelectable(byName["bounds"]) {
+		t.Fatal("empty bounds should be selectable for snapshot filtering")
 	}
 }
 
@@ -166,6 +175,7 @@ func TestBuildAndroidNodeSelectorChain(t *testing.T) {
 	rows := []androidNodeAttrRow{
 		{Selected: true, Name: "depth", Value: "2", Kind: androidNodeAttrInt, Method: "Depth"},
 		{Selected: true, Name: "text", Value: "登录", Kind: androidNodeAttrString, Method: "TextContains"},
+		{Selected: true, Name: "desc", Value: "", Kind: androidNodeAttrString, Method: "Desc"},
 		{Selected: true, Name: "clickable", Value: "true", Kind: androidNodeAttrBool, Method: "Clickable"},
 		{Selected: true, Name: "bounds", Value: "[10,20][80,60]", Kind: androidNodeAttrBounds, Method: "Bounds"},
 		{Selected: false, Name: "class", Value: "android.widget.Button", Kind: androidNodeAttrString, Method: "ClassName"},
@@ -175,7 +185,7 @@ func TestBuildAndroidNodeSelectorChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAndroidNodeSelectorChain returned error: %v", err)
 	}
-	want := `.Depth(2).TextContains("登录").Clickable(true).Bounds(10, 20, 80, 60)`
+	want := `.Depth(2).TextContains("登录").Desc("").Clickable(true).Bounds(10, 20, 80, 60)`
 	if chain != want {
 		t.Fatalf("expected chain %s, got %s", want, chain)
 	}
@@ -203,6 +213,16 @@ func TestBuildAndroidNodeSelectorCodeUsesTemplate(t *testing.T) {
 	}
 }
 
+func TestBuildAndroidNodeSelectorChainRejectsEmptyNonStringArgs(t *testing.T) {
+	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "drawingOrder", Value: "", Kind: androidNodeAttrInt, Method: "DrawingOrder"},
+	}
+
+	if _, err := buildAndroidNodeSelectorChain(rows); err == nil {
+		t.Fatal("expected empty int selector to fail code generation")
+	}
+}
+
 func TestAndroidNodeMatchesAttrsUsesMethodSemantics(t *testing.T) {
 	node := &AndroidUINode{
 		Depth: 2,
@@ -225,6 +245,43 @@ func TestAndroidNodeMatchesAttrsUsesMethodSemantics(t *testing.T) {
 	}
 	if !matched {
 		t.Fatal("expected node to match contains/bool/boundsInside selectors")
+	}
+}
+
+func TestAndroidNodeMatchesAttrsSupportsEmptyAttrFilters(t *testing.T) {
+	emptyNode := &AndroidUINode{
+		Attrs: map[string]string{
+			"text": "qq",
+		},
+	}
+	nonEmptyNode := &AndroidUINode{
+		Attrs: map[string]string{
+			"text":          "qq",
+			"content-desc":  "124",
+			"drawing-order": "2",
+			"bounds":        "[0,0][10,10]",
+		},
+	}
+	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "text", Value: "qq", XMLAttr: "text", Kind: androidNodeAttrString, Method: "Text"},
+		{Selected: true, Name: "desc", Value: "", XMLAttr: "content-desc", Kind: androidNodeAttrString, Method: "Desc"},
+		{Selected: true, Name: "drawingOrder", Value: "", XMLAttr: "drawing-order", Kind: androidNodeAttrInt, Method: "DrawingOrder"},
+		{Selected: true, Name: "bounds", Value: "", XMLAttr: "bounds", Kind: androidNodeAttrBounds, Method: "Bounds"},
+	}
+
+	matched, err := androidNodeMatchesAttrs(emptyNode, rows)
+	if err != nil {
+		t.Fatalf("androidNodeMatchesAttrs returned error: %v", err)
+	}
+	if !matched {
+		t.Fatal("expected node with missing attrs to match empty attr filters")
+	}
+	matched, err = androidNodeMatchesAttrs(nonEmptyNode, rows)
+	if err != nil {
+		t.Fatalf("androidNodeMatchesAttrs returned error: %v", err)
+	}
+	if matched {
+		t.Fatal("expected node with non-empty attrs not to match empty attr filters")
 	}
 }
 
