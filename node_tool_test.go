@@ -431,11 +431,15 @@ func TestRestoreNodeToolTabDoesNotExposeColorToolImageViewer(t *testing.T) {
 	previousCurrentTab := currentTab
 	previousImageViewer := imageViewer
 	previousColorPoints := colorPoints
+	previousSelectColorToolTab := selectColorToolTab
+	previousSelectNodeToolTab := selectNodeToolTab
 	defer func() {
 		tabDataMap = previousTabDataMap
 		currentTab = previousCurrentTab
 		imageViewer = previousImageViewer
 		colorPoints = previousColorPoints
+		selectColorToolTab = previousSelectColorToolTab
+		selectNodeToolTab = previousSelectNodeToolTab
 	}()
 
 	nodeViewer := &ImageViewer{nodeToolOnly: true}
@@ -456,6 +460,57 @@ func TestRestoreNodeToolTabDoesNotExposeColorToolImageViewer(t *testing.T) {
 	}
 	if len(colorPoints) != 0 {
 		t.Fatalf("node tool tab should clear color tool points, got %#v", colorPoints)
+	}
+}
+
+func TestRestoreTabDataSelectsMatchingToolTab(t *testing.T) {
+	previousTabDataMap := tabDataMap
+	previousCurrentTab := currentTab
+	previousImageViewer := imageViewer
+	previousColorPoints := colorPoints
+	previousSelectColorToolTab := selectColorToolTab
+	previousSelectNodeToolTab := selectNodeToolTab
+	defer func() {
+		tabDataMap = previousTabDataMap
+		currentTab = previousCurrentTab
+		imageViewer = previousImageViewer
+		colorPoints = previousColorPoints
+		selectColorToolTab = previousSelectColorToolTab
+		selectNodeToolTab = previousSelectNodeToolTab
+	}()
+
+	colorSelections := 0
+	nodeSelections := 0
+	selectColorToolTab = func() {
+		colorSelections++
+	}
+	selectNodeToolTab = func() {
+		nodeSelections++
+	}
+
+	colorViewer := NewImageViewer()
+	colorViewer.SetImage(image.NewNRGBA(image.Rect(0, 0, 1, 1)))
+	nodeViewer := &ImageViewer{nodeToolOnly: true}
+	colorTab := container.NewTabItem("图片", widget.NewLabel(""))
+	nodeTab := container.NewTabItem("节点", widget.NewLabel(""))
+	tabDataMap = map[*container.TabItem]*TabData{
+		colorTab: {
+			imageViewer: colorViewer,
+		},
+		nodeTab: {
+			imageViewer:  nodeViewer,
+			nodeToolOnly: true,
+		},
+	}
+
+	restoreTabData(colorTab)
+	restoreTabData(nodeTab)
+
+	if colorSelections != 1 {
+		t.Fatalf("expected color tool tab to be selected once, got %d", colorSelections)
+	}
+	if nodeSelections != 1 {
+		t.Fatalf("expected node tool tab to be selected once, got %d", nodeSelections)
 	}
 }
 

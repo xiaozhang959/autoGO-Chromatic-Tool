@@ -114,6 +114,10 @@ var (
 	// 图色面板 API 字段刷新回调
 	updateImagesAPIFields func() string
 
+	// 右侧工具页切换回调
+	selectColorToolTab func()
+	selectNodeToolTab  func()
+
 	// 图色面板结果代码格式模板
 	apiFormatTemplates = defaultAPIFormatTemplates()
 
@@ -1462,6 +1466,9 @@ func restoreTabData(tab *container.TabItem) {
 	}
 
 	if tabData.nodeToolOnly {
+		if selectNodeToolTab != nil {
+			selectNodeToolTab()
+		}
 		colorPoints = make([]ColorPoint, 0)
 		imageViewer = nil
 		setRectCoordText(defaultRangeText)
@@ -1480,6 +1487,10 @@ func restoreTabData(tab *container.TabItem) {
 			}
 		}
 		return
+	}
+
+	if selectColorToolTab != nil {
+		selectColorToolTab()
 	}
 
 	// 恢复颜色点列表（深拷贝）
@@ -6175,8 +6186,8 @@ func main() {
 		return imageViewer
 	}, openNodeImageTab)
 	nodeTool.SetOnOpen(func() {
-		if rightTabs != nil && nodeTabItem != nil {
-			rightTabs.Select(nodeTabItem)
+		if selectNodeToolTab != nil {
+			selectNodeToolTab()
 		}
 	})
 	grabNodeBtn := widget.NewButton("抓取节点", func() {
@@ -6747,11 +6758,22 @@ func main() {
 	)
 
 	rightToolPanel := container.NewBorder(tableArea, nil, nil, nil, toolForm)
+	colorToolTabItem := container.NewTabItem("图色工具", rightToolPanel)
 	nodeTabItem = container.NewTabItem("节点工具", nodeTool.Content())
 	rightTabs = container.NewAppTabs(
-		container.NewTabItem("图色工具", rightToolPanel),
+		colorToolTabItem,
 		nodeTabItem,
 	)
+	selectColorToolTab = func() {
+		if rightTabs != nil && colorToolTabItem != nil {
+			rightTabs.Select(colorToolTabItem)
+		}
+	}
+	selectNodeToolTab = func() {
+		if rightTabs != nil && nodeTabItem != nil {
+			rightTabs.Select(nodeTabItem)
+		}
+	}
 	rightPanel := makeFixedPanel(rightPanelMinWidth, container.NewVScroll(rightTabs))
 
 	// 左工具栏固定宽度；右工具栏默认使用最小宽度，用户可拖拽调整
