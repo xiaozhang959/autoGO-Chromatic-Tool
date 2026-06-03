@@ -16,6 +16,7 @@ var capDexPath string
 
 const androidCapDexDevicePath = "/data/local/tmp/cap.dex"
 const androidCapDexMainClass = "com.autogo.vdm.Main"
+const androidCapDexAppInfoClass = "com.autogo.vdm.AppInfo"
 
 // pushedDevices 记录已推送过 cap.dex 的设备，避免重复推送
 var pushedDevices = make(map[string]bool)
@@ -70,13 +71,20 @@ func ensureCapDexOnDevice(deviceID string) {
 }
 
 func androidCapDexMainArgs(mode string, args ...string) []string {
+	return androidCapDexClassArgs(androidCapDexMainClass, append([]string{mode}, args...)...)
+}
+
+func androidCapDexAppInfoArgs(args ...string) []string {
+	return androidCapDexClassArgs(androidCapDexAppInfoClass, args...)
+}
+
+func androidCapDexClassArgs(mainClass string, args ...string) []string {
 	command := []string{
 		"shell",
 		"CLASSPATH=" + androidCapDexDevicePath,
 		"app_process",
 		"/",
-		androidCapDexMainClass,
-		mode,
+		mainClass,
 	}
 	return append(command, args...)
 }
