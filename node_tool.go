@@ -136,7 +136,6 @@ type AndroidNodeTool struct {
 	onOpen            func()
 
 	root             fyne.CanvasObject
-	simpleCheck      *widget.Check
 	captureBtn       *widget.Button
 	searchEntry      *widget.Entry
 	statusLabel      *widget.Label
@@ -178,14 +177,8 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		treeParentID:      make(map[string]string),
 	}
 
-	tool.simpleCheck = widget.NewCheck("获取简单节点", nil)
-	tool.simpleCheck.SetChecked(false)
-
-	invisibleCheck := widget.NewCheck("获取不可见节点", nil)
-	invisibleCheck.Disable()
-
-	tool.captureBtn = widget.NewButton("抓取节点", func() {
-		tool.Capture()
+	tool.captureBtn = widget.NewButton("简单节点抓取", func() {
+		tool.CaptureSimple()
 	})
 
 	tool.searchEntry = widget.NewEntry()
@@ -307,8 +300,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	)
 
 	tool.root = container.NewVBox(
-		container.NewHBox(tool.simpleCheck, invisibleCheck, tool.captureBtn),
-		container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, prevBtn, nextBtn), tool.searchEntry),
+		container.NewBorder(nil, nil, nil, container.NewHBox(tool.captureBtn, searchBtn, prevBtn, nextBtn), tool.searchEntry),
 		tool.statusLabel,
 		nodeHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 230),
@@ -332,6 +324,14 @@ func (t *AndroidNodeTool) SetOnOpen(onOpen func()) {
 }
 
 func (t *AndroidNodeTool) Capture() {
+	t.capture(false)
+}
+
+func (t *AndroidNodeTool) CaptureSimple() {
+	t.capture(true)
+}
+
+func (t *AndroidNodeTool) capture(compressed bool) {
 	if t.busy {
 		return
 	}
@@ -360,7 +360,7 @@ func (t *AndroidNodeTool) Capture() {
 		}
 		capturedImg = convertToNRGBA(capturedImg)
 
-		snapshot, err := captureAndroidNodeSnapshot(device, t.simpleCheck.Checked)
+		snapshot, err := captureAndroidNodeSnapshot(device, compressed)
 		fyne.Do(func() {
 			t.setBusy(false)
 			if err != nil {
