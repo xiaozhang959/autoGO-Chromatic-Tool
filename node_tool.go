@@ -23,6 +23,7 @@ const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 118
 const compactNodeToolTreeRowHeight float32 = 18
 const compactNodeToolAttrRowHeight float32 = 28
+const compactNodeToolCheckOffsetY float32 = 2
 
 const androidNodeSelectorFuncFindOnce = "FindOnce"
 const androidNodeSelectorFuncFind = "Find"
@@ -127,6 +128,29 @@ func newCompactNodeToolAttrRow(selected, name, value, finder fyne.CanvasObject) 
 	finderBox := container.New(&fixedContentWidthLayout{width: compactNodeToolAttrFinderWidth}, finder)
 	main := container.NewBorder(nil, nil, nameBox, nil, value)
 	return container.NewBorder(nil, nil, selectedBox, finderBox, main)
+}
+
+type verticalOffsetLayout struct {
+	offsetY float32
+}
+
+func (l *verticalOffsetLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) == 0 {
+		return fyne.NewSize(1, 1)
+	}
+	return objects[0].MinSize()
+}
+
+func (l *verticalOffsetLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	height := size.Height - l.offsetY
+	if height < 1 {
+		height = 1
+	}
+	objects[0].Move(fyne.NewPos(0, l.offsetY))
+	objects[0].Resize(fyne.NewSize(size.Width, height))
 }
 
 type compactNodeToolRow struct {
@@ -590,8 +614,9 @@ func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNo
 		methodSelect.Disable()
 	}
 
+	checkBox := container.New(&verticalOffsetLayout{offsetY: compactNodeToolCheckOffsetY}, check)
 	row := newCompactNodeToolAttrRow(
-		check,
+		checkBox,
 		newCompactNodeToolText(attr.Name),
 		newCompactNodeToolText(trimMiddle(attr.Value, 28)),
 		methodSelect,
