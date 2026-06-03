@@ -530,7 +530,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	nodeTreeArea := container.New(&flexibleMinWidthLayout{minWidth: 1}, tool.nodeTree)
 
 	tool.root = container.NewVBox(
-		container.NewBorder(nil, nil, nil, container.NewHBox(tool.captureBtn, searchBtn, prevBtn, nextBtn), tool.searchEntry),
+		container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, prevBtn, nextBtn, tool.captureBtn), tool.searchEntry),
 		tool.statusLabel,
 		nodeHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, nodeTreeArea), 205),
