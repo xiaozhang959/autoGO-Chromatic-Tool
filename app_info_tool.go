@@ -309,7 +309,7 @@ func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *Andr
 		container.NewBorder(nil, nil, nil, copyActivitiesBtn, newAppInfoCopyLabel("其它界面", func() {
 			tool.copyText("其它界面", strings.Join(tool.selectedActivities, "\n"))
 		})),
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.activitiesList), 170),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.activitiesList), 150),
 	)
 
 	tool.root = container.NewVBox(
