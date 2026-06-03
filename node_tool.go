@@ -21,6 +21,8 @@ const androidNodeDumpPath = "/sdcard/window_dump.xml"
 const compactNodeToolAttrSelectWidth float32 = 40
 const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 118
+const compactNodeToolTreeRowHeight float32 = 18
+const compactNodeToolAttrRowHeight float32 = 22
 
 const androidNodeSelectorFuncFindOnce = "FindOnce"
 const androidNodeSelectorFuncFind = "Find"
@@ -127,6 +129,71 @@ func newCompactNodeToolAttrRow(selected, name, value, finder fyne.CanvasObject) 
 	return container.NewBorder(nil, nil, selectedBox, finderBox, main)
 }
 
+type compactNodeToolRow struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+	height  float32
+}
+
+func newCompactNodeToolRow(content fyne.CanvasObject, height float32) *compactNodeToolRow {
+	row := &compactNodeToolRow{
+		content: content,
+		height:  height,
+	}
+	row.ExtendBaseWidget(row)
+	return row
+}
+
+func (r *compactNodeToolRow) CreateRenderer() fyne.WidgetRenderer {
+	return &compactNodeToolRowRenderer{
+		row:     r,
+		objects: []fyne.CanvasObject{r.content},
+	}
+}
+
+type compactNodeToolRowRenderer struct {
+	row     *compactNodeToolRow
+	objects []fyne.CanvasObject
+}
+
+func (r *compactNodeToolRowRenderer) Destroy() {}
+
+func (r *compactNodeToolRowRenderer) Layout(size fyne.Size) {
+	r.row.content.Move(fyne.NewPos(0, 0))
+	r.row.content.Resize(size)
+}
+
+func (r *compactNodeToolRowRenderer) MinSize() fyne.Size {
+	min := r.row.content.MinSize()
+	min.Height = r.row.height
+	return min
+}
+
+func (r *compactNodeToolRowRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *compactNodeToolRowRenderer) Refresh() {
+	r.row.content.Refresh()
+}
+
+func newCompactNodeTreeRow() *compactNodeToolRow {
+	return newCompactNodeToolRow(container.NewHBox(newNodeTreeToolText()), compactNodeToolTreeRowHeight)
+}
+
+func compactNodeTreeRowLabel(item fyne.CanvasObject) *widget.Label {
+	row, ok := item.(*compactNodeToolRow)
+	if !ok {
+		return nil
+	}
+	content, ok := row.content.(*fyne.Container)
+	if !ok || len(content.Objects) == 0 {
+		return nil
+	}
+	label, _ := content.Objects[0].(*widget.Label)
+	return label
+}
+
 type AndroidNodeTool struct {
 	window fyne.Window
 
@@ -204,11 +271,13 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 			return uid == "" || len(tool.treeChildren[uid]) > 0
 		},
 		func(bool) fyne.CanvasObject {
-			return container.NewHBox(newNodeTreeToolText())
+			return newCompactNodeTreeRow()
 		},
 		func(uid widget.TreeNodeID, branch bool, item fyne.CanvasObject) {
-			row := item.(*fyne.Container)
-			label := row.Objects[0].(*widget.Label)
+			label := compactNodeTreeRowLabel(item)
+			if label == nil {
+				return
+			}
 			if uid == "" {
 				setCompactNodeToolText(label, "")
 				return
@@ -487,7 +556,7 @@ func (t *AndroidNodeTool) rebuildAttrList() {
 	t.attrList.Refresh()
 }
 
-func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNodeAttrRow) *fyne.Container {
+func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNodeAttrRow) fyne.CanvasObject {
 	selectable := androidNodeAttrSelectable(attr)
 	check := widget.NewCheck("", nil)
 	check.SetChecked(selectable && attr.Selected)
@@ -517,12 +586,13 @@ func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNo
 		methodSelect.Disable()
 	}
 
-	return newCompactNodeToolAttrRow(
+	row := newCompactNodeToolAttrRow(
 		check,
 		newCompactNodeToolText(attr.Name),
 		newCompactNodeToolText(trimMiddle(attr.Value, 28)),
 		methodSelect,
 	)
+	return newCompactNodeToolRow(row, compactNodeToolAttrRowHeight)
 }
 
 func androidNodeAttrSelectable(attr androidNodeAttrRow) bool {
