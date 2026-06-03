@@ -824,6 +824,7 @@ func (t *AndroidNodeTool) selectNode(node *AndroidUINode) {
 	if node == nil {
 		return
 	}
+	t.clearNodeFindTestHighlights()
 	t.selectedNode = node
 	t.attrRows = buildAndroidNodeAttrRows(node)
 	t.refreshSelector()

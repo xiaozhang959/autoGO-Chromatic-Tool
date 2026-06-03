@@ -373,6 +373,28 @@ func TestAndroidNodeFindTestStatusUsesSelectorFunction(t *testing.T) {
 	}
 }
 
+func TestSelectNodeClearsFindTestHighlights(t *testing.T) {
+	viewer := &ImageViewer{
+		findTestRects: []MarkRect{{X1: 1, Y1: 1, X2: 2, Y2: 2}},
+	}
+	node := &AndroidUINode{
+		Number: 1,
+		Attrs:  map[string]string{"text": "登录"},
+	}
+	tool := &AndroidNodeTool{
+		nodeViewer: viewer,
+	}
+
+	tool.selectNode(node)
+
+	if len(viewer.findTestRects) != 0 {
+		t.Fatalf("expected find test highlights to be cleared, got %#v", viewer.findTestRects)
+	}
+	if tool.selectedNode != node {
+		t.Fatalf("expected selected node to be updated, got %#v", tool.selectedNode)
+	}
+}
+
 func TestSmallestNodeAtPoint(t *testing.T) {
 	root := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 100, 100)}
 	container := &AndroidUINode{Number: 2, Depth: 1, Bounds: image.Rect(10, 10, 90, 90)}

@@ -4287,10 +4287,10 @@ func (r *imageViewerRenderer) Refresh() {
 	allObjects := []fyne.CanvasObject{r.viewer.displayImage, r.tempRect}
 	allObjects = append(allObjects, r.points...)
 	allObjects = append(allObjects, r.rects...)
-	allObjects = append(allObjects, r.findTestRects...)
 	allObjects = append(allObjects, r.nodeRects...)
 	allObjects = append(allObjects, r.linkedRects...)
 	allObjects = append(allObjects, r.nodeSelected...)
+	allObjects = append(allObjects, r.findTestRects...)
 	if r.viewer.contextMenu != nil {
 		allObjects = append(allObjects, r.viewer.contextMenu)
 	}
