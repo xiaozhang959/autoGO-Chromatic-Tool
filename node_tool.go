@@ -406,7 +406,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	})
 
 	tool.statusLabel = widget.NewLabel("未抓取节点")
-	tool.statusLabel.Wrapping = fyne.TextWrapWord
+	tool.statusLabel.Wrapping = fyne.TextWrapOff
 	tool.nodeTreeWidth = &minContentWidthLayout{minWidth: 1}
 
 	tool.nodeTree = widget.NewTree(
@@ -531,7 +531,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 
 	tool.root = container.NewVBox(
 		container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, prevBtn, nextBtn, tool.captureBtn), tool.searchEntry),
-		tool.statusLabel,
+		container.NewHScroll(tool.statusLabel),
 		nodeHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, nodeTreeArea), 205),
 		attrHeader,
