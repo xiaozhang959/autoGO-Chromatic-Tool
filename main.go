@@ -1130,29 +1130,76 @@ func getADBDevices() ([]string, error) {
 
 // 获取设备的虚拟屏ID列表
 func getVirtualDisplays(deviceID string) []string {
-	// 执行命令获取虚拟屏ID
-	output := adbExec("-s", deviceID, "shell", "app_process", "-Djava.class.path=/data/local/tmp/cap.dex", "/", "com.autogo.vdm.Main", "1")
-	log.Printf("[device] 获取虚拟屏输出: device=%s output=%q", deviceID, logPreview(output, 500))
+	args := append([]string{"-s", deviceID}, androidCapDexMainArgs("1")...)
+	output, err := adbExecCombined(args...)
+	if err != nil {
+		log.Printf("[device] 获取虚拟屏失败: device=%s err=%v", deviceID, adbErrorWithOutput(err, output))
+	} else {
+		log.Printf("[device] 获取虚拟屏输出: device=%s output=%q", deviceID, logPreview(output, 500))
+	}
 
-	// 如果输出为空或包含错误信息，返回空列表
-	if output == "" || strings.Contains(output, "Error") || strings.Contains(output, "error") ||
-		strings.Contains(output, "Exception") || strings.Contains(output, "not found") {
-		log.Printf("[device] 设备 %s 无可用虚拟屏或获取失败", deviceID)
+	displayIDs := parseVirtualDisplayIDs(output)
+	if len(displayIDs) > 0 {
+		return displayIDs
+	}
+
+	fallbackIDs := getVirtualDisplaysFromDumpsys(deviceID)
+	if len(fallbackIDs) > 0 {
+		log.Printf("[device] 通过 dumpsys display 发现虚拟屏: device=%s displays=%v", deviceID, fallbackIDs)
+		return fallbackIDs
+	}
+
+	log.Printf("[device] 设备 %s 无可用虚拟屏或获取失败", deviceID)
+	return nil
+}
+
+func getVirtualDisplaysFromDumpsys(deviceID string) []string {
+	output, err := adbExecCombined("-s", deviceID, "shell", "dumpsys", "display")
+	if err != nil {
+		log.Printf("[device] dumpsys display 获取虚拟屏失败: device=%s err=%v", deviceID, adbErrorWithOutput(err, output))
 		return nil
 	}
+	return parseDumpsysVirtualDisplayIDs(output)
+}
 
-	// 解析输出，每行一个虚拟屏ID
+func parseVirtualDisplayIDs(output string) []string {
 	var displayIDs []string
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		// 检查是否是有效的数字ID
-		if line != "" && isNumeric(line) {
-			displayIDs = append(displayIDs, line)
-		}
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(output, "\n") {
+		addVirtualDisplayID(&displayIDs, seen, strings.TrimSpace(line))
 	}
-
 	return displayIDs
+}
+
+func parseDumpsysVirtualDisplayIDs(output string) []string {
+	var displayIDs []string
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(output, "\n") {
+		idx := strings.Index(line, "mDisplayId=")
+		if idx == -1 {
+			continue
+		}
+
+		start := idx + len("mDisplayId=")
+		end := start
+		for end < len(line) && line[end] >= '0' && line[end] <= '9' {
+			end++
+		}
+		addVirtualDisplayID(&displayIDs, seen, line[start:end])
+	}
+	return displayIDs
+}
+
+func addVirtualDisplayID(displayIDs *[]string, seen map[string]struct{}, displayID string) {
+	displayID = strings.TrimSpace(displayID)
+	if displayID == "" || displayID == "0" || !isNumeric(displayID) {
+		return
+	}
+	if _, ok := seen[displayID]; ok {
+		return
+	}
+	seen[displayID] = struct{}{}
+	*displayIDs = append(*displayIDs, displayID)
 }
 
 // 检查字符串是否为纯数字
@@ -1168,26 +1215,24 @@ func isNumeric(s string) bool {
 func captureScreenWithADB(deviceID string) (img image.Image, err error) {
 	deviceTempPath := "/sdcard/screenshot_temp.png"
 
-	// 解析设备ID，检查是否包含虚拟屏ID（格式：baseDeviceID[displayID]）
-	baseDeviceID := deviceID
-	virtualDisplayID := ""
-
-	if idx := strings.Index(deviceID, "["); idx != -1 {
-		if endIdx := strings.Index(deviceID, "]"); endIdx > idx {
-			baseDeviceID = deviceID[:idx]
-			virtualDisplayID = deviceID[idx+1 : endIdx]
-		}
+	baseDeviceID, virtualDisplayID := splitAndroidDeviceID(deviceID)
+	if baseDeviceID == "" {
+		return nil, fmt.Errorf("设备 ID 为空")
 	}
 
 	// 根据是否有虚拟屏ID选择截图方式
 	if virtualDisplayID != "" {
-		// 使用 app_process 进行虚拟屏截图
-		if adbExec("-s", baseDeviceID, "shell", "app_process", "-Djava.class.path=/data/local/tmp/cap.dex", "/", "com.autogo.vdm.Main", "2", virtualDisplayID, deviceTempPath) != "" {
-			return nil, fmt.Errorf("虚拟屏截图失败: %v", err)
+		ensureCapDexOnDevice(baseDeviceID)
+		args := append([]string{"-s", baseDeviceID}, androidCapDexMainArgs("2", virtualDisplayID, deviceTempPath)...)
+		output, execErr := adbExecCombined(args...)
+		if execErr != nil {
+			return nil, fmt.Errorf("虚拟屏截图失败: %v", adbErrorWithOutput(execErr, output))
 		}
 	} else {
-		// 使用常规 screencap 命令
-		adbExec("-s", baseDeviceID, "shell", "screencap", deviceTempPath)
+		output, execErr := adbExecCombined("-s", baseDeviceID, "shell", "screencap", deviceTempPath)
+		if execErr != nil {
+			return nil, fmt.Errorf("截图失败: %v", adbErrorWithOutput(execErr, output))
+		}
 	}
 
 	defer func() {
@@ -1195,13 +1240,21 @@ func captureScreenWithADB(deviceID string) (img image.Image, err error) {
 	}()
 
 	localTempFile, err := ioutil.TempFile("", "screenshot_*.png")
+	if err != nil {
+		return nil, fmt.Errorf("创建临时文件失败: %v", err)
+	}
 	localTempPath := localTempFile.Name()
-	localTempFile.Close()
+	if closeErr := localTempFile.Close(); closeErr != nil {
+		return nil, fmt.Errorf("关闭临时文件失败: %v", closeErr)
+	}
 
 	// 确保清理本地临时文件
 	defer os.Remove(localTempPath)
 
-	adbExec("-s", baseDeviceID, "pull", deviceTempPath, localTempPath)
+	output, execErr := adbExecCombined("-s", baseDeviceID, "pull", deviceTempPath, localTempPath)
+	if execErr != nil {
+		return nil, fmt.Errorf("拉取截图失败: %v", adbErrorWithOutput(execErr, output))
+	}
 
 	data, err := ioutil.ReadFile(localTempPath)
 	if err != nil {

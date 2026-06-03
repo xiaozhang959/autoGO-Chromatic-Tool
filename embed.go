@@ -14,6 +14,9 @@ var capDexData []byte
 // capDexPath 存储临时目录中 cap.dex 的路径
 var capDexPath string
 
+const androidCapDexDevicePath = "/data/local/tmp/cap.dex"
+const androidCapDexMainClass = "com.autogo.vdm.Main"
+
 // pushedDevices 记录已推送过 cap.dex 的设备，避免重复推送
 var pushedDevices = make(map[string]bool)
 var pushedDevicesMutex sync.RWMutex
@@ -48,16 +51,32 @@ func ensureCapDexOnDevice(deviceID string) {
 
 	// 确保 capDexPath 已设置
 	if capDexPath == "" {
+		log.Printf("cap.dex 未释放，跳过推送: %s", deviceID)
 		return
 	}
 
-	// 标记为已推送（无论结果如何只执行一次）
+	// 执行 adb push
+	log.Printf("正在向设备 %s 推送 cap.dex...", deviceID)
+	output, err := adbExecCombined("-s", deviceID, "push", capDexPath, androidCapDexDevicePath)
+	if err != nil {
+		log.Printf("cap.dex 推送失败: %s err=%v", deviceID, adbErrorWithOutput(err, output))
+		return
+	}
+
 	pushedDevicesMutex.Lock()
 	pushedDevices[deviceID] = true
 	pushedDevicesMutex.Unlock()
-
-	// 执行 adb push
-	log.Printf("正在向设备 %s 推送 cap.dex...", deviceID)
-	output := adbExec("-s", deviceID, "push", capDexPath, "/data/local/tmp/cap.dex")
 	log.Printf("cap.dex 推送完成: %s output=%q", deviceID, logPreview(output, 500))
+}
+
+func androidCapDexMainArgs(mode string, args ...string) []string {
+	command := []string{
+		"shell",
+		"CLASSPATH=" + androidCapDexDevicePath,
+		"app_process",
+		"/",
+		androidCapDexMainClass,
+		mode,
+	}
+	return append(command, args...)
 }

@@ -44,6 +44,16 @@ func TestParseAndroidNodeXML(t *testing.T) {
 	}
 }
 
+func TestCaptureAndroidNodeSnapshotRejectsVirtualDisplay(t *testing.T) {
+	_, err := captureAndroidNodeSnapshot("emulator-5554[12]", false)
+	if err == nil {
+		t.Fatal("expected virtual display node capture to fail")
+	}
+	if !strings.Contains(err.Error(), "无法可靠指定虚拟屏 12") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAndroidNodeSummaryUsesSingleLineText(t *testing.T) {
 	node := &AndroidUINode{
 		Number: 1,

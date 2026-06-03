@@ -1401,6 +1401,9 @@ func captureAndroidNodeSnapshot(deviceID string, compressed bool) (*AndroidNodeS
 	if baseDevice == "" {
 		return nil, fmt.Errorf("设备 ID 为空")
 	}
+	if virtualDisplayID != "" {
+		return nil, fmt.Errorf("当前节点抓取使用 uiautomator dump，无法可靠指定虚拟屏 %s；虚拟屏截图已支持，虚拟屏节点需要接入 AutoGo uiacc bridge", virtualDisplayID)
+	}
 
 	args := []string{"-s", baseDevice, "shell", "uiautomator", "dump"}
 	if compressed {
@@ -1430,13 +1433,8 @@ func captureAndroidNodeSnapshot(deviceID string, compressed bool) (*AndroidNodeS
 		return nil, fmt.Errorf("未解析到节点")
 	}
 
-	displayDevice := deviceID
-	if virtualDisplayID != "" {
-		displayDevice = fmt.Sprintf("%s[%s] · 节点来自基础设备", baseDevice, virtualDisplayID)
-	}
-
 	return &AndroidNodeSnapshot{
-		Device:     displayDevice,
+		Device:     deviceID,
 		BaseDevice: baseDevice,
 		CapturedAt: time.Now(),
 		Nodes:      nodes,
