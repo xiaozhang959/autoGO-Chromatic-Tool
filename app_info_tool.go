@@ -14,9 +14,10 @@ import (
 )
 
 type AndroidAppInfo struct {
-	Name         string `json:"name"`
-	PackageName  string `json:"packageName"`
-	ActivityName string `json:"activityName"`
+	Name         string   `json:"name"`
+	PackageName  string   `json:"packageName"`
+	ActivityName string   `json:"activityName"`
+	Activities   []string `json:"activities"`
 }
 
 type AndroidAppInfoTool struct {
@@ -30,9 +31,19 @@ type AndroidAppInfoTool struct {
 	statusLabel *widget.Label
 	appList     *widget.List
 
+	nameEntry      *widget.Entry
+	packageEntry   *widget.Entry
+	launcherEntry  *widget.Entry
+	activitiesList *widget.List
+
 	busy         bool
 	apps         []AndroidAppInfo
 	filteredApps []AndroidAppInfo
+
+	hasSelectedApp       bool
+	selectedApp          AndroidAppInfo
+	selectedActivities   []string
+	syncingListSelection bool
 }
 
 func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *AndroidAppInfoTool {
@@ -72,21 +83,25 @@ func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *Andr
 			activityLabel := widget.NewLabel("")
 			activityLabel.Wrapping = fyne.TextWrapOff
 
-			return container.NewVBox(nameLabel, packageLabel, activityLabel)
+			countLabel := widget.NewLabel("")
+			countLabel.Wrapping = fyne.TextWrapOff
+
+			return container.NewVBox(nameLabel, packageLabel, activityLabel, countLabel)
 		},
 		func(id widget.ListItemID, item fyne.CanvasObject) {
 			if id < 0 || id >= len(tool.filteredApps) {
 				return
 			}
 			box, ok := item.(*fyne.Container)
-			if !ok || len(box.Objects) < 3 {
+			if !ok || len(box.Objects) < 4 {
 				return
 			}
 
 			nameLabel, _ := box.Objects[0].(*widget.Label)
 			packageLabel, _ := box.Objects[1].(*widget.Label)
 			activityLabel, _ := box.Objects[2].(*widget.Label)
-			if nameLabel == nil || packageLabel == nil || activityLabel == nil {
+			countLabel, _ := box.Objects[3].(*widget.Label)
+			if nameLabel == nil || packageLabel == nil || activityLabel == nil || countLabel == nil {
 				return
 			}
 
@@ -97,16 +112,85 @@ func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *Andr
 			}
 			nameLabel.SetText(app.Name)
 			packageLabel.SetText("包名: " + app.PackageName)
-			activityLabel.SetText("界面: " + activityName)
+			activityLabel.SetText("启动: " + activityName)
+			countLabel.SetText(fmt.Sprintf("页面: %d 个 · 其它: %d 个", len(app.Activities), len(androidAppOtherActivities(app))))
 		},
+	)
+	tool.appList.OnSelected = func(id widget.ListItemID) {
+		if tool.syncingListSelection {
+			return
+		}
+		tool.selectFilteredApp(id, false)
+	}
+
+	tool.nameEntry = widget.NewEntry()
+	tool.nameEntry.SetPlaceHolder("应用名称")
+	tool.packageEntry = widget.NewEntry()
+	tool.packageEntry.SetPlaceHolder("应用包名")
+	tool.launcherEntry = widget.NewEntry()
+	tool.launcherEntry.SetPlaceHolder("启动界面")
+
+	copyNameBtn := widget.NewButton("复制", func() {
+		tool.copyText("应用名称", tool.nameEntry.Text)
+	})
+	copyPackageBtn := widget.NewButton("复制", func() {
+		tool.copyText("应用包名", tool.packageEntry.Text)
+	})
+	copyLauncherBtn := widget.NewButton("复制", func() {
+		tool.copyText("启动界面", tool.launcherEntry.Text)
+	})
+	copyActivitiesBtn := widget.NewButton("复制全部", func() {
+		tool.copyText("其它界面", strings.Join(tool.selectedActivities, "\n"))
+	})
+
+	tool.activitiesList = widget.NewList(
+		func() int {
+			return len(tool.selectedActivities)
+		},
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("")
+			label.Wrapping = fyne.TextWrapOff
+			copyBtn := widget.NewButton("复制", func() {})
+			return container.NewBorder(nil, nil, nil, copyBtn, label)
+		},
+		func(id widget.ListItemID, item fyne.CanvasObject) {
+			if id < 0 || id >= len(tool.selectedActivities) {
+				return
+			}
+			row, ok := item.(*fyne.Container)
+			if !ok || len(row.Objects) < 2 {
+				return
+			}
+			label, _ := row.Objects[0].(*widget.Label)
+			copyBtn, _ := row.Objects[1].(*widget.Button)
+			if label == nil || copyBtn == nil {
+				return
+			}
+			activity := tool.selectedActivities[id]
+			label.SetText(activity)
+			copyBtn.OnTapped = func() {
+				tool.copyText("界面名称", activity)
+			}
+		},
+	)
+
+	detailPanel := container.NewVBox(
+		widget.NewLabel("应用详情"),
+		container.NewBorder(nil, nil, widget.NewLabel("名称"), copyNameBtn, tool.nameEntry),
+		container.NewBorder(nil, nil, widget.NewLabel("包名"), copyPackageBtn, tool.packageEntry),
+		container.NewBorder(nil, nil, widget.NewLabel("启动"), copyLauncherBtn, tool.launcherEntry),
+		container.NewBorder(nil, nil, nil, copyActivitiesBtn, widget.NewLabel("其它界面")),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.activitiesList), 180),
 	)
 
 	tool.root = container.NewVBox(
 		container.NewBorder(nil, nil, nil, tool.queryBtn, tool.searchEntry),
 		container.NewHScroll(tool.statusLabel),
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.appList), 520),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.appList), 260),
+		detailPanel,
 	)
 
+	tool.clearSelectedApp()
 	return tool
 }
 
@@ -147,6 +231,11 @@ func (t *AndroidAppInfoTool) Query() {
 }
 
 func (t *AndroidAppInfoTool) applySearch() {
+	selectedPackage := ""
+	if t.hasSelectedApp {
+		selectedPackage = t.selectedApp.PackageName
+	}
+
 	keyword := ""
 	if t.searchEntry != nil {
 		keyword = t.searchEntry.Text
@@ -154,6 +243,16 @@ func (t *AndroidAppInfoTool) applySearch() {
 	t.filteredApps = filterAndroidApps(t.apps, keyword)
 	if t.appList != nil {
 		t.appList.Refresh()
+	}
+
+	if len(t.filteredApps) == 0 {
+		t.clearSelectedApp()
+	} else {
+		index := androidAppIndexByPackage(t.filteredApps, selectedPackage)
+		if index < 0 {
+			index = 0
+		}
+		t.selectFilteredApp(index, true)
 	}
 
 	total := len(t.apps)
@@ -181,6 +280,71 @@ func (t *AndroidAppInfoTool) setStatus(text string) {
 	if t.statusLabel != nil {
 		t.statusLabel.SetText(text)
 	}
+}
+
+func (t *AndroidAppInfoTool) selectFilteredApp(id int, updateList bool) {
+	if id < 0 || id >= len(t.filteredApps) {
+		t.clearSelectedApp()
+		return
+	}
+
+	app := t.filteredApps[id]
+	t.hasSelectedApp = true
+	t.selectedApp = app
+	t.selectedActivities = androidAppOtherActivities(app)
+
+	if t.nameEntry != nil {
+		t.nameEntry.SetText(app.Name)
+	}
+	if t.packageEntry != nil {
+		t.packageEntry.SetText(app.PackageName)
+	}
+	if t.launcherEntry != nil {
+		t.launcherEntry.SetText(app.ActivityName)
+	}
+	if t.activitiesList != nil {
+		t.activitiesList.Refresh()
+	}
+	if updateList && t.appList != nil {
+		t.syncingListSelection = true
+		t.appList.Select(id)
+		t.syncingListSelection = false
+	}
+}
+
+func (t *AndroidAppInfoTool) clearSelectedApp() {
+	t.hasSelectedApp = false
+	t.selectedApp = AndroidAppInfo{}
+	t.selectedActivities = nil
+	if t.nameEntry != nil {
+		t.nameEntry.SetText("")
+	}
+	if t.packageEntry != nil {
+		t.packageEntry.SetText("")
+	}
+	if t.launcherEntry != nil {
+		t.launcherEntry.SetText("")
+	}
+	if t.activitiesList != nil {
+		t.activitiesList.Refresh()
+	}
+	if t.appList != nil {
+		t.syncingListSelection = true
+		t.appList.UnselectAll()
+		t.syncingListSelection = false
+	}
+}
+
+func (t *AndroidAppInfoTool) copyText(label, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		t.setStatus(label + "为空，无法复制")
+		return
+	}
+	if t.window != nil {
+		t.window.Clipboard().SetContent(text)
+	}
+	t.setStatus("已复制" + label)
 }
 
 func queryAndroidApps(deviceID string) ([]AndroidAppInfo, error) {
@@ -225,6 +389,7 @@ func parseAndroidAppInfoLines(output string) ([]AndroidAppInfo, error) {
 		app.Name = strings.TrimSpace(app.Name)
 		app.PackageName = strings.TrimSpace(app.PackageName)
 		app.ActivityName = strings.TrimSpace(app.ActivityName)
+		app.Activities = normalizeAndroidAppActivities(app.ActivityName, app.Activities)
 		if app.PackageName == "" {
 			return nil, fmt.Errorf("应用信息缺少包名: %s", line)
 		}
@@ -255,9 +420,17 @@ func filterAndroidApps(apps []AndroidAppInfo, keyword string) []AndroidAppInfo {
 }
 
 func androidAppMatches(app AndroidAppInfo, keyword string) bool {
-	return strings.Contains(strings.ToLower(app.Name), keyword) ||
+	if strings.Contains(strings.ToLower(app.Name), keyword) ||
 		strings.Contains(strings.ToLower(app.PackageName), keyword) ||
-		strings.Contains(strings.ToLower(app.ActivityName), keyword)
+		strings.Contains(strings.ToLower(app.ActivityName), keyword) {
+		return true
+	}
+	for _, activity := range app.Activities {
+		if strings.Contains(strings.ToLower(activity), keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func sortAndroidApps(apps []AndroidAppInfo) {
@@ -269,4 +442,57 @@ func sortAndroidApps(apps []AndroidAppInfo) {
 		}
 		return apps[i].PackageName < apps[j].PackageName
 	})
+}
+
+func normalizeAndroidAppActivities(launcher string, activities []string) []string {
+	normalized := make([]string, 0, len(activities)+1)
+	seen := make(map[string]struct{})
+	add := func(activity string) {
+		activity = strings.TrimSpace(activity)
+		if activity == "" {
+			return
+		}
+		if _, ok := seen[activity]; ok {
+			return
+		}
+		seen[activity] = struct{}{}
+		normalized = append(normalized, activity)
+	}
+
+	add(launcher)
+	for _, activity := range activities {
+		add(activity)
+	}
+	return normalized
+}
+
+func androidAppOtherActivities(app AndroidAppInfo) []string {
+	launcher := strings.TrimSpace(app.ActivityName)
+	others := make([]string, 0, len(app.Activities))
+	seen := make(map[string]struct{})
+	for _, activity := range app.Activities {
+		activity = strings.TrimSpace(activity)
+		if activity == "" || activity == launcher {
+			continue
+		}
+		if _, ok := seen[activity]; ok {
+			continue
+		}
+		seen[activity] = struct{}{}
+		others = append(others, activity)
+	}
+	return others
+}
+
+func androidAppIndexByPackage(apps []AndroidAppInfo, packageName string) int {
+	packageName = strings.TrimSpace(packageName)
+	if packageName == "" {
+		return -1
+	}
+	for i, app := range apps {
+		if app.PackageName == packageName {
+			return i
+		}
+	}
+	return -1
 }

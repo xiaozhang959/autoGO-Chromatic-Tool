@@ -2,12 +2,15 @@ package com.autogo.vdm;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Looper;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,9 +40,11 @@ public class AppInfo {
             String packageName = safeString(app.packageName);
             String name = appLabel(pm, app);
             String activityName = safeString(launcherActivities.get(packageName));
+            List<String> activities = queryPackageActivities(pm, packageName);
             System.out.println("{\"name\":\"" + jsonEscape(name) +
                     "\",\"packageName\":\"" + jsonEscape(packageName) +
-                    "\",\"activityName\":\"" + jsonEscape(activityName) + "\"}");
+                    "\",\"activityName\":\"" + jsonEscape(activityName) +
+                    "\",\"activities\":" + jsonStringArray(activities) + "}");
         }
     }
 
@@ -60,6 +65,41 @@ public class AppInfo {
             result.put(packageName, activityName);
         }
         return result;
+    }
+
+    private static List<String> queryPackageActivities(PackageManager pm, String packageName) {
+        List<String> result = new ArrayList<String>();
+        try {
+            PackageInfo packageInfo = pm.getPackageInfo(packageName,
+                    PackageManager.GET_ACTIVITIES | PackageManager.MATCH_DISABLED_COMPONENTS);
+            if (packageInfo == null || packageInfo.activities == null) {
+                return result;
+            }
+            for (ActivityInfo activity : packageInfo.activities) {
+                if (activity == null) {
+                    continue;
+                }
+                String name = safeString(activity.name);
+                if (name.length() == 0 || contains(result, name)) {
+                    continue;
+                }
+                result.add(name);
+            }
+        } catch (RuntimeException ignored) {
+            // Keep the app row visible even if one package cannot expose activities.
+        } catch (PackageManager.NameNotFoundException ignored) {
+            // Package disappeared during query; keep the app row visible.
+        }
+        return result;
+    }
+
+    private static boolean contains(List<String> values, String target) {
+        for (String value : values) {
+            if (target.equals(value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Context getSystemContext() throws Exception {
@@ -150,6 +190,19 @@ public class AppInfo {
                     break;
             }
         }
+        return out.toString();
+    }
+
+    private static String jsonStringArray(List<String> values) {
+        StringBuilder out = new StringBuilder();
+        out.append('[');
+        for (int i = 0; i < values.size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            out.append('"').append(jsonEscape(values.get(i))).append('"');
+        }
+        out.append(']');
         return out.toString();
     }
 }

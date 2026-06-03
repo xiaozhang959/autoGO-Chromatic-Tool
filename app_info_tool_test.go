@@ -18,7 +18,7 @@ func TestParseAndroidAppInfoLines(t *testing.T) {
 	output := `
 ignored warning
 {"name":"微信","packageName":"com.tencent.mm","activityName":"com.tencent.mm.ui.LauncherUI"}
-{"name":"","packageName":"com.example.no_label","activityName":""}
+{"name":"","packageName":"com.example.no_label","activityName":"","activities":[".MainActivity",".MainActivity","com.example.SettingsActivity"]}
 `
 
 	apps, err := parseAndroidAppInfoLines(output)
@@ -34,6 +34,7 @@ ignored warning
 	if apps[1].Name != "com.example.no_label" {
 		t.Fatalf("empty app name should fallback to package name: %+v", apps[1])
 	}
+	assertStringSliceEqual(t, apps[1].Activities, []string{".MainActivity", "com.example.SettingsActivity"})
 }
 
 func TestParseAndroidAppInfoLinesRejectsMissingPackage(t *testing.T) {
@@ -45,7 +46,7 @@ func TestParseAndroidAppInfoLinesRejectsMissingPackage(t *testing.T) {
 
 func TestFilterAndroidAppsMatchesNamePackageAndActivity(t *testing.T) {
 	apps := []AndroidAppInfo{
-		{Name: "微信", PackageName: "com.tencent.mm", ActivityName: "com.tencent.mm.ui.LauncherUI"},
+		{Name: "微信", PackageName: "com.tencent.mm", ActivityName: "com.tencent.mm.ui.LauncherUI", Activities: []string{"com.tencent.mm.ui.LauncherUI", "com.tencent.mm.plugin.setting.ui.setting.SettingsUI"}},
 		{Name: "Settings", PackageName: "com.android.settings", ActivityName: "com.android.settings.Settings"},
 	}
 
@@ -58,4 +59,24 @@ func TestFilterAndroidAppsMatchesNamePackageAndActivity(t *testing.T) {
 	if got := filterAndroidApps(apps, "launcherui"); len(got) != 1 || got[0].PackageName != "com.tencent.mm" {
 		t.Fatalf("activity filter mismatch: %+v", got)
 	}
+	if got := filterAndroidApps(apps, "settingsui"); len(got) != 1 || got[0].PackageName != "com.tencent.mm" {
+		t.Fatalf("other activity filter mismatch: %+v", got)
+	}
+}
+
+func TestAndroidAppOtherActivitiesExcludesLauncher(t *testing.T) {
+	app := AndroidAppInfo{
+		ActivityName: "com.example.MainActivity",
+		Activities: []string{
+			"com.example.MainActivity",
+			"com.example.LoginActivity",
+			"com.example.LoginActivity",
+			"com.example.SettingsActivity",
+		},
+	}
+
+	assertStringSliceEqual(t, androidAppOtherActivities(app), []string{
+		"com.example.LoginActivity",
+		"com.example.SettingsActivity",
+	})
 }
