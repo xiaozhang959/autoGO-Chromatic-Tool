@@ -74,7 +74,7 @@ type androidNodeAttrMeta struct {
 }
 
 var androidNodeAttrMetas = []androidNodeAttrMeta{
-	{Name: "depth", Kind: androidNodeAttrUnsupported},
+	{Name: "depth", Finder: "depth", Kind: androidNodeAttrInt, Methods: []string{"Depth"}},
 	{Name: "index", XMLAttr: "index", Finder: "index", Kind: androidNodeAttrInt, Methods: []string{"Index"}},
 	{Name: "drawingOrder", XMLAttr: "drawing-order", Finder: "drawing-order", Kind: androidNodeAttrInt, Methods: []string{"DrawingOrder"}},
 	{Name: "class", XMLAttr: "class", Finder: "class", Kind: androidNodeAttrString, Methods: []string{"ClassName", "ClassNameContains", "ClassNameStartsWith", "ClassNameEndsWith", "ClassNameMatches"}},
@@ -1327,6 +1327,8 @@ func androidNodeAttrMethod(row androidNodeAttrRow) string {
 		return "PackageName"
 	case "index":
 		return "Index"
+	case "depth":
+		return "Depth"
 	case "drawing-order":
 		return "DrawingOrder"
 	case "checkable":
@@ -1368,7 +1370,7 @@ func androidNodeAttrKindForMethod(row androidNodeAttrRow, method string) android
 	if row.Kind != androidNodeAttrUnsupported {
 		return row.Kind
 	}
-	if method == "Index" || method == "DrawingOrder" {
+	if method == "Depth" || method == "Index" || method == "DrawingOrder" {
 		return androidNodeAttrInt
 	}
 	if method == "Bounds" || method == "BoundsInside" || method == "BoundsContains" {

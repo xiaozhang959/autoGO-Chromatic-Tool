@@ -74,6 +74,9 @@ func TestBuildAndroidNodeAttrRowsSelectsStableAttrs(t *testing.T) {
 	if methods["text"] != "Text" || methods["desc"] != "Desc" || methods["id"] != "Id" {
 		t.Fatalf("unexpected default methods: text=%q desc=%q id=%q", methods["text"], methods["desc"], methods["id"])
 	}
+	if methods["depth"] != "Depth" {
+		t.Fatalf("expected depth default method Depth, got %q", methods["depth"])
+	}
 	if methods["bounds"] != "Bounds" {
 		t.Fatalf("expected bounds default method Bounds, got %q", methods["bounds"])
 	}
@@ -102,6 +105,7 @@ func TestSelectedXPath(t *testing.T) {
 
 func TestBuildAndroidNodeSelectorChain(t *testing.T) {
 	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "depth", Value: "2", Kind: androidNodeAttrInt, Method: "Depth"},
 		{Selected: true, Name: "text", Value: "登录", Kind: androidNodeAttrString, Method: "TextContains"},
 		{Selected: true, Name: "clickable", Value: "true", Kind: androidNodeAttrBool, Method: "Clickable"},
 		{Selected: true, Name: "bounds", Value: "[10,20][80,60]", Kind: androidNodeAttrBounds, Method: "Bounds"},
@@ -112,7 +116,7 @@ func TestBuildAndroidNodeSelectorChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAndroidNodeSelectorChain returned error: %v", err)
 	}
-	want := `.TextContains("登录").Clickable(true).Bounds(10, 20, 80, 60)`
+	want := `.Depth(2).TextContains("登录").Clickable(true).Bounds(10, 20, 80, 60)`
 	if chain != want {
 		t.Fatalf("expected chain %s, got %s", want, chain)
 	}
@@ -142,6 +146,7 @@ func TestBuildAndroidNodeSelectorCodeUsesTemplate(t *testing.T) {
 
 func TestAndroidNodeMatchesAttrsUsesMethodSemantics(t *testing.T) {
 	node := &AndroidUINode{
+		Depth: 2,
 		Attrs: map[string]string{
 			"text":      "登录按钮",
 			"clickable": "true",
@@ -149,6 +154,7 @@ func TestAndroidNodeMatchesAttrsUsesMethodSemantics(t *testing.T) {
 		},
 	}
 	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "depth", Value: "2", Kind: androidNodeAttrInt, Method: "Depth"},
 		{Selected: true, Name: "text", Value: "登录", XMLAttr: "text", Kind: androidNodeAttrString, Method: "TextContains"},
 		{Selected: true, Name: "clickable", Value: "true", XMLAttr: "clickable", Kind: androidNodeAttrBool, Method: "Clickable"},
 		{Selected: true, Name: "bounds", Value: "[0,0][100,100]", XMLAttr: "bounds", Kind: androidNodeAttrBounds, Method: "BoundsInside"},
