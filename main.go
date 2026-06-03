@@ -6422,6 +6422,9 @@ func main() {
 			selectNodeToolTab()
 		}
 	})
+	appInfoTool := newAndroidAppInfoTool(w, func() string {
+		return selectedAndroidDeviceID()
+	})
 	grabNodeBtn := widget.NewButton("抓取节点", func() {
 		nodeTool.Capture()
 	})
@@ -6995,9 +6998,11 @@ func main() {
 	rightToolPanel := container.NewBorder(tableArea, nil, nil, nil, toolForm)
 	colorToolTabItem := container.NewTabItem("图色工具", rightToolPanel)
 	nodeTabItem = container.NewTabItem("节点工具", nodeTool.Content())
+	appInfoTabItem := container.NewTabItem("App信息", appInfoTool.Content())
 	rightTabs = container.NewAppTabs(
 		colorToolTabItem,
 		nodeTabItem,
+		appInfoTabItem,
 	)
 	selectColorToolTab = func() {
 		if rightTabs != nil && colorToolTabItem != nil {
