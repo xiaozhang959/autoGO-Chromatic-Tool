@@ -1272,7 +1272,21 @@ func buildAndroidNodeSelectorChain(rows []androidNodeAttrRow) (string, error) {
 }
 
 func androidNodeSelectorArgs(row androidNodeAttrRow, method string) (string, error) {
-	switch androidNodeAttrKindForMethod(row, method) {
+	kind := androidNodeAttrKindForMethod(row, method)
+	if strings.TrimSpace(row.Value) == "" {
+		switch kind {
+		case androidNodeAttrString:
+			return strconv.Quote(row.Value), nil
+		case androidNodeAttrBool:
+			return "false", nil
+		case androidNodeAttrInt:
+			return "0", nil
+		case androidNodeAttrBounds:
+			return "0, 0, 0, 0", nil
+		}
+	}
+
+	switch kind {
 	case androidNodeAttrString:
 		return strconv.Quote(row.Value), nil
 	case androidNodeAttrBool:

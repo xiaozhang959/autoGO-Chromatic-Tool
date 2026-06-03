@@ -213,13 +213,20 @@ func TestBuildAndroidNodeSelectorCodeUsesTemplate(t *testing.T) {
 	}
 }
 
-func TestBuildAndroidNodeSelectorChainRejectsEmptyNonStringArgs(t *testing.T) {
+func TestBuildAndroidNodeSelectorChainGeneratesZeroValuesForEmptyArgs(t *testing.T) {
 	rows := []androidNodeAttrRow{
 		{Selected: true, Name: "drawingOrder", Value: "", Kind: androidNodeAttrInt, Method: "DrawingOrder"},
+		{Selected: true, Name: "bounds", Value: "", Kind: androidNodeAttrBounds, Method: "Bounds"},
+		{Selected: true, Name: "clickable", Value: "", Kind: androidNodeAttrBool, Method: "Clickable"},
 	}
 
-	if _, err := buildAndroidNodeSelectorChain(rows); err == nil {
-		t.Fatal("expected empty int selector to fail code generation")
+	chain, err := buildAndroidNodeSelectorChain(rows)
+	if err != nil {
+		t.Fatalf("buildAndroidNodeSelectorChain returned error: %v", err)
+	}
+	want := `.DrawingOrder(0).Bounds(0, 0, 0, 0).Clickable(false)`
+	if chain != want {
+		t.Fatalf("expected chain %s, got %s", want, chain)
 	}
 }
 
