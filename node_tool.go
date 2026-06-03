@@ -19,7 +19,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-const androidNodeDumpPath = "/sdcard/window_dump.xml"
 const compactNodeToolAttrSelectWidth float32 = 40
 const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 118
@@ -1405,32 +1404,32 @@ func captureAndroidNodeSnapshot(deviceID string, compressed bool) (*AndroidNodeS
 		return nil, fmt.Errorf("当前节点抓取使用 uiautomator dump，无法可靠指定虚拟屏 %s；虚拟屏截图已支持，虚拟屏节点需要接入 AutoGo uiacc bridge", virtualDisplayID)
 	}
 
-	args := []string{"-s", baseDevice, "shell", "uiautomator", "dump"}
-	if compressed {
-		args = append(args, "--compressed")
-	}
-	args = append(args, androidNodeDumpPath)
-
-	if output, err := adbExecCombined(args...); err != nil {
-		return nil, fmt.Errorf("执行 uiautomator dump 失败: %v", adbErrorWithOutput(err, output))
-	}
-
-	xmlText, err := adbExecCombined("-s", baseDevice, "exec-out", "cat", androidNodeDumpPath)
-	if err != nil || !strings.Contains(xmlText, "<hierarchy") {
-		fallbackText, fallbackErr := adbExecCombined("-s", baseDevice, "shell", "cat", androidNodeDumpPath)
-		if fallbackErr != nil {
-			return nil, fmt.Errorf("读取节点 XML 失败: %v", adbErrorWithOutput(fallbackErr, fallbackText))
+	var failed []string
+	var nodes []*AndroidUINode
+	for _, dumpPath := range androidNodeDumpPaths() {
+		xmlText, dumpErr := captureAndroidNodeXML(baseDevice, compressed, dumpPath)
+		if dumpErr != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", dumpPath, dumpErr))
+			continue
 		}
-		xmlText = fallbackText
-	}
-	_, _ = adbExecCombined("-s", baseDevice, "shell", "rm", androidNodeDumpPath)
 
-	nodes, err := parseAndroidNodeXML(xmlText)
-	if err != nil {
-		return nil, err
+		parsedNodes, parseErr := parseAndroidNodeXML(xmlText)
+		if parseErr != nil {
+			failed = append(failed, fmt.Sprintf("%s: %v", dumpPath, parseErr))
+			continue
+		}
+		if len(parsedNodes) == 0 {
+			failed = append(failed, fmt.Sprintf("%s: 未解析到节点", dumpPath))
+			continue
+		}
+		nodes = parsedNodes
+		break
 	}
 	if len(nodes) == 0 {
-		return nil, fmt.Errorf("未解析到节点")
+		if len(failed) == 0 {
+			return nil, fmt.Errorf("未解析到节点")
+		}
+		return nil, fmt.Errorf("抓取节点失败，已尝试临时路径: %s", strings.Join(failed, "; "))
 	}
 
 	return &AndroidNodeSnapshot{
@@ -1439,6 +1438,41 @@ func captureAndroidNodeSnapshot(deviceID string, compressed bool) (*AndroidNodeS
 		CapturedAt: time.Now(),
 		Nodes:      nodes,
 	}, nil
+}
+
+func androidNodeDumpPaths() []string {
+	return []string{
+		"/data/local/tmp/window_dump.xml",
+		"/sdcard/window_dump.xml",
+	}
+}
+
+func captureAndroidNodeXML(baseDevice string, compressed bool, dumpPath string) (string, error) {
+	args := []string{"-s", baseDevice, "shell", "uiautomator", "dump"}
+	if compressed {
+		args = append(args, "--compressed")
+	}
+	args = append(args, dumpPath)
+
+	if output, err := adbExecCombined(args...); err != nil {
+		return "", fmt.Errorf("执行 uiautomator dump 失败: %v", adbErrorWithOutput(err, output))
+	}
+	defer func() {
+		_, _ = adbExecCombined("-s", baseDevice, "shell", "rm", dumpPath)
+	}()
+
+	xmlText, err := adbExecCombined("-s", baseDevice, "exec-out", "cat", dumpPath)
+	if err != nil || !strings.Contains(xmlText, "<hierarchy") {
+		fallbackText, fallbackErr := adbExecCombined("-s", baseDevice, "shell", "cat", dumpPath)
+		if fallbackErr != nil {
+			return "", fmt.Errorf("读取节点 XML 失败: %v", adbErrorWithOutput(fallbackErr, fallbackText))
+		}
+		xmlText = fallbackText
+	}
+	if !strings.Contains(xmlText, "<hierarchy") {
+		return "", fmt.Errorf("节点 XML 内容无效")
+	}
+	return xmlText, nil
 }
 
 func parseAndroidNodeXML(xmlText string) ([]*AndroidUINode, error) {
