@@ -407,7 +407,11 @@ func TestSelectNodeAtPointRepeatedClickClimbsAncestors(t *testing.T) {
 	tool := &AndroidNodeTool{
 		snapshot:      &AndroidNodeSnapshot{Nodes: []*AndroidUINode{root, parent, child}},
 		filteredNodes: []*AndroidUINode{root, parent, child},
-		selectedNode:  child,
+	}
+
+	tool.selectNodeAtPoint(25, 25)
+	if tool.selectedNode != child {
+		t.Fatalf("expected first click to select child node, got %#v", tool.selectedNode)
 	}
 
 	tool.selectNodeAtPoint(25, 25)
@@ -439,6 +443,68 @@ func TestSelectNodeAtPointFallsBackToHitTestOutsideSelection(t *testing.T) {
 	tool.selectNodeAtPoint(10, 10)
 	if tool.selectedNode != root {
 		t.Fatalf("click outside selected node should use normal hit-test, got %#v", tool.selectedNode)
+	}
+}
+
+func TestSelectNodeAtPointMovedClickUsesHitTestInsideSelectedAncestor(t *testing.T) {
+	root := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 300, 300)}
+	parent := &AndroidUINode{Number: 2, Depth: 1, Bounds: image.Rect(100, 100, 250, 250)}
+	child := &AndroidUINode{Number: 3, Depth: 2, Bounds: image.Rect(200, 200, 220, 220)}
+	root.Children = []*AndroidUINode{parent}
+	parent.Children = []*AndroidUINode{child}
+	tool := &AndroidNodeTool{
+		snapshot:      &AndroidNodeSnapshot{Nodes: []*AndroidUINode{root, parent, child}},
+		filteredNodes: []*AndroidUINode{root, parent, child},
+	}
+
+	tool.selectNodeAtPoint(10, 10)
+	if tool.selectedNode != root {
+		t.Fatalf("expected first click to select root node, got %#v", tool.selectedNode)
+	}
+
+	tool.selectNodeAtPoint(205, 205)
+	if tool.selectedNode != child {
+		t.Fatalf("moved click should use normal hit-test and select child, got %#v", tool.selectedNode)
+	}
+}
+
+func TestSelectNodeAtPointNoNodeClickResetsParentChain(t *testing.T) {
+	root := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 100, 100)}
+	child := &AndroidUINode{Number: 2, Depth: 1, Bounds: image.Rect(20, 20, 40, 40)}
+	root.Children = []*AndroidUINode{child}
+	tool := &AndroidNodeTool{
+		snapshot:      &AndroidNodeSnapshot{Nodes: []*AndroidUINode{root, child}},
+		filteredNodes: []*AndroidUINode{root, child},
+	}
+
+	tool.selectNodeAtPoint(25, 25)
+	tool.selectNodeAtPoint(25, 25)
+	if tool.selectedNode != root {
+		t.Fatalf("expected repeated click to select root node, got %#v", tool.selectedNode)
+	}
+
+	tool.selectNodeAtPoint(150, 150)
+	tool.selectNodeAtPoint(25, 25)
+	if tool.selectedNode != child {
+		t.Fatalf("click without node should reset parent chain; expected child, got %#v", tool.selectedNode)
+	}
+}
+
+func TestSelectNodeAtPointIgnoresSelectedNodeFromOtherPage(t *testing.T) {
+	oldPageNode := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 100, 100)}
+	currentPageNode := &AndroidUINode{Number: 2, Depth: 0, Bounds: image.Rect(20, 20, 40, 40)}
+	tool := &AndroidNodeTool{
+		snapshot:              &AndroidNodeSnapshot{Nodes: []*AndroidUINode{currentPageNode}},
+		filteredNodes:         []*AndroidUINode{currentPageNode},
+		selectedNode:          oldPageNode,
+		lastNodeClickPoint:    image.Pt(25, 25),
+		lastNodeClickNode:     oldPageNode,
+		hasLastNodeClickPoint: true,
+	}
+
+	tool.selectNodeAtPoint(25, 25)
+	if tool.selectedNode != currentPageNode {
+		t.Fatalf("click should use active page hit-test, got %#v", tool.selectedNode)
 	}
 }
 

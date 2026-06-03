@@ -33,6 +33,7 @@ const androidNodeSelectorFuncFind = "Find"
 const androidNodeSelectorFuncWaitFor = "WaitFor"
 const androidNodeSelectorDefaultTimeout = "3000"
 const androidNodeSelectorDefaultTemplate = "acc := uiacc.New({displayId})\nobj := acc{chain}.{call}"
+const androidNodeParentClickTolerance = 30
 
 type AndroidUINode struct {
 	Number   int
@@ -367,6 +368,10 @@ type AndroidNodeTool struct {
 	treeIDByNode  map[*AndroidUINode]string
 	treeParentID  map[string]string
 	syncingTree   bool
+
+	lastNodeClickPoint    image.Point
+	lastNodeClickNode     *AndroidUINode
+	hasLastNodeClickPoint bool
 }
 
 func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImageViewer func() *ImageViewer, openNodeImage func(image.Image, func(int, int)) *ImageViewer) *AndroidNodeTool {
@@ -660,6 +665,7 @@ func (t *AndroidNodeTool) activateNodePage(page *androidNodePageState) {
 	}
 	if t.activePage != page {
 		t.saveActivePageState()
+		t.resetNodeClickPoint()
 	}
 
 	page.ensureCollections()
@@ -1070,12 +1076,13 @@ func (t *AndroidNodeTool) updateNodeTreeScrollWidth() {
 
 func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
 	point := image.Pt(x, y)
-	if t.selectSelectedNodeParentAtPoint(point) {
+	if t.isRepeatedNodeClickOnSelectedNode(point) && t.selectSelectedNodeParentAtPoint(point) {
 		return
 	}
 
 	node := t.smallestNodeAtPoint(point)
 	if node == nil {
+		t.resetNodeClickPoint()
 		return
 	}
 
@@ -1085,6 +1092,7 @@ func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
 	}
 
 	t.selectNode(node)
+	t.rememberNodeClickPoint(point)
 	t.setStatus(fmt.Sprintf("已选择节点 %03d · %s", node.Number, androidNodeSummary(node)))
 }
 
@@ -1097,7 +1105,7 @@ func (t *AndroidNodeTool) selectNodeAtPointOnPage(page *androidNodePageState, x,
 }
 
 func (t *AndroidNodeTool) selectSelectedNodeParentAtPoint(point image.Point) bool {
-	if t.snapshot == nil || t.selectedNode == nil || t.selectedNode.Bounds.Empty() || !point.In(t.selectedNode.Bounds) {
+	if t.snapshot == nil || t.selectedNode == nil || !t.selectedNodeBelongsToActivePage() || t.selectedNode.Bounds.Empty() || !point.In(t.selectedNode.Bounds) {
 		return false
 	}
 
@@ -1115,8 +1123,31 @@ func (t *AndroidNodeTool) selectSelectedNodeParentAtPoint(point image.Point) boo
 	}
 
 	t.selectNode(parent)
+	t.rememberNodeClickPoint(point)
 	t.setStatus(fmt.Sprintf("已选择父节点 %03d · %s", parent.Number, androidNodeSummary(parent)))
 	return true
+}
+
+func (t *AndroidNodeTool) isRepeatedNodeClickOnSelectedNode(point image.Point) bool {
+	if !t.hasLastNodeClickPoint || t.selectedNode == nil || t.lastNodeClickNode != t.selectedNode {
+		return false
+	}
+	if t.selectedNode.Bounds.Empty() || !point.In(t.selectedNode.Bounds) || !t.selectedNodeBelongsToActivePage() {
+		return false
+	}
+	return distance(t.lastNodeClickPoint.X, t.lastNodeClickPoint.Y, point.X, point.Y) <= androidNodeParentClickTolerance
+}
+
+func (t *AndroidNodeTool) rememberNodeClickPoint(point image.Point) {
+	t.lastNodeClickPoint = point
+	t.lastNodeClickNode = t.selectedNode
+	t.hasLastNodeClickPoint = true
+}
+
+func (t *AndroidNodeTool) resetNodeClickPoint() {
+	t.lastNodeClickPoint = image.Point{}
+	t.lastNodeClickNode = nil
+	t.hasLastNodeClickPoint = false
 }
 
 func (t *AndroidNodeTool) parentNode(node *AndroidUINode) *AndroidUINode {
