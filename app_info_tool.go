@@ -180,7 +180,7 @@ func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *Andr
 		container.NewBorder(nil, nil, widget.NewLabel("包名"), copyPackageBtn, tool.packageEntry),
 		container.NewBorder(nil, nil, widget.NewLabel("启动"), copyLauncherBtn, tool.launcherEntry),
 		container.NewBorder(nil, nil, nil, copyActivitiesBtn, widget.NewLabel("其它界面")),
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.activitiesList), 180),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.activitiesList), 150),
 	)
 
 	tool.root = container.NewVBox(
