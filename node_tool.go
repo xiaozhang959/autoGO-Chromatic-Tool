@@ -54,8 +54,6 @@ type androidNodePageState struct {
 	viewer        *ImageViewer
 	searchText    string
 	filteredNodes []*AndroidUINode
-	selectedNode  *AndroidUINode
-	attrRows      []androidNodeAttrRow
 	treeChildren  map[string][]string
 	treeNodeByID  map[string]*AndroidUINode
 	treeIDByNode  map[*AndroidUINode]string
@@ -67,7 +65,6 @@ func newAndroidNodePageState(snapshot *AndroidNodeSnapshot, viewer *ImageViewer)
 		snapshot:      snapshot,
 		viewer:        viewer,
 		filteredNodes: make([]*AndroidUINode, 0),
-		attrRows:      make([]androidNodeAttrRow, 0),
 	}
 	state.ensureCollections()
 	return state
@@ -76,9 +73,6 @@ func newAndroidNodePageState(snapshot *AndroidNodeSnapshot, viewer *ImageViewer)
 func (s *androidNodePageState) ensureCollections() {
 	if s.filteredNodes == nil {
 		s.filteredNodes = make([]*AndroidUINode, 0)
-	}
-	if s.attrRows == nil {
-		s.attrRows = make([]androidNodeAttrRow, 0)
 	}
 	if s.treeChildren == nil {
 		s.treeChildren = make(map[string][]string)
@@ -672,8 +666,6 @@ func (t *AndroidNodeTool) activateNodePage(page *androidNodePageState) {
 	t.activePage = page
 	t.snapshot = page.snapshot
 	t.filteredNodes = page.filteredNodes
-	t.selectedNode = page.selectedNode
-	t.attrRows = page.attrRows
 	t.nodeViewer = page.viewer
 	t.treeChildren = page.treeChildren
 	t.treeNodeByID = page.treeNodeByID
@@ -683,14 +675,45 @@ func (t *AndroidNodeTool) activateNodePage(page *androidNodePageState) {
 	if t.searchEntry != nil && t.searchEntry.Text != page.searchText {
 		t.searchEntry.SetText(page.searchText)
 	}
-	t.refreshSelector()
-	t.refreshLists()
-	if t.selectedNode != nil {
+	t.refreshNodeTree()
+	t.refreshActivePageSelectionVisual()
+}
+
+func (t *AndroidNodeTool) refreshNodeTree() {
+	if t.nodeTree != nil {
+		t.nodeTree.Refresh()
+	}
+}
+
+func (t *AndroidNodeTool) refreshActivePageSelectionVisual() {
+	if t.selectedNodeBelongsToActivePage() {
 		t.syncNodeListSelection(t.selectedNode)
 		t.highlightSelectedNode()
 		return
 	}
+	t.unselectNodeTree()
 	t.clearSelectedNodeOverlay()
+}
+
+func (t *AndroidNodeTool) selectedNodeBelongsToActivePage() bool {
+	if t.snapshot == nil || t.selectedNode == nil {
+		return false
+	}
+	for _, node := range t.snapshot.Nodes {
+		if node == t.selectedNode {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *AndroidNodeTool) unselectNodeTree() {
+	if t.nodeTree == nil {
+		return
+	}
+	t.syncingTree = true
+	t.nodeTree.UnselectAll()
+	t.syncingTree = false
 }
 
 func (t *AndroidNodeTool) saveActivePageState() {
@@ -704,8 +727,6 @@ func (t *AndroidNodeTool) saveActivePageState() {
 		t.activePage.searchText = t.searchEntry.Text
 	}
 	t.activePage.filteredNodes = t.filteredNodes
-	t.activePage.selectedNode = t.selectedNode
-	t.activePage.attrRows = t.attrRows
 	t.activePage.treeChildren = t.treeChildren
 	t.activePage.treeNodeByID = t.treeNodeByID
 	t.activePage.treeIDByNode = t.treeIDByNode
@@ -713,21 +734,36 @@ func (t *AndroidNodeTool) saveActivePageState() {
 }
 
 func (t *AndroidNodeTool) setSnapshot(snapshot *AndroidNodeSnapshot) {
+	selectFirstNode := !t.hasSelectorState()
 	t.snapshot = snapshot
-	t.selectedNode = nil
-	t.attrRows = t.attrRows[:0]
+	if selectFirstNode {
+		t.selectedNode = nil
+		t.attrRows = t.attrRows[:0]
+	}
 	t.updateNodeOverlay()
-	t.applySearch()
+	t.applySearchWithSelection(selectFirstNode)
 	t.saveActivePageState()
 
 	t.setStatus(fmt.Sprintf("已抓取 %d 个节点 · 设备: %s", len(snapshot.Nodes), snapshot.Device))
 }
 
+func (t *AndroidNodeTool) hasSelectorState() bool {
+	return t.selectedNode != nil || len(t.attrRows) > 0
+}
+
 func (t *AndroidNodeTool) applySearch() {
+	t.applySearchWithSelection(true)
+}
+
+func (t *AndroidNodeTool) applySearchWithSelection(selectFirstNode bool) {
 	t.filteredNodes = t.filteredNodes[:0]
 	if t.snapshot == nil {
 		t.rebuildNodeTree("")
-		t.refreshLists()
+		if selectFirstNode {
+			t.refreshLists()
+		} else {
+			t.refreshNodeTree()
+		}
 		t.saveActivePageState()
 		return
 	}
@@ -741,16 +777,27 @@ func (t *AndroidNodeTool) applySearch() {
 	t.rebuildNodeTree(keyword)
 
 	if len(t.filteredNodes) > 0 {
-		t.selectNode(t.filteredNodes[0])
-	} else {
+		if selectFirstNode {
+			t.selectNode(t.filteredNodes[0])
+		} else {
+			t.refreshActivePageSelectionVisual()
+			t.saveActivePageState()
+		}
+		return
+	}
+
+	if selectFirstNode {
 		t.selectedNode = nil
 		t.attrRows = t.attrRows[:0]
 		t.refreshSelector()
 		t.refreshLists()
-		t.clearSelectedNodeOverlay()
-		t.setStatus(fmt.Sprintf("没有匹配节点 · 总节点: %d", len(t.snapshot.Nodes)))
-		t.saveActivePageState()
+	} else {
+		t.refreshNodeTree()
+		t.unselectNodeTree()
 	}
+	t.clearSelectedNodeOverlay()
+	t.setStatus(fmt.Sprintf("没有匹配节点 · 总节点: %d", len(t.snapshot.Nodes)))
+	t.saveActivePageState()
 }
 
 func (t *AndroidNodeTool) selectRelative(offset int) {
@@ -1174,8 +1221,8 @@ func (t *AndroidNodeTool) selectedXPath() string {
 }
 
 func (t *AndroidNodeTool) testSelectedAttrs() {
-	if t.snapshot == nil || t.selectedNode == nil {
-		t.setStatus("请先抓取并选择节点")
+	if t.snapshot == nil {
+		t.setStatus("请先抓取节点")
 		return
 	}
 
