@@ -24,9 +24,9 @@ const compactNodeToolAttrSelectWidth float32 = 40
 const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 118
 const compactNodeToolTreeRowHeight float32 = 18
-const compactNodeToolTreeBottomPadding float32 = 28
 const compactNodeToolAttrRowHeight float32 = 28
 const compactNodeToolCheckOffsetY float32 = 5
+const androidNodeTreeBottomSpacerRows = 2
 
 const androidNodeSelectorFuncFindOnce = "FindOnce"
 const androidNodeSelectorFuncFind = "Find"
@@ -139,12 +139,6 @@ func newCompactNodeToolAttrSeparator() fyne.CanvasObject {
 	return separator
 }
 
-func newCompactNodeToolBottomSpacer(height float32) fyne.CanvasObject {
-	spacer := canvas.NewRectangle(color.Transparent)
-	spacer.SetMinSize(fyne.NewSize(1, height))
-	return spacer
-}
-
 type verticalOffsetLayout struct {
 	offsetY float32
 }
@@ -193,6 +187,7 @@ type compactNodeToolRow struct {
 	widget.BaseWidget
 	content  fyne.CanvasObject
 	height   float32
+	minWidth *minContentWidthLayout
 	onTapped func()
 }
 
@@ -236,6 +231,9 @@ func (r *compactNodeToolRowRenderer) Layout(size fyne.Size) {
 
 func (r *compactNodeToolRowRenderer) MinSize() fyne.Size {
 	min := r.row.content.MinSize()
+	if r.row.minWidth != nil {
+		min.Width = fyne.Max(min.Width, r.row.minWidth.minWidth)
+	}
 	min.Height = r.row.height
 	return min
 }
@@ -248,8 +246,10 @@ func (r *compactNodeToolRowRenderer) Refresh() {
 	r.row.content.Refresh()
 }
 
-func newCompactNodeTreeRow() *compactNodeToolRow {
-	return newCompactNodeToolRow(container.NewHBox(newNodeTreeToolText()), compactNodeToolTreeRowHeight)
+func newCompactNodeTreeRow(minWidth *minContentWidthLayout) *compactNodeToolRow {
+	row := newCompactNodeToolRow(container.NewHBox(newNodeTreeToolText()), compactNodeToolTreeRowHeight)
+	row.minWidth = minWidth
+	return row
 }
 
 func compactNodeTreeRowLabel(item fyne.CanvasObject) *widget.Label {
@@ -283,7 +283,6 @@ type AndroidNodeTool struct {
 	searchEntry      *widget.Entry
 	statusLabel      *widget.Label
 	nodeTree         *widget.Tree
-	nodeTreeContent  *fyne.Container
 	nodeTreeWidth    *minContentWidthLayout
 	attrList         *fyne.Container
 	selectorEntry    *widget.Entry
@@ -340,6 +339,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 
 	tool.statusLabel = widget.NewLabel("未抓取节点")
 	tool.statusLabel.Wrapping = fyne.TextWrapWord
+	tool.nodeTreeWidth = &minContentWidthLayout{minWidth: 1}
 
 	tool.nodeTree = widget.NewTree(
 		func(uid widget.TreeNodeID) []widget.TreeNodeID {
@@ -349,7 +349,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 			return uid == "" || len(tool.treeChildren[uid]) > 0
 		},
 		func(bool) fyne.CanvasObject {
-			return newCompactNodeTreeRow()
+			return newCompactNodeTreeRow(tool.nodeTreeWidth)
 		},
 		func(uid widget.TreeNodeID, branch bool, item fyne.CanvasObject) {
 			label := compactNodeTreeRowLabel(item)
@@ -459,16 +459,12 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		newCompactNodeToolText("值"),
 		newCompactNodeToolText("函数"),
 	)
-	tool.nodeTreeWidth = &minContentWidthLayout{minWidth: 1}
-	nodeTreeWithPadding := container.NewBorder(nil, newCompactNodeToolBottomSpacer(compactNodeToolTreeBottomPadding), nil, nil, tool.nodeTree)
-	tool.nodeTreeContent = container.New(tool.nodeTreeWidth, nodeTreeWithPadding)
-	nodeTreeScroll := container.NewHScroll(tool.nodeTreeContent)
 
 	tool.root = container.NewVBox(
 		container.NewBorder(nil, nil, nil, container.NewHBox(tool.captureBtn, searchBtn, prevBtn, nextBtn), tool.searchEntry),
 		tool.statusLabel,
 		nodeHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, nodeTreeScroll), 205),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 205),
 		attrHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tool.attrList)), 140),
 		container.NewGridWithColumns(4, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn, generateSelectorBtn),
@@ -837,6 +833,9 @@ func (t *AndroidNodeTool) rebuildNodeTree(keyword string) {
 	for _, root := range androidRootNodes(t.snapshot.Nodes) {
 		addNode("", root)
 	}
+	for i := 0; i < androidNodeTreeBottomSpacerRows; i++ {
+		t.treeChildren[""] = append(t.treeChildren[""], androidNodeTreeBottomSpacerID(i))
+	}
 
 	t.updateNodeTreeScrollWidth()
 	if t.nodeTree != nil {
@@ -858,9 +857,6 @@ func (t *AndroidNodeTool) updateNodeTreeScrollWidth() {
 	}
 
 	t.nodeTreeWidth.minWidth = minWidth
-	if t.nodeTreeContent != nil {
-		t.nodeTreeContent.Refresh()
-	}
 }
 
 func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
@@ -1208,6 +1204,10 @@ func androidNodeTreeID(node *AndroidUINode) string {
 		return ""
 	}
 	return fmt.Sprintf("node-%d", node.Number)
+}
+
+func androidNodeTreeBottomSpacerID(index int) string {
+	return fmt.Sprintf("node-tree-bottom-spacer-%d", index)
 }
 
 func androidRootNodes(nodes []*AndroidUINode) []*AndroidUINode {

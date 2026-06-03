@@ -362,8 +362,9 @@ func TestRebuildNodeTreeKeepsMatchedAncestors(t *testing.T) {
 	rootID := androidNodeTreeID(root)
 	containerID := androidNodeTreeID(container)
 	buttonID := androidNodeTreeID(button)
-	if got := tool.treeChildren[""]; len(got) != 1 || got[0] != rootID {
-		t.Fatalf("expected root visible, got %v", got)
+	rootChildren := tool.treeChildren[""]
+	if len(rootChildren) != 1+androidNodeTreeBottomSpacerRows || rootChildren[0] != rootID {
+		t.Fatalf("expected root followed by bottom spacers, got %v", rootChildren)
 	}
 	if got := tool.treeChildren[rootID]; len(got) != 1 || got[0] != containerID {
 		t.Fatalf("expected container ancestor visible, got %v", got)
