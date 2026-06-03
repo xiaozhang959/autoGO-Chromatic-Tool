@@ -24,6 +24,7 @@ const compactNodeToolAttrSelectWidth float32 = 40
 const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 118
 const compactNodeToolTreeRowHeight float32 = 18
+const compactNodeToolTreeBottomPadding float32 = 16
 const compactNodeToolAttrRowHeight float32 = 28
 const compactNodeToolCheckOffsetY float32 = 5
 
@@ -136,6 +137,12 @@ func newCompactNodeToolAttrSeparator() fyne.CanvasObject {
 	separator := canvas.NewRectangle(color.NRGBA{R: 210, G: 210, B: 210, A: 120})
 	separator.SetMinSize(fyne.NewSize(1, 1))
 	return separator
+}
+
+func newCompactNodeToolBottomSpacer(height float32) fyne.CanvasObject {
+	spacer := canvas.NewRectangle(color.Transparent)
+	spacer.SetMinSize(fyne.NewSize(1, height))
+	return spacer
 }
 
 type verticalOffsetLayout struct {
@@ -434,16 +441,17 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		newCompactNodeToolText("函数"),
 	)
 	tool.nodeTreeWidth = &minContentWidthLayout{minWidth: 1}
-	tool.nodeTreeContent = container.New(tool.nodeTreeWidth, tool.nodeTree)
+	nodeTreeWithPadding := container.NewBorder(nil, newCompactNodeToolBottomSpacer(compactNodeToolTreeBottomPadding), nil, nil, tool.nodeTree)
+	tool.nodeTreeContent = container.New(tool.nodeTreeWidth, nodeTreeWithPadding)
 	nodeTreeScroll := container.NewHScroll(tool.nodeTreeContent)
 
 	tool.root = container.NewVBox(
 		container.NewBorder(nil, nil, nil, container.NewHBox(tool.captureBtn, searchBtn, prevBtn, nextBtn), tool.searchEntry),
 		tool.statusLabel,
 		nodeHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, nodeTreeScroll), 165),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, nodeTreeScroll), 205),
 		attrHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tool.attrList)), 120),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tool.attrList)), 140),
 		container.NewGridWithColumns(4, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn, generateSelectorBtn),
 		container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, tool.selectorFunc),
 		container.NewBorder(nil, nil, widget.NewLabel("格式"), tool.copyAttrsBtn, tool.selectorFormat),
