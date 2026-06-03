@@ -74,6 +74,7 @@ var (
 	lightHeaderBgColor = color.NRGBA{220, 220, 220, 255} // 表头浅色背景
 	transparent        = color.NRGBA{0, 0, 0, 0}         // 透明色
 	findTestMarkColor  = color.NRGBA{255, 0, 255, 255}   // 找色测试结果高亮色
+	nodeFindTestColor  = color.NRGBA{0, 255, 120, 255}   // 节点查找测试结果高亮色
 	linkedPointColor   = color.NRGBA{255, 215, 0, 255}   // 图像点和列表联动高亮色
 	linkedRowBgColor   = color.NRGBA{255, 215, 0, 110}   // 图像点和列表联动行背景色
 
@@ -3288,12 +3289,45 @@ func findTestHighlightRects(img image.Image, points []image.Point) []MarkRect {
 	return highlightRectsForPoints(img, points, findTestMarkRadius, findTestMarkColor)
 }
 
+func nodeFindTestHighlightRects(img image.Image, rects []image.Rectangle) []MarkRect {
+	if img == nil {
+		return nil
+	}
+
+	bounds := img.Bounds()
+	marks := make([]MarkRect, 0, len(rects))
+	for _, rect := range rects {
+		rect = rect.Intersect(bounds)
+		if rect.Empty() {
+			continue
+		}
+		marks = append(marks, MarkRect{
+			X1:    rect.Min.X,
+			Y1:    rect.Min.Y,
+			X2:    rect.Max.X,
+			Y2:    rect.Max.Y,
+			Color: nodeFindTestColor,
+		})
+	}
+	return marks
+}
+
 func linkedPointHighlightRects(img image.Image, points []image.Point) []MarkRect {
 	return highlightRectsForPoints(img, points, linkedPointMarkRadius, linkedPointColor)
 }
 
 func (v *ImageViewer) SetFindTestHighlights(points []image.Point) {
 	v.findTestRects = findTestHighlightRects(v.image, points)
+	if v.image != nil {
+		v.Refresh()
+	}
+}
+
+func (v *ImageViewer) SetNodeFindTestHighlights(rects []image.Rectangle) {
+	if v == nil {
+		return
+	}
+	v.findTestRects = nodeFindTestHighlightRects(v.image, rects)
 	if v.image != nil {
 		v.Refresh()
 	}

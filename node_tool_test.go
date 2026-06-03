@@ -325,6 +325,54 @@ func TestAndroidNodeMatchesAttrsReportsInvalidRegex(t *testing.T) {
 	}
 }
 
+func TestAndroidNodeFindTestMatchesUsesSelectorFunction(t *testing.T) {
+	first := &AndroidUINode{Number: 1, Attrs: map[string]string{"text": "登录"}}
+	second := &AndroidUINode{Number: 2, Attrs: map[string]string{"text": "登录"}}
+	other := &AndroidUINode{Number: 3, Attrs: map[string]string{"text": "注册"}}
+	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "text", Value: "登录", XMLAttr: "text", Kind: androidNodeAttrString, Method: "Text"},
+	}
+	nodes := []*AndroidUINode{first, second, other}
+
+	highlighted, total, err := androidNodeFindTestMatches(nodes, rows, androidNodeSelectorFuncFindOnce)
+	if err != nil {
+		t.Fatalf("androidNodeFindTestMatches FindOnce returned error: %v", err)
+	}
+	if total != 2 || len(highlighted) != 1 || highlighted[0] != first {
+		t.Fatalf("FindOnce should highlight first of 2 matches, total=%d highlighted=%#v", total, highlighted)
+	}
+
+	highlighted, total, err = androidNodeFindTestMatches(nodes, rows, androidNodeSelectorFuncFind)
+	if err != nil {
+		t.Fatalf("androidNodeFindTestMatches Find returned error: %v", err)
+	}
+	if total != 2 || len(highlighted) != 2 || highlighted[0] != first || highlighted[1] != second {
+		t.Fatalf("Find should highlight all matches, total=%d highlighted=%#v", total, highlighted)
+	}
+
+	highlighted, total, err = androidNodeFindTestMatches(nodes, rows, androidNodeSelectorFuncWaitFor)
+	if err != nil {
+		t.Fatalf("androidNodeFindTestMatches WaitFor returned error: %v", err)
+	}
+	if total != 2 || len(highlighted) != 1 || highlighted[0] != first {
+		t.Fatalf("WaitFor should highlight first of 2 matches, total=%d highlighted=%#v", total, highlighted)
+	}
+}
+
+func TestAndroidNodeFindTestStatusUsesSelectorFunction(t *testing.T) {
+	node := &AndroidUINode{Number: 7}
+
+	if got := androidNodeFindTestStatus(androidNodeSelectorFuncFind, 2, []*AndroidUINode{node}); got != "查找测试 Find: 匹配 2 个节点" {
+		t.Fatalf("unexpected Find status: %q", got)
+	}
+	if got := androidNodeFindTestStatus(androidNodeSelectorFuncFindOnce, 2, []*AndroidUINode{node}); strings.Contains(got, "不唯一") || !strings.Contains(got, "FindOnce") {
+		t.Fatalf("unexpected FindOnce status: %q", got)
+	}
+	if got := androidNodeFindTestStatus(androidNodeSelectorFuncWaitFor, 0, nil); got != "查找测试 WaitFor: 当前快照未找到节点" {
+		t.Fatalf("unexpected WaitFor miss status: %q", got)
+	}
+}
+
 func TestSmallestNodeAtPoint(t *testing.T) {
 	root := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 100, 100)}
 	container := &AndroidUINode{Number: 2, Depth: 1, Bounds: image.Rect(10, 10, 90, 90)}

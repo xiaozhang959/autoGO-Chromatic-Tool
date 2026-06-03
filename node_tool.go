@@ -1222,33 +1222,91 @@ func (t *AndroidNodeTool) selectedXPath() string {
 
 func (t *AndroidNodeTool) testSelectedAttrs() {
 	if t.snapshot == nil {
+		t.clearNodeFindTestHighlights()
 		t.setStatus("请先抓取节点")
 		return
 	}
 
 	selected := selectedAndroidNodeAttrRows(t.attrRows)
 	if len(selected) == 0 {
+		t.clearNodeFindTestHighlights()
 		t.setStatus("请先勾选至少一个有效属性")
 		return
 	}
 
-	matches := 0
-	for _, node := range t.snapshot.Nodes {
-		matched, err := androidNodeMatchesAttrs(node, selected)
-		if err != nil {
-			t.setStatus("查找测试失败: " + err.Error())
-			return
-		}
-		if matched {
-			matches++
-		}
+	function := t.selectedSelectorFunction()
+	highlighted, total, err := androidNodeFindTestMatches(t.snapshot.Nodes, selected, function)
+	if err != nil {
+		t.clearNodeFindTestHighlights()
+		t.setStatus("查找测试失败: " + err.Error())
+		return
 	}
 
-	level := "不唯一"
-	if matches == 1 {
-		level = "唯一"
+	t.setNodeFindTestHighlights(highlighted)
+	t.setStatus(androidNodeFindTestStatus(function, total, highlighted))
+}
+
+func (t *AndroidNodeTool) setNodeFindTestHighlights(nodes []*AndroidUINode) {
+	viewer := t.activeNodeViewer()
+	if viewer == nil {
+		return
 	}
-	t.setStatus(fmt.Sprintf("查找测试: 匹配 %d 个节点 · %s", matches, level))
+
+	rects := make([]image.Rectangle, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil || node.Bounds.Empty() {
+			continue
+		}
+		rects = append(rects, node.Bounds)
+	}
+	viewer.SetNodeFindTestHighlights(rects)
+}
+
+func (t *AndroidNodeTool) clearNodeFindTestHighlights() {
+	viewer := t.activeNodeViewer()
+	if viewer != nil {
+		viewer.ClearFindTestHighlights()
+	}
+}
+
+func androidNodeFindTestMatches(nodes []*AndroidUINode, selected []androidNodeAttrRow, function string) ([]*AndroidUINode, int, error) {
+	highlightAll := normalizeAndroidNodeSelectorFunction(function) == androidNodeSelectorFuncFind
+	highlighted := make([]*AndroidUINode, 0)
+	total := 0
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		matched, err := androidNodeMatchesAttrs(node, selected)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !matched {
+			continue
+		}
+		total++
+		if highlightAll || len(highlighted) == 0 {
+			highlighted = append(highlighted, node)
+		}
+	}
+	return highlighted, total, nil
+}
+
+func androidNodeFindTestStatus(function string, total int, highlighted []*AndroidUINode) string {
+	switch normalizeAndroidNodeSelectorFunction(function) {
+	case androidNodeSelectorFuncFind:
+		return fmt.Sprintf("查找测试 Find: 匹配 %d 个节点", total)
+	case androidNodeSelectorFuncWaitFor:
+		if len(highlighted) == 0 {
+			return "查找测试 WaitFor: 当前快照未找到节点"
+		}
+		return fmt.Sprintf("查找测试 WaitFor: 当前快照命中节点 %03d · 候选 %d 个", highlighted[0].Number, total)
+	default:
+		if len(highlighted) == 0 {
+			return "查找测试 FindOnce: 未找到节点"
+		}
+		return fmt.Sprintf("查找测试 FindOnce: 命中节点 %03d · 候选 %d 个", highlighted[0].Number, total)
+	}
 }
 
 func captureAndroidNodeSnapshot(deviceID string, compressed bool) (*AndroidNodeSnapshot, error) {
