@@ -294,6 +294,18 @@ func TestAndroidNodeSelectorFormatDisplayFollowsSelectedFunction(t *testing.T) {
 	}
 }
 
+func TestAndroidNodeSelectorFormatDisplayStaysEnabledForReadableText(t *testing.T) {
+	tool := newAndroidNodeTool(nil, func() string {
+		return ""
+	}, func() *ImageViewer {
+		return nil
+	}, nil, nil)
+
+	if tool.selectorFormat.Disabled() {
+		t.Fatal("selector format display should stay enabled so template text uses normal readable color")
+	}
+}
+
 func TestBuildAndroidNodeSelectorChainGeneratesZeroValuesForEmptyArgs(t *testing.T) {
 	rows := []androidNodeAttrRow{
 		{Selected: true, Name: "drawingOrder", Value: "", Kind: androidNodeAttrInt, Method: "DrawingOrder"},

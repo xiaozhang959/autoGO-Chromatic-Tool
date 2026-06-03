@@ -514,7 +514,11 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	tool.selectorFormat = widget.NewMultiLineEntry()
 	tool.selectorFormat.SetPlaceHolder("当前函数模板（点击格式按钮编辑）")
 	tool.selectorFormat.SetMinRowsVisible(2)
-	tool.selectorFormat.Disable()
+	tool.selectorFormat.OnChanged = func(string) {
+		if tool.selectorFormat.Text != tool.selectedSelectorTemplate() {
+			tool.refreshSelectorFormat()
+		}
+	}
 	tool.refreshSelectorFormat()
 	formatBtn := widget.NewButton("格式", func() {
 		onSaved := func() {
