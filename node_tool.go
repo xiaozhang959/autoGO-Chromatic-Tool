@@ -24,7 +24,7 @@ const compactNodeToolAttrSelectWidth float32 = 40
 const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 118
 const compactNodeToolTreeRowHeight float32 = 18
-const compactNodeToolTreeBottomPadding float32 = 16
+const compactNodeToolTreeBottomPadding float32 = 28
 const compactNodeToolAttrRowHeight float32 = 28
 const compactNodeToolCheckOffsetY float32 = 5
 
@@ -265,6 +265,11 @@ func compactNodeTreeRowLabel(item fyne.CanvasObject) *widget.Label {
 	return label
 }
 
+func compactNodeTreeRow(item fyne.CanvasObject) *compactNodeToolRow {
+	row, _ := item.(*compactNodeToolRow)
+	return row
+}
+
 type AndroidNodeTool struct {
 	window fyne.Window
 
@@ -351,13 +356,20 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 			if label == nil {
 				return
 			}
+			row := compactNodeTreeRow(item)
 			if uid == "" {
 				setCompactNodeToolText(label, "")
+				if row != nil {
+					row.onTapped = nil
+				}
 				return
 			}
 			node := tool.treeNodeByID[uid]
 			if node == nil {
 				setCompactNodeToolText(label, "")
+				if row != nil {
+					row.onTapped = nil
+				}
 				return
 			}
 			prefix := "  "
@@ -365,6 +377,13 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 				prefix = "▶ "
 			}
 			setCompactNodeToolText(label, prefix+androidNodeSummary(node))
+			if row != nil {
+				row.onTapped = func() {
+					if !tool.syncingTree {
+						tool.nodeTree.Select(uid)
+					}
+				}
+			}
 		},
 	)
 	tool.nodeTree.HideSeparators = true
