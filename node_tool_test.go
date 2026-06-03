@@ -41,6 +41,28 @@ func TestParseAndroidNodeXML(t *testing.T) {
 	}
 }
 
+func TestAndroidNodeSummaryUsesSingleLineText(t *testing.T) {
+	node := &AndroidUINode{
+		Number: 1,
+		Depth:  1,
+		Attrs: map[string]string{
+			"class": "android.widget.TextView\nBad",
+			"text":  "move vx,vy\n移动内容 vy 到 vx",
+		},
+	}
+
+	summary := androidNodeSummary(node)
+	if strings.Contains(summary, "\n") || strings.Contains(summary, "\t") {
+		t.Fatalf("expected single-line summary, got %q", summary)
+	}
+	if !strings.Contains(summary, "TextView Bad") {
+		t.Fatalf("expected class whitespace to be normalized, got %q", summary)
+	}
+	if !strings.Contains(summary, "move vx,vy 移动内容 vy 到 vx") {
+		t.Fatalf("expected text whitespace to be normalized, got %q", summary)
+	}
+}
+
 func TestBuildAndroidNodeAttrRowsSelectsStableAttrs(t *testing.T) {
 	node := &AndroidUINode{
 		Depth: 2,

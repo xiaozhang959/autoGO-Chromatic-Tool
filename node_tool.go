@@ -161,6 +161,27 @@ func (l *verticalOffsetLayout) Layout(objects []fyne.CanvasObject, size fyne.Siz
 	objects[0].Resize(fyne.NewSize(size.Width, height))
 }
 
+type minContentWidthLayout struct {
+	minWidth float32
+}
+
+func (l *minContentWidthLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) == 0 {
+		return fyne.NewSize(l.minWidth, 1)
+	}
+	min := objects[0].MinSize()
+	min.Width = fyne.Max(min.Width, l.minWidth)
+	return min
+}
+
+func (l *minContentWidthLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	objects[0].Move(fyne.NewPos(0, 0))
+	objects[0].Resize(size)
+}
+
 type compactNodeToolRow struct {
 	widget.BaseWidget
 	content  fyne.CanvasObject
@@ -250,6 +271,8 @@ type AndroidNodeTool struct {
 	searchEntry      *widget.Entry
 	statusLabel      *widget.Label
 	nodeTree         *widget.Tree
+	nodeTreeContent  *fyne.Container
+	nodeTreeWidth    *minContentWidthLayout
 	attrList         *fyne.Container
 	selectorEntry    *widget.Entry
 	selectorFunc     *widget.Select
@@ -410,12 +433,15 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		newCompactNodeToolText("值"),
 		newCompactNodeToolText("函数"),
 	)
+	tool.nodeTreeWidth = &minContentWidthLayout{minWidth: 1}
+	tool.nodeTreeContent = container.New(tool.nodeTreeWidth, tool.nodeTree)
+	nodeTreeScroll := container.NewHScroll(tool.nodeTreeContent)
 
 	tool.root = container.NewVBox(
 		container.NewBorder(nil, nil, nil, container.NewHBox(tool.captureBtn, searchBtn, prevBtn, nextBtn), tool.searchEntry),
 		tool.statusLabel,
 		nodeHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 230),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, nodeTreeScroll), 230),
 		attrHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tool.attrList)), 180),
 		container.NewGridWithColumns(4, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn, generateSelectorBtn),
@@ -746,6 +772,7 @@ func (t *AndroidNodeTool) rebuildNodeTree(keyword string) {
 	t.treeParentID = make(map[string]string)
 
 	if t.snapshot == nil {
+		t.updateNodeTreeScrollWidth()
 		return
 	}
 
@@ -784,9 +811,28 @@ func (t *AndroidNodeTool) rebuildNodeTree(keyword string) {
 		addNode("", root)
 	}
 
+	t.updateNodeTreeScrollWidth()
 	if t.nodeTree != nil {
 		t.nodeTree.Refresh()
 		t.nodeTree.OpenAllBranches()
+	}
+}
+
+func (t *AndroidNodeTool) updateNodeTreeScrollWidth() {
+	if t.nodeTreeWidth == nil {
+		return
+	}
+
+	minWidth := float32(1)
+	for _, node := range t.treeNodeByID {
+		textWidth := fyne.MeasureText("  "+androidNodeSummary(node), theme.CaptionTextSize(), fyne.TextStyle{}).Width
+		indentWidth := float32(node.Depth+1) * (theme.IconInlineSize() + theme.Padding())
+		minWidth = fyne.Max(minWidth, textWidth+indentWidth+theme.Padding()*4)
+	}
+
+	t.nodeTreeWidth.minWidth = minWidth
+	if t.nodeTreeContent != nil {
+		t.nodeTreeContent.Refresh()
 	}
 }
 
@@ -1177,13 +1223,13 @@ func androidNodeSummary(node *AndroidUINode) string {
 		return ""
 	}
 
-	className := shortAndroidClassName(node.Attrs["class"])
-	primary := firstNonEmpty(
+	className := singleLineNodeText(shortAndroidClassName(node.Attrs["class"]))
+	primary := singleLineNodeText(firstNonEmpty(
 		node.Attrs["text"],
 		node.Attrs["content-desc"],
 		node.Attrs["resource-id"],
 		node.Attrs["bounds"],
-	)
+	))
 	indent := strings.Repeat("  ", min(node.Depth, 6))
 	return fmt.Sprintf("%03d %s%s  %s", node.Number, indent, className, trimMiddle(primary, 48))
 }
@@ -1656,6 +1702,10 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func singleLineNodeText(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func shortAndroidClassName(value string) string {
