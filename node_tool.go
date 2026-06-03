@@ -32,7 +32,7 @@ const androidNodeSelectorFuncFindOnce = "FindOnce"
 const androidNodeSelectorFuncFind = "Find"
 const androidNodeSelectorFuncWaitFor = "WaitFor"
 const androidNodeSelectorDefaultTimeout = "3000"
-const androidNodeSelectorDefaultTemplate = "acc := uiacc.New({displayId})\nobj := acc{chain}.{call}"
+const androidNodeSelectorDefaultTemplate = "acc := uiacc.New([屏幕ID])\nobj := acc[参数].[调用]"
 const androidNodeParentClickTolerance = 30
 
 type AndroidUINode struct {
@@ -349,6 +349,7 @@ type AndroidNodeTool struct {
 	selectorEntry    *widget.Entry
 	selectorFunc     *widget.Select
 	selectorFormat   *widget.Entry
+	openFormatDialog func(selectedFunction string, onSaved func())
 	copySelectorBtn  *widget.Button
 	copyAttrsBtn     *widget.Button
 	selectAllBtn     *widget.Button
@@ -374,12 +375,13 @@ type AndroidNodeTool struct {
 	hasLastNodeClickPoint bool
 }
 
-func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImageViewer func() *ImageViewer, openNodeImage func(image.Image, func(int, int)) *ImageViewer) *AndroidNodeTool {
+func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImageViewer func() *ImageViewer, openNodeImage func(image.Image, func(int, int)) *ImageViewer, openFormatDialog func(string, func())) *AndroidNodeTool {
 	tool := &AndroidNodeTool{
 		window:            w,
 		getSelectedDevice: getSelectedDevice,
 		getImageViewer:    getImageViewer,
 		openNodeImage:     openNodeImage,
+		openFormatDialog:  openFormatDialog,
 		filteredNodes:     make([]*AndroidUINode, 0),
 		attrRows:          make([]androidNodeAttrRow, 0),
 		nodePages:         make(map[*ImageViewer]*androidNodePageState),
@@ -505,16 +507,30 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	}, nil)
 	tool.selectorFunc.SetSelected(androidNodeSelectorFuncFindOnce)
 	tool.selectorFunc.OnChanged = func(string) {
+		tool.refreshSelectorFormat()
 		tool.refreshSelector()
 	}
 
 	tool.selectorFormat = widget.NewMultiLineEntry()
-	tool.selectorFormat.SetPlaceHolder("输出格式，支持 {displayId} / {chain} / {params} / {function} / {call} / {timeout}")
+	tool.selectorFormat.SetPlaceHolder("当前函数模板（点击格式按钮编辑）")
 	tool.selectorFormat.SetMinRowsVisible(2)
-	tool.selectorFormat.SetText(androidNodeSelectorDefaultTemplate)
 	tool.selectorFormat.OnChanged = func(string) {
-		tool.refreshSelector()
+		if tool.selectorFormat.Text != tool.selectedSelectorTemplate() {
+			tool.refreshSelectorFormat()
+		}
 	}
+	tool.refreshSelectorFormat()
+	formatBtn := widget.NewButton("格式", func() {
+		onSaved := func() {
+			tool.refreshSelectorFormat()
+			tool.refreshSelector()
+		}
+		if tool.openFormatDialog != nil {
+			tool.openFormatDialog(tool.selectedSelectorFunction(), onSaved)
+			return
+		}
+		showAPIFormatDialog(tool.window, tool.selectedSelectorFunction(), onSaved)
+	})
 
 	tool.selectorEntry = widget.NewMultiLineEntry()
 	tool.selectorEntry.SetPlaceHolder("选择节点并勾选属性后生成 AutoGo uiacc 代码")
@@ -538,7 +554,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tool.attrList)), 140),
 		container.NewGridWithColumns(4, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn, generateSelectorBtn),
 		container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, tool.selectorFunc),
-		container.NewBorder(nil, nil, widget.NewLabel("格式"), tool.copyAttrsBtn, tool.selectorFormat),
+		container.NewBorder(nil, nil, formatBtn, tool.copyAttrsBtn, tool.selectorFormat),
 		container.NewBorder(nil, nil, widget.NewLabel("代码"), tool.copySelectorBtn, tool.selectorEntry),
 	)
 
@@ -1201,6 +1217,13 @@ func (t *AndroidNodeTool) refreshSelector() {
 	t.selectorEntry.SetText(code)
 }
 
+func (t *AndroidNodeTool) refreshSelectorFormat() {
+	if t.selectorFormat == nil {
+		return
+	}
+	t.selectorFormat.SetText(t.selectedSelectorTemplate())
+}
+
 func (t *AndroidNodeTool) selectedSelectorCode() (string, error) {
 	selected := selectedAndroidNodeAttrRows(t.attrRows)
 	if len(selected) == 0 {
@@ -1222,10 +1245,7 @@ func (t *AndroidNodeTool) selectedSelectorFunction() string {
 }
 
 func (t *AndroidNodeTool) selectedSelectorTemplate() string {
-	if t.selectorFormat == nil {
-		return androidNodeSelectorDefaultTemplate
-	}
-	return t.selectorFormat.Text
+	return formatTemplateFor(t.selectedSelectorFunction())
 }
 
 func (t *AndroidNodeTool) copySelectedSelectorCode() {
@@ -1650,20 +1670,38 @@ func buildAndroidNodeSelectorCode(rows []androidNodeAttrRow, options androidNode
 	if displayID == "" {
 		displayID = "0"
 	}
+	call := androidNodeSelectorCall(function, timeout)
 	template := options.Template
+	if strings.TrimSpace(template) == "" {
+		template = formatTemplateFor(function)
+	}
 	if strings.TrimSpace(template) == "" {
 		template = androidNodeSelectorDefaultTemplate
 	}
-	call := androidNodeSelectorCall(function, timeout)
 
+	return applyAndroidNodeSelectorFormatTemplate(template, androidNodeSelectorFormatValues(function, chain, call, timeout, displayID)), nil
+}
+
+func androidNodeSelectorFormatValues(function, chain, call, timeout, displayID string) map[string]string {
+	return map[string]string{
+		"[函数名]":  function,
+		"[参数]":   chain,
+		"[屏幕ID]": displayID,
+		"[调用]":   call,
+		"[超时]":   timeout,
+	}
+}
+
+func applyAndroidNodeSelectorFormatTemplate(template string, values map[string]string) string {
+	result := applyFormatTemplate(template, values)
 	return strings.NewReplacer(
-		"{displayId}", displayID,
-		"{chain}", chain,
-		"{params}", chain,
-		"{function}", function,
-		"{call}", call,
-		"{timeout}", timeout,
-	).Replace(template), nil
+		"{displayId}", values["[屏幕ID]"],
+		"{chain}", values["[参数]"],
+		"{params}", values["[参数]"],
+		"{function}", values["[函数名]"],
+		"{call}", values["[调用]"],
+		"{timeout}", values["[超时]"],
+	).Replace(result)
 }
 
 func buildAndroidNodeSelectorChain(rows []androidNodeAttrRow) (string, error) {
@@ -1731,9 +1769,13 @@ func androidNodeSelectorArgs(row androidNodeAttrRow, method string) (string, err
 }
 
 func normalizeAndroidNodeSelectorFunction(function string) string {
-	switch strings.TrimSpace(function) {
-	case androidNodeSelectorFuncFind, androidNodeSelectorFuncWaitFor:
-		return strings.TrimSpace(function)
+	switch strings.ToLower(strings.TrimSpace(function)) {
+	case strings.ToLower(androidNodeSelectorFuncFind):
+		return androidNodeSelectorFuncFind
+	case strings.ToLower(androidNodeSelectorFuncWaitFor):
+		return androidNodeSelectorFuncWaitFor
+	case strings.ToLower(androidNodeSelectorFuncFindOnce):
+		return androidNodeSelectorFuncFindOnce
 	default:
 		return androidNodeSelectorFuncFindOnce
 	}

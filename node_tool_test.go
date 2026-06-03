@@ -238,6 +238,74 @@ func TestBuildAndroidNodeSelectorCodeUsesTemplate(t *testing.T) {
 	}
 }
 
+func TestBuildAndroidNodeSelectorCodeUsesSharedFormatTemplate(t *testing.T) {
+	oldTemplates := apiFormatTemplates
+	t.Cleanup(func() {
+		apiFormatTemplates = oldTemplates
+	})
+	apiFormatTemplates = normalizeAPIFormatTemplates(map[string]string{
+		"find": "objs := uiacc.New([屏幕ID])[参数].Find()",
+	})
+	rows := []androidNodeAttrRow{
+		{Selected: true, Name: "text", Value: "登录", Kind: androidNodeAttrString, Method: "Text"},
+	}
+
+	code, err := buildAndroidNodeSelectorCode(rows, androidNodeSelectorOptions{
+		DisplayID: "2",
+		Function:  "find",
+	})
+	if err != nil {
+		t.Fatalf("buildAndroidNodeSelectorCode returned error: %v", err)
+	}
+
+	want := `objs := uiacc.New(2).Text("登录").Find()`
+	if code != want {
+		t.Fatalf("shared template code mismatch:\nwant: %s\n got: %s", want, code)
+	}
+}
+
+func TestAndroidNodeSelectorFormatDisplayFollowsSelectedFunction(t *testing.T) {
+	oldTemplates := apiFormatTemplates
+	t.Cleanup(func() {
+		apiFormatTemplates = oldTemplates
+	})
+	apiFormatTemplates = normalizeAPIFormatTemplates(map[string]string{
+		"findonce": "one template",
+		"waitfor":  "wait template",
+	})
+	tool := &AndroidNodeTool{
+		selectorFormat: widget.NewMultiLineEntry(),
+		selectorFunc: widget.NewSelect([]string{
+			androidNodeSelectorFuncFindOnce,
+			androidNodeSelectorFuncWaitFor,
+		}, nil),
+	}
+
+	tool.selectorFunc.SetSelected(androidNodeSelectorFuncFindOnce)
+	tool.refreshSelectorFormat()
+	if tool.selectorFormat.Text != "one template" {
+		t.Fatalf("expected FindOnce template, got %q", tool.selectorFormat.Text)
+	}
+
+	tool.selectorFunc.SetSelected(androidNodeSelectorFuncWaitFor)
+	tool.refreshSelectorFormat()
+	if tool.selectorFormat.Text != "wait template" {
+		t.Fatalf("expected WaitFor template, got %q", tool.selectorFormat.Text)
+	}
+}
+
+func TestAndroidNodeSelectorFormatDisplayStaysEnabledForReadableText(t *testing.T) {
+	tool := newAndroidNodeTool(nil, func() string {
+		return ""
+	}, func() *ImageViewer {
+		return nil
+	}, nil, nil)
+
+	if tool.selectorFormat.Disabled() {
+		t.Fatal("selector format display should stay enabled so template text uses normal readable color")
+	}
+}
+
 func TestBuildAndroidNodeSelectorChainGeneratesZeroValuesForEmptyArgs(t *testing.T) {
 	rows := []androidNodeAttrRow{
 		{Selected: true, Name: "drawingOrder", Value: "", Kind: androidNodeAttrInt, Method: "DrawingOrder"},
