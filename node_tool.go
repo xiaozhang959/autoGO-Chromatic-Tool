@@ -33,6 +33,7 @@ const androidNodeSelectorFuncFind = "Find"
 const androidNodeSelectorFuncWaitFor = "WaitFor"
 const androidNodeSelectorDefaultTimeout = "3000"
 const androidNodeSelectorDefaultTemplate = "acc := uiacc.New({displayId})\nobj := acc{chain}.{call}"
+const androidNodeParentClickTolerance = 30
 
 type AndroidUINode struct {
 	Number   int
@@ -367,6 +368,10 @@ type AndroidNodeTool struct {
 	treeIDByNode  map[*AndroidUINode]string
 	treeParentID  map[string]string
 	syncingTree   bool
+
+	lastNodeClickPoint    image.Point
+	lastNodeClickNode     *AndroidUINode
+	hasLastNodeClickPoint bool
 }
 
 func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImageViewer func() *ImageViewer, openNodeImage func(image.Image, func(int, int)) *ImageViewer) *AndroidNodeTool {
@@ -401,7 +406,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	})
 
 	tool.statusLabel = widget.NewLabel("未抓取节点")
-	tool.statusLabel.Wrapping = fyne.TextWrapWord
+	tool.statusLabel.Wrapping = fyne.TextWrapOff
 	tool.nodeTreeWidth = &minContentWidthLayout{minWidth: 1}
 
 	tool.nodeTree = widget.NewTree(
@@ -525,8 +530,8 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	nodeTreeArea := container.New(&flexibleMinWidthLayout{minWidth: 1}, tool.nodeTree)
 
 	tool.root = container.NewVBox(
-		container.NewBorder(nil, nil, nil, container.NewHBox(tool.captureBtn, searchBtn, prevBtn, nextBtn), tool.searchEntry),
-		tool.statusLabel,
+		container.NewBorder(nil, nil, nil, container.NewHBox(searchBtn, prevBtn, nextBtn, tool.captureBtn), tool.searchEntry),
+		container.NewHScroll(tool.statusLabel),
 		nodeHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, nodeTreeArea), 205),
 		attrHeader,
@@ -660,6 +665,7 @@ func (t *AndroidNodeTool) activateNodePage(page *androidNodePageState) {
 	}
 	if t.activePage != page {
 		t.saveActivePageState()
+		t.resetNodeClickPoint()
 	}
 
 	page.ensureCollections()
@@ -1069,8 +1075,14 @@ func (t *AndroidNodeTool) updateNodeTreeScrollWidth() {
 }
 
 func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
-	node := t.smallestNodeAtPoint(image.Pt(x, y))
+	point := image.Pt(x, y)
+	if t.isRepeatedNodeClickOnSelectedNode(point) && t.selectSelectedNodeParentAtPoint(point) {
+		return
+	}
+
+	node := t.smallestNodeAtPoint(point)
 	if node == nil {
+		t.resetNodeClickPoint()
 		return
 	}
 
@@ -1080,6 +1092,7 @@ func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
 	}
 
 	t.selectNode(node)
+	t.rememberNodeClickPoint(point)
 	t.setStatus(fmt.Sprintf("已选择节点 %03d · %s", node.Number, androidNodeSummary(node)))
 }
 
@@ -1089,6 +1102,59 @@ func (t *AndroidNodeTool) selectNodeAtPointOnPage(page *androidNodePageState, x,
 	}
 	t.activateNodePage(page)
 	t.selectNodeAtPoint(x, y)
+}
+
+func (t *AndroidNodeTool) selectSelectedNodeParentAtPoint(point image.Point) bool {
+	if t.snapshot == nil || t.selectedNode == nil || !t.selectedNodeBelongsToActivePage() || t.selectedNode.Bounds.Empty() || !point.In(t.selectedNode.Bounds) {
+		return false
+	}
+
+	parent := t.parentNode(t.selectedNode)
+	if parent == nil {
+		t.setStatus(fmt.Sprintf("当前节点 %03d 已经是顶层节点", t.selectedNode.Number))
+		return true
+	}
+
+	if t.filteredNodeIndex(parent) < 0 {
+		if t.searchEntry != nil {
+			t.searchEntry.SetText("")
+		}
+		t.applySearchWithSelection(false)
+	}
+
+	t.selectNode(parent)
+	t.rememberNodeClickPoint(point)
+	t.setStatus(fmt.Sprintf("已选择父节点 %03d · %s", parent.Number, androidNodeSummary(parent)))
+	return true
+}
+
+func (t *AndroidNodeTool) isRepeatedNodeClickOnSelectedNode(point image.Point) bool {
+	if !t.hasLastNodeClickPoint || t.selectedNode == nil || t.lastNodeClickNode != t.selectedNode {
+		return false
+	}
+	if t.selectedNode.Bounds.Empty() || !point.In(t.selectedNode.Bounds) || !t.selectedNodeBelongsToActivePage() {
+		return false
+	}
+	return distance(t.lastNodeClickPoint.X, t.lastNodeClickPoint.Y, point.X, point.Y) <= androidNodeParentClickTolerance
+}
+
+func (t *AndroidNodeTool) rememberNodeClickPoint(point image.Point) {
+	t.lastNodeClickPoint = point
+	t.lastNodeClickNode = t.selectedNode
+	t.hasLastNodeClickPoint = true
+}
+
+func (t *AndroidNodeTool) resetNodeClickPoint() {
+	t.lastNodeClickPoint = image.Point{}
+	t.lastNodeClickNode = nil
+	t.hasLastNodeClickPoint = false
+}
+
+func (t *AndroidNodeTool) parentNode(node *AndroidUINode) *AndroidUINode {
+	if t.snapshot == nil || node == nil {
+		return nil
+	}
+	return androidNodeParentMap(t.snapshot.Nodes)[node]
 }
 
 func (t *AndroidNodeTool) smallestNodeAtPoint(point image.Point) *AndroidUINode {
