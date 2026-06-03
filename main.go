@@ -83,9 +83,12 @@ var (
 	isDarkTheme = false
 
 	// 设备选择相关变量
-	deviceSelect      *widget.Select
-	selectedDevice    string
-	deviceRefreshChan = make(chan bool)
+	deviceSelect         *widget.Select
+	displaySelect        *widget.Select
+	selectedDevice       string
+	selectedDisplayID    = "0"
+	deviceDisplayOptions = map[string][]string{}
+	deviceRefreshChan    = make(chan bool)
 
 	// 区域坐标显示
 	rectCoordEntry *widget.Entry
@@ -128,6 +131,9 @@ var (
 	gridSpacingValue = 7
 	adb              = findADBPath()
 )
+
+const deviceSelectPrompt = "--设备选择--"
+const displaySelectPrompt = "--虚拟屏选择--"
 
 var pickModeOptions = []string{
 	"随机取点",
@@ -1130,29 +1136,159 @@ func getADBDevices() ([]string, error) {
 
 // 获取设备的虚拟屏ID列表
 func getVirtualDisplays(deviceID string) []string {
-	// 执行命令获取虚拟屏ID
-	output := adbExec("-s", deviceID, "shell", "app_process", "-Djava.class.path=/data/local/tmp/cap.dex", "/", "com.autogo.vdm.Main", "1")
-	log.Printf("[device] 获取虚拟屏输出: device=%s output=%q", deviceID, logPreview(output, 500))
+	args := append([]string{"-s", deviceID}, androidCapDexMainArgs("1")...)
+	output, err := adbExecCombined(args...)
+	if err != nil {
+		log.Printf("[device] 获取虚拟屏失败: device=%s err=%v", deviceID, adbErrorWithOutput(err, output))
+	} else {
+		log.Printf("[device] 获取虚拟屏输出: device=%s output=%q", deviceID, logPreview(output, 500))
+	}
 
-	// 如果输出为空或包含错误信息，返回空列表
-	if output == "" || strings.Contains(output, "Error") || strings.Contains(output, "error") ||
-		strings.Contains(output, "Exception") || strings.Contains(output, "not found") {
-		log.Printf("[device] 设备 %s 无可用虚拟屏或获取失败", deviceID)
+	displayIDs := parseVirtualDisplayIDs(output)
+	if len(displayIDs) > 0 {
+		return displayIDs
+	}
+
+	fallbackIDs := getVirtualDisplaysFromDumpsys(deviceID)
+	if len(fallbackIDs) > 0 {
+		log.Printf("[device] 通过 dumpsys display 发现虚拟屏: device=%s displays=%v", deviceID, fallbackIDs)
+		return fallbackIDs
+	}
+
+	log.Printf("[device] 设备 %s 无可用虚拟屏或获取失败", deviceID)
+	return nil
+}
+
+func getVirtualDisplaysFromDumpsys(deviceID string) []string {
+	output, err := adbExecCombined("-s", deviceID, "shell", "dumpsys", "display")
+	if err != nil {
+		log.Printf("[device] dumpsys display 获取虚拟屏失败: device=%s err=%v", deviceID, adbErrorWithOutput(err, output))
 		return nil
 	}
+	return parseDumpsysVirtualDisplayIDs(output)
+}
 
-	// 解析输出，每行一个虚拟屏ID
+func parseVirtualDisplayIDs(output string) []string {
 	var displayIDs []string
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		// 检查是否是有效的数字ID
-		if line != "" && isNumeric(line) {
-			displayIDs = append(displayIDs, line)
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(output, "\n") {
+		addVirtualDisplayID(&displayIDs, seen, strings.TrimSpace(line))
+	}
+	return displayIDs
+}
+
+func parseDumpsysVirtualDisplayIDs(output string) []string {
+	var displayIDs []string
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(output, "\n") {
+		idx := strings.Index(line, "mDisplayId=")
+		if idx == -1 {
+			continue
 		}
+
+		start := idx + len("mDisplayId=")
+		end := start
+		for end < len(line) && line[end] >= '0' && line[end] <= '9' {
+			end++
+		}
+		addVirtualDisplayID(&displayIDs, seen, line[start:end])
+	}
+	return displayIDs
+}
+
+func addVirtualDisplayID(displayIDs *[]string, seen map[string]struct{}, displayID string) {
+	displayID = strings.TrimSpace(displayID)
+	if displayID == "" || displayID == "0" || !isNumeric(displayID) {
+		return
+	}
+	if _, ok := seen[displayID]; ok {
+		return
+	}
+	seen[displayID] = struct{}{}
+	*displayIDs = append(*displayIDs, displayID)
+}
+
+func buildDeviceDisplayOptions(devices []string) ([]string, map[string][]string) {
+	baseDevices := make([]string, 0, len(devices))
+	displayOptions := make(map[string][]string)
+	seenBase := make(map[string]struct{})
+	seenDisplays := make(map[string]map[string]struct{})
+
+	for _, deviceID := range devices {
+		baseDevice, displayID := splitAndroidDeviceID(deviceID)
+		if baseDevice == "" {
+			continue
+		}
+
+		if _, ok := seenBase[baseDevice]; !ok {
+			seenBase[baseDevice] = struct{}{}
+			baseDevices = append(baseDevices, baseDevice)
+			displayOptions[baseDevice] = []string{"0"}
+			seenDisplays[baseDevice] = map[string]struct{}{"0": {}}
+		}
+
+		if displayID == "" {
+			continue
+		}
+		if _, ok := seenDisplays[baseDevice][displayID]; ok {
+			continue
+		}
+		seenDisplays[baseDevice][displayID] = struct{}{}
+		displayOptions[baseDevice] = append(displayOptions[baseDevice], displayID)
 	}
 
-	return displayIDs
+	return baseDevices, displayOptions
+}
+
+func normalizeDisplayOptions(options []string) []string {
+	if len(options) == 0 {
+		return []string{"0"}
+	}
+	return options
+}
+
+func selectOptionsWithPrompt(prompt string, options []string) []string {
+	result := make([]string, 0, len(options)+1)
+	result = append(result, prompt)
+	result = append(result, options...)
+	return result
+}
+
+func containsString(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func formatAndroidDeviceID(baseDevice, displayID string) string {
+	baseDevice = strings.TrimSpace(baseDevice)
+	displayID = strings.TrimSpace(displayID)
+	if baseDevice == "" {
+		return ""
+	}
+	if displayID == "" || displayID == "0" {
+		return baseDevice
+	}
+	return fmt.Sprintf("%s[%s]", baseDevice, displayID)
+}
+
+func selectedAndroidDeviceID() string {
+	return formatAndroidDeviceID(selectedDevice, selectedDisplayID)
 }
 
 // 检查字符串是否为纯数字
@@ -1168,26 +1304,24 @@ func isNumeric(s string) bool {
 func captureScreenWithADB(deviceID string) (img image.Image, err error) {
 	deviceTempPath := "/sdcard/screenshot_temp.png"
 
-	// 解析设备ID，检查是否包含虚拟屏ID（格式：baseDeviceID[displayID]）
-	baseDeviceID := deviceID
-	virtualDisplayID := ""
-
-	if idx := strings.Index(deviceID, "["); idx != -1 {
-		if endIdx := strings.Index(deviceID, "]"); endIdx > idx {
-			baseDeviceID = deviceID[:idx]
-			virtualDisplayID = deviceID[idx+1 : endIdx]
-		}
+	baseDeviceID, virtualDisplayID := splitAndroidDeviceID(deviceID)
+	if baseDeviceID == "" {
+		return nil, fmt.Errorf("设备 ID 为空")
 	}
 
 	// 根据是否有虚拟屏ID选择截图方式
 	if virtualDisplayID != "" {
-		// 使用 app_process 进行虚拟屏截图
-		if adbExec("-s", baseDeviceID, "shell", "app_process", "-Djava.class.path=/data/local/tmp/cap.dex", "/", "com.autogo.vdm.Main", "2", virtualDisplayID, deviceTempPath) != "" {
-			return nil, fmt.Errorf("虚拟屏截图失败: %v", err)
+		ensureCapDexOnDevice(baseDeviceID)
+		args := append([]string{"-s", baseDeviceID}, androidCapDexMainArgs("2", virtualDisplayID, deviceTempPath)...)
+		output, execErr := adbExecCombined(args...)
+		if execErr != nil {
+			return nil, fmt.Errorf("虚拟屏截图失败: %v", adbErrorWithOutput(execErr, output))
 		}
 	} else {
-		// 使用常规 screencap 命令
-		adbExec("-s", baseDeviceID, "shell", "screencap", deviceTempPath)
+		output, execErr := adbExecCombined("-s", baseDeviceID, "shell", "screencap", deviceTempPath)
+		if execErr != nil {
+			return nil, fmt.Errorf("截图失败: %v", adbErrorWithOutput(execErr, output))
+		}
 	}
 
 	defer func() {
@@ -1195,13 +1329,21 @@ func captureScreenWithADB(deviceID string) (img image.Image, err error) {
 	}()
 
 	localTempFile, err := ioutil.TempFile("", "screenshot_*.png")
+	if err != nil {
+		return nil, fmt.Errorf("创建临时文件失败: %v", err)
+	}
 	localTempPath := localTempFile.Name()
-	localTempFile.Close()
+	if closeErr := localTempFile.Close(); closeErr != nil {
+		return nil, fmt.Errorf("关闭临时文件失败: %v", closeErr)
+	}
 
 	// 确保清理本地临时文件
 	defer os.Remove(localTempPath)
 
-	adbExec("-s", baseDeviceID, "pull", deviceTempPath, localTempPath)
+	output, execErr := adbExecCombined("-s", baseDeviceID, "pull", deviceTempPath, localTempPath)
+	if execErr != nil {
+		return nil, fmt.Errorf("拉取截图失败: %v", adbErrorWithOutput(execErr, output))
+	}
 
 	data, err := ioutil.ReadFile(localTempPath)
 	if err != nil {
@@ -1222,13 +1364,23 @@ func deviceMonitor() {
 
 // 更新设备列表
 func updateDeviceList() {
-	if deviceSelect == nil {
+	if deviceSelect == nil || displaySelect == nil {
 		return
 	}
 
-	// 获取当前已选择的设备ID
-	currentSelectedDevice := deviceSelect.Selected
-	currentOptions := deviceSelect.Options
+	currentSelectedDevice := strings.TrimSpace(deviceSelect.Selected)
+	if currentSelectedDevice == deviceSelectPrompt {
+		currentSelectedDevice = strings.TrimSpace(selectedDevice)
+	}
+	currentSelectedDisplay := strings.TrimSpace(displaySelect.Selected)
+	if currentSelectedDisplay == displaySelectPrompt {
+		currentSelectedDisplay = strings.TrimSpace(selectedDisplayID)
+	}
+	if currentSelectedDisplay == "" {
+		currentSelectedDisplay = "0"
+	}
+	currentDeviceOptions := append([]string(nil), deviceSelect.Options...)
+	currentDisplayOptions := append([]string(nil), displaySelect.Options...)
 
 	// 获取新设备列表
 	devices, err := getADBDevices()
@@ -1237,73 +1389,85 @@ func updateDeviceList() {
 		// 错误处理
 		fyne.Do(func() {
 			// 先清空选项列表和选择
-			deviceSelect.Options = []string{}
+			deviceSelect.Options = []string{deviceSelectPrompt}
 			deviceSelect.Selected = "" // 直接设置 Selected 字段
 			deviceSelect.SetSelected("")
+			displaySelect.Options = selectOptionsWithPrompt(displaySelectPrompt, []string{"0"})
+			displaySelect.SetSelected("0")
+			deviceDisplayOptions = map[string][]string{}
+			selectedDevice = ""
+			selectedDisplayID = "0"
 			if appLoggingEnabled {
 				deviceSelect.PlaceHolder = "获取设备失败（见日志）"
 			} else {
 				deviceSelect.PlaceHolder = "获取设备失败（可开启日志）"
 			}
+			displaySelect.PlaceHolder = displaySelectPrompt
 			deviceSelect.Refresh()
+			displaySelect.Refresh()
 		})
 		return
 	}
 
+	baseDevices, displayOptionsByDevice := buildDeviceDisplayOptions(devices)
+
 	// 无设备情况处理
-	if len(devices) == 0 {
+	if len(baseDevices) == 0 {
 		log.Printf("[device] 未发现已连接设备")
 		fyne.Do(func() {
 			// 先清空选项列表和选择
-			deviceSelect.Options = []string{}
+			deviceSelect.Options = []string{deviceSelectPrompt}
 			deviceSelect.Selected = "" // 直接设置 Selected 字段
 			deviceSelect.SetSelected("")
+			displaySelect.Options = selectOptionsWithPrompt(displaySelectPrompt, []string{"0"})
+			displaySelect.SetSelected("0")
 			deviceSelect.PlaceHolder = "无设备连接"
+			displaySelect.PlaceHolder = displaySelectPrompt
+			deviceDisplayOptions = map[string][]string{}
 			selectedDevice = ""
+			selectedDisplayID = "0"
 			deviceSelect.Refresh()
+			displaySelect.Refresh()
 		})
 		return
 	}
 
-	// 检查设备列表是否有变化（包括虚拟屏的变化）
-	listChanged := len(devices) != len(currentOptions)
-	if !listChanged {
-		for i, dev := range devices {
-			if i >= len(currentOptions) || dev != currentOptions[i] {
-				listChanged = true
-				break
-			}
-		}
+	targetDevice := currentSelectedDevice
+	if targetDevice == "" || !containsString(baseDevices, targetDevice) {
+		targetDevice = baseDevices[0]
 	}
 
-	// 检查当前选择的设备是否仍在列表中
-	deviceStillExists := false
-	for _, dev := range devices {
-		if dev == currentSelectedDevice {
-			deviceStillExists = true
-			break
-		}
+	displayOptions := normalizeDisplayOptions(displayOptionsByDevice[targetDevice])
+	targetDisplay := currentSelectedDisplay
+	if !containsString(displayOptions, targetDisplay) {
+		targetDisplay = "0"
 	}
+	deviceUIOptions := selectOptionsWithPrompt(deviceSelectPrompt, baseDevices)
+	displayUIOptions := selectOptionsWithPrompt(displaySelectPrompt, displayOptions)
 
 	// 只有当列表变化或需要更新选择时才更新UI
-	if listChanged || !deviceStillExists {
-		log.Printf("[device] 更新下拉设备列表: devices=%v current=%q keepCurrent=%v", devices, currentSelectedDevice, deviceStillExists)
+	if !stringSlicesEqual(deviceUIOptions, currentDeviceOptions) ||
+		!stringSlicesEqual(displayUIOptions, currentDisplayOptions) ||
+		currentSelectedDevice != targetDevice ||
+		currentSelectedDisplay != targetDisplay {
+		log.Printf("[device] 更新下拉设备列表: devices=%v displays=%v current=%q[%s] target=%q[%s]", baseDevices, displayOptionsByDevice, currentSelectedDevice, currentSelectedDisplay, targetDevice, targetDisplay)
 		fyne.Do(func() {
 			// 更新设备列表
-			deviceSelect.Options = devices
-
-			if deviceStillExists && currentSelectedDevice != "" {
-				// 如果之前选择的设备仍然存在，保持选择
-				deviceSelect.SetSelected(currentSelectedDevice)
-				deviceSelect.PlaceHolder = "选择设备"
-				selectedDevice = currentSelectedDevice
-			} else {
-				// 否则选择第一个设备
-				deviceSelect.SetSelected(devices[0])
-				deviceSelect.PlaceHolder = "选择设备"
-				selectedDevice = devices[0]
-			}
+			deviceDisplayOptions = displayOptionsByDevice
+			deviceSelect.Options = deviceUIOptions
+			displaySelect.Options = displayUIOptions
+			deviceSelect.SetSelected(targetDevice)
+			displaySelect.SetSelected(targetDisplay)
+			deviceSelect.PlaceHolder = deviceSelectPrompt
+			displaySelect.PlaceHolder = displaySelectPrompt
+			selectedDevice = targetDevice
+			selectedDisplayID = targetDisplay
 			deviceSelect.Refresh()
+			displaySelect.Refresh()
+		})
+	} else {
+		fyne.Do(func() {
+			deviceDisplayOptions = displayOptionsByDevice
 		})
 	}
 }
@@ -5384,13 +5548,42 @@ func main() {
 	a.Settings().SetTheme(newMyTheme())
 
 	// 创建设备选择下拉框
-	deviceSelect = widget.NewSelect([]string{}, func(value string) {
+	deviceSelect = widget.NewSelect([]string{deviceSelectPrompt}, func(value string) {
+		if value == deviceSelectPrompt {
+			if selectedDevice != "" {
+				deviceSelect.SetSelected(selectedDevice)
+			}
+			return
+		}
 		if value != "" {
 			selectedDevice = value
+			displayOptions := normalizeDisplayOptions(deviceDisplayOptions[value])
+			targetDisplay := selectedDisplayID
+			if !containsString(displayOptions, targetDisplay) {
+				targetDisplay = "0"
+			}
+			selectedDisplayID = targetDisplay
+			if displaySelect != nil {
+				displaySelect.Options = selectOptionsWithPrompt(displaySelectPrompt, displayOptions)
+				displaySelect.SetSelected(targetDisplay)
+				displaySelect.Refresh()
+			}
 		}
 	})
 	// 设置下拉框占位符
-	deviceSelect.PlaceHolder = "正在加载设备..."
+	deviceSelect.PlaceHolder = deviceSelectPrompt
+	displaySelect = widget.NewSelect(selectOptionsWithPrompt(displaySelectPrompt, []string{"0"}), func(value string) {
+		if value == displaySelectPrompt {
+			displaySelect.SetSelected(selectedDisplayID)
+			return
+		}
+		if value == "" {
+			return
+		}
+		selectedDisplayID = value
+	})
+	displaySelect.SetSelected("0")
+	displaySelect.PlaceHolder = displaySelectPrompt
 
 	// 启动设备监控线程
 	go deviceMonitor()
@@ -5655,7 +5848,7 @@ func main() {
 
 		// 异步执行截图操作
 		go func() {
-			capturedImg, err := captureScreenWithADB(selectedDevice)
+			capturedImg, err := captureScreenWithADB(selectedAndroidDeviceID())
 
 			// 使用 fyne.Do 确保在主线程中更新UI
 			fyne.Do(func() {
@@ -6211,7 +6404,7 @@ func main() {
 	var rightTabs *container.AppTabs
 	var nodeTabItem *container.TabItem
 	nodeTool := newAndroidNodeTool(w, func() string {
-		return selectedDevice
+		return selectedAndroidDeviceID()
 	}, func() *ImageViewer {
 		return imageViewer
 	}, openNodeImageTab, func(selectedFunction string, onSaved func()) {
@@ -6432,8 +6625,11 @@ func main() {
 	})
 	autoCopyRangeCheck.SetChecked(autoCopyRangeEnabled)
 
+	displaySelectBox := container.New(&fixedWidthLayout{width: 64}, displaySelect)
+	deviceDisplayRow := container.NewBorder(nil, nil, nil, displaySelectBox, deviceSelect)
+
 	leftControls := container.NewVBox(
-		deviceSelect,
+		deviceDisplayRow,
 		magnifierThemeRow,
 		screenshotBtn,
 		rotateRow,

@@ -56,6 +56,76 @@ func distinctPointColorBuckets(t *testing.T, img image.Image, points []image.Poi
 	return classes
 }
 
+func assertStringSliceEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("slice length mismatch: want %d got %d (%v)", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("slice item %d mismatch: want %q got %q (%v)", i, want[i], got[i], got)
+		}
+	}
+}
+
+func TestAndroidCapDexMainArgsUsesClasspathAppProcess(t *testing.T) {
+	got := androidCapDexMainArgs("2", "7", "/sdcard/screenshot.png")
+	want := []string{
+		"shell",
+		"CLASSPATH=" + androidCapDexDevicePath,
+		"app_process",
+		"/",
+		androidCapDexMainClass,
+		"2",
+		"7",
+		"/sdcard/screenshot.png",
+	}
+	assertStringSliceEqual(t, got, want)
+}
+
+func TestParseVirtualDisplayIDs(t *testing.T) {
+	output := "\n0\n2\nabc\n2\n 15 \n"
+	assertStringSliceEqual(t, parseVirtualDisplayIDs(output), []string{"2", "15"})
+}
+
+func TestParseDumpsysVirtualDisplayIDs(t *testing.T) {
+	output := `
+  mNextNonDefaultDisplayId=17
+  mDefaultViewport=DisplayViewport{valid=true, displayId=0}
+    mDisplayId=0
+    mDisplayId=3
+    mDisplayId=3
+    mDisplayId=12
+`
+	assertStringSliceEqual(t, parseDumpsysVirtualDisplayIDs(output), []string{"3", "12"})
+}
+
+func TestBuildDeviceDisplayOptions(t *testing.T) {
+	devices := []string{"emulator-5554", "emulator-5554[2]", "device-1[9]", "device-1", "emulator-5554[2]"}
+
+	baseDevices, displaysByDevice := buildDeviceDisplayOptions(devices)
+
+	assertStringSliceEqual(t, baseDevices, []string{"emulator-5554", "device-1"})
+	assertStringSliceEqual(t, displaysByDevice["emulator-5554"], []string{"0", "2"})
+	assertStringSliceEqual(t, displaysByDevice["device-1"], []string{"0", "9"})
+}
+
+func TestSelectOptionsWithPrompt(t *testing.T) {
+	assertStringSliceEqual(t, selectOptionsWithPrompt("--虚拟屏选择--", []string{"0", "2"}), []string{"--虚拟屏选择--", "0", "2"})
+}
+
+func TestFormatAndroidDeviceID(t *testing.T) {
+	if got := formatAndroidDeviceID("emulator-5554", "0"); got != "emulator-5554" {
+		t.Fatalf("primary display device mismatch: %q", got)
+	}
+	if got := formatAndroidDeviceID("emulator-5554", "7"); got != "emulator-5554[7]" {
+		t.Fatalf("virtual display device mismatch: %q", got)
+	}
+	if got := formatAndroidDeviceID(" ", "7"); got != "" {
+		t.Fatalf("empty base device should stay empty, got %q", got)
+	}
+}
+
 func TestParsePickCount(t *testing.T) {
 	tests := []struct {
 		text string
