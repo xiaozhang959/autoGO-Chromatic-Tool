@@ -1371,7 +1371,6 @@ type ImageViewer struct {
 	onMouseDown        func(x, y int)
 	onMouseUp          func(x, y int)
 	onRightClick       func(x, y int)
-	onDoubleClick      func(x, y int)
 	onRangeModeChanged func(enabled bool)
 	onRangeSelected    func(rect image.Rectangle)
 	onActivated        func()
@@ -3864,19 +3863,12 @@ func (v *ImageViewer) MouseUp(e *desktop.MouseEvent) {
 }
 
 func (v *ImageViewer) DoubleTapped(e *fyne.PointEvent) {
-	if v.image == nil {
+	if v.image == nil || v.nodeToolOnly {
 		return
 	}
 
 	mouseX, mouseY, ok := v.imagePositionFromView(e.Position)
 	if !ok {
-		return
-	}
-
-	if v.nodeToolOnly {
-		if v.onDoubleClick != nil {
-			v.onDoubleClick(mouseX, mouseY)
-		}
 		return
 	}
 

@@ -398,7 +398,7 @@ func TestSelectNodeClearsFindTestHighlights(t *testing.T) {
 	}
 }
 
-func TestSelectSelectedNodeParentAtPointClimbsAncestors(t *testing.T) {
+func TestSelectNodeAtPointRepeatedClickClimbsAncestors(t *testing.T) {
 	root := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 100, 100), Attrs: map[string]string{"class": "Root"}}
 	parent := &AndroidUINode{Number: 2, Depth: 1, Bounds: image.Rect(10, 10, 90, 90), Attrs: map[string]string{"class": "Parent"}}
 	child := &AndroidUINode{Number: 3, Depth: 2, Bounds: image.Rect(20, 20, 40, 40), Attrs: map[string]string{"class": "Child"}}
@@ -410,23 +410,23 @@ func TestSelectSelectedNodeParentAtPointClimbsAncestors(t *testing.T) {
 		selectedNode:  child,
 	}
 
-	tool.selectSelectedNodeParentAtPoint(image.Pt(25, 25))
+	tool.selectNodeAtPoint(25, 25)
 	if tool.selectedNode != parent {
 		t.Fatalf("expected selected parent node, got %#v", tool.selectedNode)
 	}
 
-	tool.selectSelectedNodeParentAtPoint(image.Pt(25, 25))
+	tool.selectNodeAtPoint(25, 25)
 	if tool.selectedNode != root {
 		t.Fatalf("expected selected root node, got %#v", tool.selectedNode)
 	}
 
-	tool.selectSelectedNodeParentAtPoint(image.Pt(25, 25))
+	tool.selectNodeAtPoint(25, 25)
 	if tool.selectedNode != root {
 		t.Fatalf("top-level node should stay selected, got %#v", tool.selectedNode)
 	}
 }
 
-func TestSelectSelectedNodeParentAtPointRequiresPointInsideSelection(t *testing.T) {
+func TestSelectNodeAtPointFallsBackToHitTestOutsideSelection(t *testing.T) {
 	root := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 100, 100)}
 	child := &AndroidUINode{Number: 2, Depth: 1, Bounds: image.Rect(20, 20, 40, 40)}
 	root.Children = []*AndroidUINode{child}
@@ -436,9 +436,9 @@ func TestSelectSelectedNodeParentAtPointRequiresPointInsideSelection(t *testing.
 		selectedNode:  child,
 	}
 
-	tool.selectSelectedNodeParentAtPoint(image.Pt(10, 10))
-	if tool.selectedNode != child {
-		t.Fatalf("selection should not change when double-click point is outside selected node, got %#v", tool.selectedNode)
+	tool.selectNodeAtPoint(10, 10)
+	if tool.selectedNode != root {
+		t.Fatalf("click outside selected node should use normal hit-test, got %#v", tool.selectedNode)
 	}
 }
 

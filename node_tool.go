@@ -610,9 +610,6 @@ func (t *AndroidNodeTool) capture(compressed bool) {
 					t.nodePages = make(map[*ImageViewer]*androidNodePageState)
 				}
 				t.nodePages[viewer] = page
-				viewer.onDoubleClick = func(x, y int) {
-					t.selectSelectedNodeParentAtPointOnPage(page, x, y)
-				}
 				viewer.onActivated = func() {
 					t.ActivateViewer(viewer)
 				}
@@ -1072,7 +1069,12 @@ func (t *AndroidNodeTool) updateNodeTreeScrollWidth() {
 }
 
 func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
-	node := t.smallestNodeAtPoint(image.Pt(x, y))
+	point := image.Pt(x, y)
+	if t.selectSelectedNodeParentAtPoint(point) {
+		return
+	}
+
+	node := t.smallestNodeAtPoint(point)
 	if node == nil {
 		return
 	}
@@ -1094,23 +1096,15 @@ func (t *AndroidNodeTool) selectNodeAtPointOnPage(page *androidNodePageState, x,
 	t.selectNodeAtPoint(x, y)
 }
 
-func (t *AndroidNodeTool) selectSelectedNodeParentAtPointOnPage(page *androidNodePageState, x, y int) {
-	if page == nil {
-		return
-	}
-	t.activateNodePage(page)
-	t.selectSelectedNodeParentAtPoint(image.Pt(x, y))
-}
-
-func (t *AndroidNodeTool) selectSelectedNodeParentAtPoint(point image.Point) {
+func (t *AndroidNodeTool) selectSelectedNodeParentAtPoint(point image.Point) bool {
 	if t.snapshot == nil || t.selectedNode == nil || t.selectedNode.Bounds.Empty() || !point.In(t.selectedNode.Bounds) {
-		return
+		return false
 	}
 
 	parent := t.parentNode(t.selectedNode)
 	if parent == nil {
 		t.setStatus(fmt.Sprintf("当前节点 %03d 已经是顶层节点", t.selectedNode.Number))
-		return
+		return true
 	}
 
 	if t.filteredNodeIndex(parent) < 0 {
@@ -1122,6 +1116,7 @@ func (t *AndroidNodeTool) selectSelectedNodeParentAtPoint(point image.Point) {
 
 	t.selectNode(parent)
 	t.setStatus(fmt.Sprintf("已选择父节点 %03d · %s", parent.Number, androidNodeSummary(parent)))
+	return true
 }
 
 func (t *AndroidNodeTool) parentNode(node *AndroidUINode) *AndroidUINode {
