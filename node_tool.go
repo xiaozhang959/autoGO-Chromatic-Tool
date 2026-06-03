@@ -183,6 +183,27 @@ func (l *minContentWidthLayout) Layout(objects []fyne.CanvasObject, size fyne.Si
 	objects[0].Resize(size)
 }
 
+type flexibleMinWidthLayout struct {
+	minWidth float32
+}
+
+func (l *flexibleMinWidthLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) == 0 {
+		return fyne.NewSize(l.minWidth, 1)
+	}
+	min := objects[0].MinSize()
+	min.Width = l.minWidth
+	return min
+}
+
+func (l *flexibleMinWidthLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	objects[0].Move(fyne.NewPos(0, 0))
+	objects[0].Resize(size)
+}
+
 type compactNodeToolRow struct {
 	widget.BaseWidget
 	content  fyne.CanvasObject
@@ -459,12 +480,13 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		newCompactNodeToolText("值"),
 		newCompactNodeToolText("函数"),
 	)
+	nodeTreeArea := container.New(&flexibleMinWidthLayout{minWidth: 1}, tool.nodeTree)
 
 	tool.root = container.NewVBox(
 		container.NewBorder(nil, nil, nil, container.NewHBox(tool.captureBtn, searchBtn, prevBtn, nextBtn), tool.searchEntry),
 		tool.statusLabel,
 		nodeHeader,
-		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.nodeTree), 205),
+		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, nodeTreeArea), 205),
 		attrHeader,
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tool.attrList)), 140),
 		container.NewGridWithColumns(4, tool.selectAllBtn, tool.clearSelectedBtn, tool.testSelectorBtn, generateSelectorBtn),
