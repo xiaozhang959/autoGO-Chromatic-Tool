@@ -110,6 +110,10 @@ func TestBuildDeviceDisplayOptions(t *testing.T) {
 	assertStringSliceEqual(t, displaysByDevice["device-1"], []string{"0", "9"})
 }
 
+func TestSelectOptionsWithPrompt(t *testing.T) {
+	assertStringSliceEqual(t, selectOptionsWithPrompt("--虚拟屏选择--", []string{"0", "2"}), []string{"--虚拟屏选择--", "0", "2"})
+}
+
 func TestFormatAndroidDeviceID(t *testing.T) {
 	if got := formatAndroidDeviceID("emulator-5554", "0"); got != "emulator-5554" {
 		t.Fatalf("primary display device mismatch: %q", got)

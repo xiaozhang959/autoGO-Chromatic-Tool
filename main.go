@@ -132,6 +132,9 @@ var (
 	adb              = findADBPath()
 )
 
+const deviceSelectPrompt = "--设备选择--"
+const displaySelectPrompt = "--虚拟屏选择--"
+
 var pickModeOptions = []string{
 	"随机取点",
 	"轮廓取点",
@@ -1244,6 +1247,13 @@ func normalizeDisplayOptions(options []string) []string {
 	return options
 }
 
+func selectOptionsWithPrompt(prompt string, options []string) []string {
+	result := make([]string, 0, len(options)+1)
+	result = append(result, prompt)
+	result = append(result, options...)
+	return result
+}
+
 func containsString(items []string, value string) bool {
 	for _, item := range items {
 		if item == value {
@@ -1359,7 +1369,13 @@ func updateDeviceList() {
 	}
 
 	currentSelectedDevice := strings.TrimSpace(deviceSelect.Selected)
+	if currentSelectedDevice == deviceSelectPrompt {
+		currentSelectedDevice = strings.TrimSpace(selectedDevice)
+	}
 	currentSelectedDisplay := strings.TrimSpace(displaySelect.Selected)
+	if currentSelectedDisplay == displaySelectPrompt {
+		currentSelectedDisplay = strings.TrimSpace(selectedDisplayID)
+	}
 	if currentSelectedDisplay == "" {
 		currentSelectedDisplay = "0"
 	}
@@ -1373,10 +1389,10 @@ func updateDeviceList() {
 		// 错误处理
 		fyne.Do(func() {
 			// 先清空选项列表和选择
-			deviceSelect.Options = []string{}
+			deviceSelect.Options = []string{deviceSelectPrompt}
 			deviceSelect.Selected = "" // 直接设置 Selected 字段
 			deviceSelect.SetSelected("")
-			displaySelect.Options = []string{"0"}
+			displaySelect.Options = selectOptionsWithPrompt(displaySelectPrompt, []string{"0"})
 			displaySelect.SetSelected("0")
 			deviceDisplayOptions = map[string][]string{}
 			selectedDevice = ""
@@ -1386,7 +1402,7 @@ func updateDeviceList() {
 			} else {
 				deviceSelect.PlaceHolder = "获取设备失败（可开启日志）"
 			}
-			displaySelect.PlaceHolder = "屏幕"
+			displaySelect.PlaceHolder = displaySelectPrompt
 			deviceSelect.Refresh()
 			displaySelect.Refresh()
 		})
@@ -1400,13 +1416,13 @@ func updateDeviceList() {
 		log.Printf("[device] 未发现已连接设备")
 		fyne.Do(func() {
 			// 先清空选项列表和选择
-			deviceSelect.Options = []string{}
+			deviceSelect.Options = []string{deviceSelectPrompt}
 			deviceSelect.Selected = "" // 直接设置 Selected 字段
 			deviceSelect.SetSelected("")
-			displaySelect.Options = []string{"0"}
+			displaySelect.Options = selectOptionsWithPrompt(displaySelectPrompt, []string{"0"})
 			displaySelect.SetSelected("0")
 			deviceSelect.PlaceHolder = "无设备连接"
-			displaySelect.PlaceHolder = "屏幕"
+			displaySelect.PlaceHolder = displaySelectPrompt
 			deviceDisplayOptions = map[string][]string{}
 			selectedDevice = ""
 			selectedDisplayID = "0"
@@ -1426,22 +1442,24 @@ func updateDeviceList() {
 	if !containsString(displayOptions, targetDisplay) {
 		targetDisplay = "0"
 	}
+	deviceUIOptions := selectOptionsWithPrompt(deviceSelectPrompt, baseDevices)
+	displayUIOptions := selectOptionsWithPrompt(displaySelectPrompt, displayOptions)
 
 	// 只有当列表变化或需要更新选择时才更新UI
-	if !stringSlicesEqual(baseDevices, currentDeviceOptions) ||
-		!stringSlicesEqual(displayOptions, currentDisplayOptions) ||
+	if !stringSlicesEqual(deviceUIOptions, currentDeviceOptions) ||
+		!stringSlicesEqual(displayUIOptions, currentDisplayOptions) ||
 		currentSelectedDevice != targetDevice ||
 		currentSelectedDisplay != targetDisplay {
 		log.Printf("[device] 更新下拉设备列表: devices=%v displays=%v current=%q[%s] target=%q[%s]", baseDevices, displayOptionsByDevice, currentSelectedDevice, currentSelectedDisplay, targetDevice, targetDisplay)
 		fyne.Do(func() {
 			// 更新设备列表
 			deviceDisplayOptions = displayOptionsByDevice
-			deviceSelect.Options = baseDevices
-			displaySelect.Options = displayOptions
+			deviceSelect.Options = deviceUIOptions
+			displaySelect.Options = displayUIOptions
 			deviceSelect.SetSelected(targetDevice)
 			displaySelect.SetSelected(targetDisplay)
-			deviceSelect.PlaceHolder = "选择设备"
-			displaySelect.PlaceHolder = "屏幕"
+			deviceSelect.PlaceHolder = deviceSelectPrompt
+			displaySelect.PlaceHolder = displaySelectPrompt
 			selectedDevice = targetDevice
 			selectedDisplayID = targetDisplay
 			deviceSelect.Refresh()
@@ -5530,7 +5548,13 @@ func main() {
 	a.Settings().SetTheme(newMyTheme())
 
 	// 创建设备选择下拉框
-	deviceSelect = widget.NewSelect([]string{}, func(value string) {
+	deviceSelect = widget.NewSelect([]string{deviceSelectPrompt}, func(value string) {
+		if value == deviceSelectPrompt {
+			if selectedDevice != "" {
+				deviceSelect.SetSelected(selectedDevice)
+			}
+			return
+		}
 		if value != "" {
 			selectedDevice = value
 			displayOptions := normalizeDisplayOptions(deviceDisplayOptions[value])
@@ -5540,22 +5564,26 @@ func main() {
 			}
 			selectedDisplayID = targetDisplay
 			if displaySelect != nil {
-				displaySelect.Options = displayOptions
+				displaySelect.Options = selectOptionsWithPrompt(displaySelectPrompt, displayOptions)
 				displaySelect.SetSelected(targetDisplay)
 				displaySelect.Refresh()
 			}
 		}
 	})
 	// 设置下拉框占位符
-	deviceSelect.PlaceHolder = "正在加载设备..."
-	displaySelect = widget.NewSelect([]string{"0"}, func(value string) {
+	deviceSelect.PlaceHolder = deviceSelectPrompt
+	displaySelect = widget.NewSelect(selectOptionsWithPrompt(displaySelectPrompt, []string{"0"}), func(value string) {
+		if value == displaySelectPrompt {
+			displaySelect.SetSelected(selectedDisplayID)
+			return
+		}
 		if value == "" {
 			return
 		}
 		selectedDisplayID = value
 	})
 	displaySelect.SetSelected("0")
-	displaySelect.PlaceHolder = "屏幕"
+	displaySelect.PlaceHolder = displaySelectPrompt
 
 	// 启动设备监控线程
 	go deviceMonitor()
