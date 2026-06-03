@@ -100,6 +100,28 @@ func TestParseDumpsysVirtualDisplayIDs(t *testing.T) {
 	assertStringSliceEqual(t, parseDumpsysVirtualDisplayIDs(output), []string{"3", "12"})
 }
 
+func TestBuildDeviceDisplayOptions(t *testing.T) {
+	devices := []string{"emulator-5554", "emulator-5554[2]", "device-1[9]", "device-1", "emulator-5554[2]"}
+
+	baseDevices, displaysByDevice := buildDeviceDisplayOptions(devices)
+
+	assertStringSliceEqual(t, baseDevices, []string{"emulator-5554", "device-1"})
+	assertStringSliceEqual(t, displaysByDevice["emulator-5554"], []string{"0", "2"})
+	assertStringSliceEqual(t, displaysByDevice["device-1"], []string{"0", "9"})
+}
+
+func TestFormatAndroidDeviceID(t *testing.T) {
+	if got := formatAndroidDeviceID("emulator-5554", "0"); got != "emulator-5554" {
+		t.Fatalf("primary display device mismatch: %q", got)
+	}
+	if got := formatAndroidDeviceID("emulator-5554", "7"); got != "emulator-5554[7]" {
+		t.Fatalf("virtual display device mismatch: %q", got)
+	}
+	if got := formatAndroidDeviceID(" ", "7"); got != "" {
+		t.Fatalf("empty base device should stay empty, got %q", got)
+	}
+}
+
 func TestParsePickCount(t *testing.T) {
 	tests := []struct {
 		text string
