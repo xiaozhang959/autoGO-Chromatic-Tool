@@ -47,6 +47,7 @@ type TabData struct {
 	manualRectSelected bool         // 是否手动框选了区域
 	imageViewer        *ImageViewer // 该标签页的图像查看器
 	generatedCode      string       // 该标签页生成的代码
+	nodeToolOnly       bool         // 是否为节点工具专用页
 }
 
 type UserConfig struct {
@@ -1375,6 +1376,7 @@ type ImageViewer struct {
 	manualRectSelected bool                                             // 是否手动框选了区域
 	rangeSelectMode    bool                                             // 是否等待框选范围
 	mouseInWidget      bool                                             // 鼠标是否在图片框上
+	nodeToolOnly       bool                                             // 节点工具专用页不响应图色工具操作
 	window             fyne.Window                                      // 窗口引用，用于获取窗口位置
 }
 
@@ -1410,6 +1412,9 @@ func getColorMode() string {
 // 保存当前标签页的数据
 func saveCurrentTabData() {
 	if currentTab == nil || imageViewer == nil {
+		return
+	}
+	if imageViewer.nodeToolOnly {
 		return
 	}
 
@@ -1452,6 +1457,27 @@ func restoreTabData(tab *container.TabItem) {
 		}
 		if refreshColorList != nil {
 			refreshColorList()
+		}
+		return
+	}
+
+	if tabData.nodeToolOnly {
+		colorPoints = make([]ColorPoint, 0)
+		imageViewer = nil
+		setRectCoordText(defaultRangeText)
+		if codeDisplayEntry != nil {
+			codeDisplayEntry.SetText("")
+		}
+		if refreshColorList != nil {
+			refreshColorList()
+		}
+		if tabData.imageViewer != nil {
+			if tabData.imageViewer.image != nil {
+				tabData.imageViewer.Refresh()
+			}
+			if tabData.imageViewer.onActivated != nil {
+				tabData.imageViewer.onActivated()
+			}
 		}
 		return
 	}
@@ -3235,6 +3261,10 @@ func addColorPointToList(x, y int, colorHex string, selected bool) {
 
 // 添加矩形标记 - 确保只有一个矩形
 func (v *ImageViewer) AddRect(x1, y1, x2, y2 int, c color.Color) {
+	if v.nodeToolOnly {
+		return
+	}
+
 	// 清空现有的所有矩形
 	v.markRects = v.markRects[:0]
 
@@ -3317,6 +3347,9 @@ func linkedPointHighlightRects(img image.Image, points []image.Point) []MarkRect
 }
 
 func (v *ImageViewer) SetFindTestHighlights(points []image.Point) {
+	if v.nodeToolOnly {
+		return
+	}
 	v.findTestRects = findTestHighlightRects(v.image, points)
 	if v.image != nil {
 		v.Refresh()
@@ -3480,6 +3513,10 @@ func (v *ImageViewer) updateBoundingBox() {
 
 // 清除所有标记
 func (v *ImageViewer) ClearMarks() {
+	if v.nodeToolOnly {
+		return
+	}
+
 	atomic.AddUint64(&linkedColorPointFlashSeq, 1)
 	linkedColorPointIndex = -1
 	linkedColorPointFlashVisible = false
@@ -3527,6 +3564,10 @@ func (v *ImageViewer) SetOnRightClick(callback func(x, y int)) {
 }
 
 func (v *ImageViewer) SetRangeSelectMode(enabled bool) {
+	if v.nodeToolOnly && enabled {
+		return
+	}
+
 	if v.rangeSelectMode == enabled {
 		return
 	}
@@ -3543,6 +3584,10 @@ func (v *ImageViewer) SetRangeSelectMode(enabled bool) {
 }
 
 func (v *ImageViewer) SetRangeSelectModeWithCallback(callback func(image.Rectangle)) {
+	if v.nodeToolOnly {
+		return
+	}
+
 	v.onRangeSelected = callback
 	v.SetRangeSelectMode(true)
 }
@@ -3596,6 +3641,10 @@ func (v *ImageViewer) clampImagePosition(x, y int) (int, int, bool) {
 }
 
 func (v *ImageViewer) addPointAt(x, y int) {
+	if v.nodeToolOnly {
+		return
+	}
+
 	if v.getGridParams != nil {
 		cols, rows, spacing, hasParams := v.getGridParams()
 		if hasParams && cols > 0 && rows > 0 && spacing > 0 {
@@ -3658,6 +3707,10 @@ func (v *ImageViewer) ShowOriginalSize() {
 }
 
 func (v *ImageViewer) ResetRangeSelection() {
+	if v.nodeToolOnly {
+		return
+	}
+
 	v.markRects = v.markRects[:0]
 	v.manualRectSelected = false
 	v.tempRect = nil
@@ -3723,7 +3776,7 @@ func (v *ImageViewer) MouseDown(e *desktop.MouseEvent) {
 	v.dragMode = imageDragPan
 	if v.rangeSelectMode {
 		v.dragMode = imageDragRange
-	} else if e.Modifier&fyne.KeyModifierControl != 0 {
+	} else if !v.nodeToolOnly && e.Modifier&fyne.KeyModifierControl != 0 {
 		v.dragMode = imageDragPoint
 	}
 
@@ -3799,7 +3852,7 @@ func (v *ImageViewer) MouseUp(e *desktop.MouseEvent) {
 }
 
 func (v *ImageViewer) DoubleTapped(e *fyne.PointEvent) {
-	if v.image == nil {
+	if v.image == nil || v.nodeToolOnly {
 		return
 	}
 
@@ -3816,7 +3869,7 @@ func (v *ImageViewer) DoubleTapped(e *fyne.PointEvent) {
 
 // 实现TappedSecondary接口方法，处理右键点击
 func (v *ImageViewer) TappedSecondary(e *fyne.PointEvent) {
-	if v.image == nil || v.window == nil {
+	if v.image == nil || v.window == nil || v.nodeToolOnly {
 		return
 	}
 
@@ -3921,7 +3974,7 @@ func (v *ImageViewer) SetImage(img image.Image) {
 
 // 旋转图像到指定角度
 func (v *ImageViewer) RotateImage(degrees int) {
-	if v.originalImage == nil {
+	if v.originalImage == nil || v.nodeToolOnly {
 		return
 	}
 
@@ -4110,7 +4163,7 @@ func (v *ImageViewer) TypedRune(r rune) {}
 // 处理键盘按键事件
 func (v *ImageViewer) TypedKey(key *fyne.KeyEvent) {
 	// 只有在鼠标在图片框上时才处理方向键
-	if !v.mouseInWidget || v.image == nil || v.window == nil {
+	if !v.mouseInWidget || v.image == nil || v.window == nil || v.nodeToolOnly {
 		return
 	}
 
@@ -4802,6 +4855,10 @@ func NewImageViewer() *ImageViewer {
 
 // 添加点标记
 func (v *ImageViewer) AddPoint(x, y int, c color.Color) {
+	if v.nodeToolOnly {
+		return
+	}
+
 	// 如果提供了颜色，使用提供的颜色
 	// 如果没有提供颜色（nil）且有图像，则根据背景亮度选择高对比度颜色
 	markColor := c
@@ -4869,7 +4926,7 @@ func (v *ImageViewer) ReplacePoints(points []image.Point) {
 }
 
 func (v *ImageViewer) addPoints(points []image.Point, clearExisting bool) {
-	if v.image == nil || len(points) == 0 {
+	if v.image == nil || len(points) == 0 || v.nodeToolOnly {
 		return
 	}
 
@@ -4906,7 +4963,7 @@ func (v *ImageViewer) addPoints(points []image.Point, clearExisting bool) {
 
 // 批量添加NxN点阵的颜色点
 func (v *ImageViewer) AddGridPoints(startX, startY, cols, rows, spacing int) {
-	if v.image == nil {
+	if v.image == nil || v.nodeToolOnly {
 		return
 	}
 
@@ -5497,6 +5554,7 @@ func main() {
 		saveCurrentTabData()
 
 		newImageViewer := NewImageViewer()
+		newImageViewer.nodeToolOnly = true
 		newMagnifier := NewMagnifierWidget()
 		newImgContainer := container.New(&topLeftLayout{}, newImageViewer)
 		newScrollContainer := container.NewScroll(newImgContainer)
@@ -5526,12 +5584,13 @@ func main() {
 			manualRectSelected: false,
 			imageViewer:        newImageViewer,
 			generatedCode:      "",
+			nodeToolOnly:       true,
 		}
 
 		tabs.Append(newTab)
 		tabs.Select(newTab)
 		currentTab = newTab
-		imageViewer = newImageViewer
+		imageViewer = nil
 		fitImageToView(newImageViewer)
 
 		colorPoints = make([]ColorPoint, 0)

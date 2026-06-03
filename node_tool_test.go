@@ -4,6 +4,9 @@ import (
 	"image"
 	"strings"
 	"testing"
+
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
 )
 
 func TestParseAndroidNodeXML(t *testing.T) {
@@ -392,6 +395,67 @@ func TestSelectNodeClearsFindTestHighlights(t *testing.T) {
 	}
 	if tool.selectedNode != node {
 		t.Fatalf("expected selected node to be updated, got %#v", tool.selectedNode)
+	}
+}
+
+func TestNodeToolOnlyImageViewerIgnoresColorToolActions(t *testing.T) {
+	viewer := &ImageViewer{
+		nodeToolOnly:      true,
+		markPoints:        []MarkPoint{{X: 1, Y: 1}},
+		markRects:         []MarkRect{{X1: 1, Y1: 1, X2: 2, Y2: 2}},
+		nodeOverlayRects:  []MarkRect{{X1: 3, Y1: 3, X2: 4, Y2: 4}},
+		nodeSelectedRects: []MarkRect{{X1: 5, Y1: 5, X2: 6, Y2: 6}},
+	}
+
+	viewer.ClearMarks()
+	viewer.AddPoint(10, 10, nil)
+	viewer.AddRect(10, 10, 20, 20, nil)
+	viewer.SetRangeSelectMode(true)
+
+	if len(viewer.markPoints) != 1 {
+		t.Fatalf("node-only viewer should ignore color point changes, got %#v", viewer.markPoints)
+	}
+	if len(viewer.markRects) != 1 {
+		t.Fatalf("node-only viewer should ignore color rect changes, got %#v", viewer.markRects)
+	}
+	if len(viewer.nodeOverlayRects) != 1 || len(viewer.nodeSelectedRects) != 1 {
+		t.Fatalf("node-only viewer should keep node overlays, overlay=%#v selected=%#v", viewer.nodeOverlayRects, viewer.nodeSelectedRects)
+	}
+	if viewer.rangeSelectMode {
+		t.Fatal("node-only viewer should not enter range select mode")
+	}
+}
+
+func TestRestoreNodeToolTabDoesNotExposeColorToolImageViewer(t *testing.T) {
+	previousTabDataMap := tabDataMap
+	previousCurrentTab := currentTab
+	previousImageViewer := imageViewer
+	previousColorPoints := colorPoints
+	defer func() {
+		tabDataMap = previousTabDataMap
+		currentTab = previousCurrentTab
+		imageViewer = previousImageViewer
+		colorPoints = previousColorPoints
+	}()
+
+	nodeViewer := &ImageViewer{nodeToolOnly: true}
+	nodeTab := container.NewTabItem("节点", widget.NewLabel(""))
+	tabDataMap = map[*container.TabItem]*TabData{
+		nodeTab: {
+			imageViewer:  nodeViewer,
+			nodeToolOnly: true,
+		},
+	}
+	imageViewer = &ImageViewer{}
+	colorPoints = []ColorPoint{{ID: 1}}
+
+	restoreTabData(nodeTab)
+
+	if imageViewer != nil {
+		t.Fatalf("node tool tab should not become color tool imageViewer, got %#v", imageViewer)
+	}
+	if len(colorPoints) != 0 {
+		t.Fatalf("node tool tab should clear color tool points, got %#v", colorPoints)
 	}
 }
 
