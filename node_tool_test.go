@@ -346,6 +346,49 @@ func TestSmallestNodeAtPoint(t *testing.T) {
 	}
 }
 
+func TestActivateViewerRestoresNodePageState(t *testing.T) {
+	viewerA := &ImageViewer{}
+	viewerB := &ImageViewer{}
+	nodeA := &AndroidUINode{Number: 1, Depth: 0, Bounds: image.Rect(0, 0, 10, 10)}
+	nodeB := &AndroidUINode{Number: 2, Depth: 0, Bounds: image.Rect(10, 10, 20, 20)}
+	pageA := newAndroidNodePageState(&AndroidNodeSnapshot{
+		Device: "device-a",
+		Nodes:  []*AndroidUINode{nodeA},
+	}, viewerA)
+	pageB := newAndroidNodePageState(&AndroidNodeSnapshot{
+		Device: "device-b",
+		Nodes:  []*AndroidUINode{nodeB},
+	}, viewerB)
+	pageA.filteredNodes = []*AndroidUINode{nodeA}
+	pageA.selectedNode = nodeA
+	pageA.attrRows = []androidNodeAttrRow{{Selected: true, Name: "text", Value: "A", Finder: "text"}}
+	pageB.filteredNodes = []*AndroidUINode{nodeB}
+	pageB.selectedNode = nodeB
+	pageB.attrRows = []androidNodeAttrRow{{Selected: true, Name: "text", Value: "B", Finder: "text"}}
+
+	tool := &AndroidNodeTool{
+		nodePages: map[*ImageViewer]*androidNodePageState{
+			viewerA: pageA,
+			viewerB: pageB,
+		},
+	}
+	tool.activateNodePage(pageB)
+	tool.ActivateViewer(viewerA)
+
+	if tool.snapshot != pageA.snapshot {
+		t.Fatal("expected page A snapshot to become active")
+	}
+	if tool.selectedNode != nodeA {
+		t.Fatalf("expected page A selected node, got %#v", tool.selectedNode)
+	}
+	if len(tool.filteredNodes) != 1 || tool.filteredNodes[0] != nodeA {
+		t.Fatalf("expected page A filtered nodes, got %#v", tool.filteredNodes)
+	}
+	if len(tool.attrRows) != 1 || tool.attrRows[0].Value != "A" {
+		t.Fatalf("expected page A attr rows, got %#v", tool.attrRows)
+	}
+}
+
 func TestRebuildNodeTreeKeepsMatchedAncestors(t *testing.T) {
 	root := &AndroidUINode{Number: 1, Depth: 0, Attrs: map[string]string{"class": "Root"}}
 	container := &AndroidUINode{Number: 2, Depth: 1, Attrs: map[string]string{"class": "Container"}}

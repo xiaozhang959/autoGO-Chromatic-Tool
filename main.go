@@ -1367,6 +1367,7 @@ type ImageViewer struct {
 	onRightClick       func(x, y int)
 	onRangeModeChanged func(enabled bool)
 	onRangeSelected    func(rect image.Rectangle)
+	onActivated        func()
 	getGridParams      func() (cols, rows, spacing int, hasParams bool) // 获取点阵参数的回调
 	scrollContainer    *container.Scroll                                // 滚动容器引用
 	magnifier          *MagnifierWidget                                 // 放大镜引用
@@ -1485,6 +1486,9 @@ func restoreTabData(tab *container.TabItem) {
 
 		// 重新绘制图像（显示标记点）
 		imageViewer.Refresh()
+		if imageViewer.onActivated != nil {
+			imageViewer.onActivated()
+		}
 	}
 
 	// 恢复生成的代码

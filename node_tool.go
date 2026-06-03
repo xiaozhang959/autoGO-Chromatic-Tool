@@ -49,6 +49,51 @@ type AndroidNodeSnapshot struct {
 	Nodes      []*AndroidUINode
 }
 
+type androidNodePageState struct {
+	snapshot      *AndroidNodeSnapshot
+	viewer        *ImageViewer
+	searchText    string
+	filteredNodes []*AndroidUINode
+	selectedNode  *AndroidUINode
+	attrRows      []androidNodeAttrRow
+	treeChildren  map[string][]string
+	treeNodeByID  map[string]*AndroidUINode
+	treeIDByNode  map[*AndroidUINode]string
+	treeParentID  map[string]string
+}
+
+func newAndroidNodePageState(snapshot *AndroidNodeSnapshot, viewer *ImageViewer) *androidNodePageState {
+	state := &androidNodePageState{
+		snapshot:      snapshot,
+		viewer:        viewer,
+		filteredNodes: make([]*AndroidUINode, 0),
+		attrRows:      make([]androidNodeAttrRow, 0),
+	}
+	state.ensureCollections()
+	return state
+}
+
+func (s *androidNodePageState) ensureCollections() {
+	if s.filteredNodes == nil {
+		s.filteredNodes = make([]*AndroidUINode, 0)
+	}
+	if s.attrRows == nil {
+		s.attrRows = make([]androidNodeAttrRow, 0)
+	}
+	if s.treeChildren == nil {
+		s.treeChildren = make(map[string][]string)
+	}
+	if s.treeNodeByID == nil {
+		s.treeNodeByID = make(map[string]*AndroidUINode)
+	}
+	if s.treeIDByNode == nil {
+		s.treeIDByNode = make(map[*AndroidUINode]string)
+	}
+	if s.treeParentID == nil {
+		s.treeParentID = make(map[string]string)
+	}
+}
+
 type androidNodeAttrRow struct {
 	Selected bool
 	Name     string
@@ -321,6 +366,8 @@ type AndroidNodeTool struct {
 	selectedNode  *AndroidUINode
 	attrRows      []androidNodeAttrRow
 	nodeViewer    *ImageViewer
+	nodePages     map[*ImageViewer]*androidNodePageState
+	activePage    *androidNodePageState
 	treeChildren  map[string][]string
 	treeNodeByID  map[string]*AndroidUINode
 	treeIDByNode  map[*AndroidUINode]string
@@ -336,6 +383,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 		openNodeImage:     openNodeImage,
 		filteredNodes:     make([]*AndroidUINode, 0),
 		attrRows:          make([]androidNodeAttrRow, 0),
+		nodePages:         make(map[*ImageViewer]*androidNodePageState),
 		treeChildren:      make(map[string][]string),
 		treeNodeByID:      make(map[string]*AndroidUINode),
 		treeIDByNode:      make(map[*AndroidUINode]string),
@@ -552,11 +600,27 @@ func (t *AndroidNodeTool) capture(compressed bool) {
 				return
 			}
 
+			var page *androidNodePageState
+			var viewer *ImageViewer
 			if t.openNodeImage != nil {
-				t.nodeViewer = t.openNodeImage(capturedImg, func(x, y int) {
-					t.selectNodeAtPoint(x, y)
+				viewer = t.openNodeImage(capturedImg, func(x, y int) {
+					if page == nil {
+						return
+					}
+					t.selectNodeAtPointOnPage(page, x, y)
 				})
 			}
+			page = newAndroidNodePageState(snapshot, viewer)
+			if viewer != nil {
+				if t.nodePages == nil {
+					t.nodePages = make(map[*ImageViewer]*androidNodePageState)
+				}
+				t.nodePages[viewer] = page
+				viewer.onActivated = func() {
+					t.ActivateViewer(viewer)
+				}
+			}
+			t.activateNodePage(page)
 			t.setSnapshot(snapshot)
 		})
 	}()
@@ -580,12 +644,81 @@ func (t *AndroidNodeTool) setStatus(text string) {
 	}
 }
 
+func (t *AndroidNodeTool) ActivateViewer(viewer *ImageViewer) {
+	if viewer == nil || t.nodePages == nil {
+		return
+	}
+
+	page := t.nodePages[viewer]
+	if page == nil || page == t.activePage {
+		return
+	}
+
+	t.activateNodePage(page)
+	if t.snapshot != nil {
+		t.setStatus(fmt.Sprintf("已切换节点页 · %d 个节点 · 设备: %s", len(t.snapshot.Nodes), t.snapshot.Device))
+	}
+}
+
+func (t *AndroidNodeTool) activateNodePage(page *androidNodePageState) {
+	if page == nil {
+		return
+	}
+	if t.activePage != page {
+		t.saveActivePageState()
+	}
+
+	page.ensureCollections()
+	t.activePage = page
+	t.snapshot = page.snapshot
+	t.filteredNodes = page.filteredNodes
+	t.selectedNode = page.selectedNode
+	t.attrRows = page.attrRows
+	t.nodeViewer = page.viewer
+	t.treeChildren = page.treeChildren
+	t.treeNodeByID = page.treeNodeByID
+	t.treeIDByNode = page.treeIDByNode
+	t.treeParentID = page.treeParentID
+
+	if t.searchEntry != nil && t.searchEntry.Text != page.searchText {
+		t.searchEntry.SetText(page.searchText)
+	}
+	t.refreshSelector()
+	t.refreshLists()
+	if t.selectedNode != nil {
+		t.syncNodeListSelection(t.selectedNode)
+		t.highlightSelectedNode()
+		return
+	}
+	t.clearSelectedNodeOverlay()
+}
+
+func (t *AndroidNodeTool) saveActivePageState() {
+	if t.activePage == nil {
+		return
+	}
+
+	t.activePage.snapshot = t.snapshot
+	t.activePage.viewer = t.nodeViewer
+	if t.searchEntry != nil {
+		t.activePage.searchText = t.searchEntry.Text
+	}
+	t.activePage.filteredNodes = t.filteredNodes
+	t.activePage.selectedNode = t.selectedNode
+	t.activePage.attrRows = t.attrRows
+	t.activePage.treeChildren = t.treeChildren
+	t.activePage.treeNodeByID = t.treeNodeByID
+	t.activePage.treeIDByNode = t.treeIDByNode
+	t.activePage.treeParentID = t.treeParentID
+}
+
 func (t *AndroidNodeTool) setSnapshot(snapshot *AndroidNodeSnapshot) {
 	t.snapshot = snapshot
 	t.selectedNode = nil
 	t.attrRows = t.attrRows[:0]
 	t.updateNodeOverlay()
 	t.applySearch()
+	t.saveActivePageState()
 
 	t.setStatus(fmt.Sprintf("已抓取 %d 个节点 · 设备: %s", len(snapshot.Nodes), snapshot.Device))
 }
@@ -595,6 +728,7 @@ func (t *AndroidNodeTool) applySearch() {
 	if t.snapshot == nil {
 		t.rebuildNodeTree("")
 		t.refreshLists()
+		t.saveActivePageState()
 		return
 	}
 
@@ -615,6 +749,7 @@ func (t *AndroidNodeTool) applySearch() {
 		t.refreshLists()
 		t.clearSelectedNodeOverlay()
 		t.setStatus(fmt.Sprintf("没有匹配节点 · 总节点: %d", len(t.snapshot.Nodes)))
+		t.saveActivePageState()
 	}
 }
 
@@ -648,6 +783,7 @@ func (t *AndroidNodeTool) selectNode(node *AndroidUINode) {
 	t.syncNodeListSelection(node)
 	t.refreshLists()
 	t.highlightSelectedNode()
+	t.saveActivePageState()
 }
 
 func (t *AndroidNodeTool) refreshLists() {
@@ -683,6 +819,7 @@ func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNo
 			}
 			t.attrRows[index].Selected = selected
 			t.refreshSelector()
+			t.saveActivePageState()
 		}
 	}
 
@@ -695,6 +832,7 @@ func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNo
 			}
 			t.attrRows[index].Method = method
 			t.refreshSelector()
+			t.saveActivePageState()
 		}
 	} else {
 		methodSelect.Disable()
@@ -735,6 +873,7 @@ func (t *AndroidNodeTool) toggleAttrRowSelection(index int) {
 	t.attrRows[index].Selected = !t.attrRows[index].Selected
 	t.refreshSelector()
 	t.rebuildAttrList()
+	t.saveActivePageState()
 }
 
 func (t *AndroidNodeTool) highlightSelectedNode() {
@@ -896,6 +1035,14 @@ func (t *AndroidNodeTool) selectNodeAtPoint(x, y int) {
 	t.setStatus(fmt.Sprintf("已选择节点 %03d · %s", node.Number, androidNodeSummary(node)))
 }
 
+func (t *AndroidNodeTool) selectNodeAtPointOnPage(page *androidNodePageState, x, y int) {
+	if page == nil {
+		return
+	}
+	t.activateNodePage(page)
+	t.selectNodeAtPoint(x, y)
+}
+
 func (t *AndroidNodeTool) smallestNodeAtPoint(point image.Point) *AndroidUINode {
 	if t.snapshot == nil {
 		return nil
@@ -925,6 +1072,7 @@ func (t *AndroidNodeTool) setAllAttrRows(selected bool) {
 	}
 	t.refreshSelector()
 	t.rebuildAttrList()
+	t.saveActivePageState()
 }
 
 func (t *AndroidNodeTool) refreshSelector() {
