@@ -82,6 +82,65 @@ func TestBuildAndroidNodeAttrRowsSelectsStableAttrs(t *testing.T) {
 	}
 }
 
+func TestBuildAndroidNodeAttrRowsIncludesUiaccMatchableAttrs(t *testing.T) {
+	node := &AndroidUINode{
+		Depth: 1,
+		Attrs: map[string]string{
+			"class": "android.widget.EditText",
+		},
+	}
+
+	rows := buildAndroidNodeAttrRows(node)
+	byName := map[string]androidNodeAttrRow{}
+	for _, row := range rows {
+		byName[row.Name] = row
+	}
+
+	for _, name := range []string{
+		"depth", "index", "drawingOrder", "class", "package", "text", "desc", "id", "bounds",
+		"checkable", "checked", "clickable", "enabled", "focusable", "focused",
+		"scrollable", "editable", "longClickable", "password", "selected",
+		"visible", "multiLine", "dismissable", "contextClickable",
+	} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("expected uiacc matchable attr %s to be listed", name)
+		}
+	}
+	if byName["editable"].Value != "false" {
+		t.Fatalf("expected missing editable to default false, got %q", byName["editable"].Value)
+	}
+	if byName["visible"].Value != "true" {
+		t.Fatalf("expected missing visible to default true, got %q", byName["visible"].Value)
+	}
+	if androidNodeAttrSelectable(byName["drawingOrder"]) {
+		t.Fatal("empty drawingOrder should be listed but not selectable")
+	}
+}
+
+func TestAndroidNodeAttrValueUsesAliases(t *testing.T) {
+	node := &AndroidUINode{
+		Attrs: map[string]string{
+			"drawingOrder":     "3",
+			"longClickable":    "true",
+			"multiLine":        "true",
+			"contextClickable": "true",
+		},
+	}
+
+	if got := androidNodeAttrValue(node, "drawingOrder", "drawing-order", "drawing-order", androidNodeAttrInt); got != "3" {
+		t.Fatalf("expected drawingOrder alias value 3, got %q", got)
+	}
+	if got := androidNodeAttrValue(node, "longClickable", "long-clickable", "long-clickable", androidNodeAttrBool); got != "true" {
+		t.Fatalf("expected longClickable alias true, got %q", got)
+	}
+	if got := androidNodeAttrValue(node, "multiLine", "multi-line", "multi-line", androidNodeAttrBool); got != "true" {
+		t.Fatalf("expected multiLine alias true, got %q", got)
+	}
+	if got := androidNodeAttrValue(node, "contextClickable", "context-clickable", "context-clickable", androidNodeAttrBool); got != "true" {
+		t.Fatalf("expected contextClickable alias true, got %q", got)
+	}
+}
+
 func TestSelectedXPath(t *testing.T) {
 	tool := &AndroidNodeTool{
 		attrRows: []androidNodeAttrRow{

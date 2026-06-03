@@ -966,10 +966,6 @@ func buildAndroidNodeAttrRows(node *AndroidUINode) []androidNodeAttrRow {
 	hasStableSelection := false
 	for _, meta := range androidNodeAttrMetas {
 		value := androidNodeAttrValueByMeta(node, meta)
-		if value == "" && meta.Name != "depth" {
-			continue
-		}
-
 		methods := append([]string(nil), meta.Methods...)
 		method := ""
 		if len(methods) > 0 {
@@ -1285,29 +1281,74 @@ func androidNodeBoundsMatches(method string, value, expected image.Rectangle) bo
 }
 
 func androidNodeAttrValueByMeta(node *AndroidUINode, meta androidNodeAttrMeta) string {
-	if node == nil {
-		return ""
-	}
-	if meta.Name == "depth" {
-		return strconv.Itoa(node.Depth)
-	}
-	if meta.XMLAttr == "" {
-		return ""
-	}
-	return node.Attrs[meta.XMLAttr]
+	return androidNodeAttrValue(node, meta.Name, meta.XMLAttr, meta.Finder, meta.Kind)
 }
 
 func androidNodeValueByAttrRow(node *AndroidUINode, row androidNodeAttrRow) string {
+	return androidNodeAttrValue(node, row.Name, row.XMLAttr, row.Finder, row.Kind)
+}
+
+func androidNodeAttrValue(node *AndroidUINode, name, xmlAttr, finder string, kind androidNodeAttrKind) string {
 	if node == nil {
 		return ""
 	}
-	if row.Name == "depth" {
+	if name == "depth" {
 		return strconv.Itoa(node.Depth)
 	}
-	if row.XMLAttr != "" {
-		return node.Attrs[row.XMLAttr]
+	for _, key := range androidNodeAttrXMLKeys(name, xmlAttr, finder) {
+		if value, ok := node.Attrs[key]; ok {
+			return value
+		}
 	}
-	return androidNodeValueByFinder(node, row.Finder, row.Name)
+	if kind == androidNodeAttrBool {
+		if name == "visible" {
+			return "true"
+		}
+		return "false"
+	}
+	return ""
+}
+
+func androidNodeAttrXMLKeys(name, xmlAttr, finder string) []string {
+	keys := make([]string, 0, 4)
+	add := func(key string) {
+		if key == "" {
+			return
+		}
+		for _, existing := range keys {
+			if existing == key {
+				return
+			}
+		}
+		keys = append(keys, key)
+	}
+
+	add(xmlAttr)
+	add(finder)
+	switch name {
+	case "desc":
+		add("content-desc")
+	case "id":
+		add("resource-id")
+	case "class":
+		add("className")
+	case "package":
+		add("packageName")
+	case "drawingOrder":
+		add("drawing-order")
+		add("drawingOrder")
+	case "longClickable":
+		add("long-clickable")
+		add("longClickable")
+		add("longClick")
+	case "multiLine":
+		add("multi-line")
+		add("multiLine")
+	case "contextClickable":
+		add("context-clickable")
+		add("contextClickable")
+	}
+	return keys
 }
 
 func androidNodeAttrMethod(row androidNodeAttrRow) string {
