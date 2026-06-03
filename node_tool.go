@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"image"
+	"image/color"
 	"io"
 	"regexp"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
@@ -23,7 +25,7 @@ const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 118
 const compactNodeToolTreeRowHeight float32 = 18
 const compactNodeToolAttrRowHeight float32 = 28
-const compactNodeToolCheckOffsetY float32 = 2
+const compactNodeToolCheckOffsetY float32 = 5
 
 const androidNodeSelectorFuncFindOnce = "FindOnce"
 const androidNodeSelectorFuncFind = "Find"
@@ -128,6 +130,12 @@ func newCompactNodeToolAttrRow(selected, name, value, finder fyne.CanvasObject) 
 	finderBox := container.New(&fixedContentWidthLayout{width: compactNodeToolAttrFinderWidth}, finder)
 	main := container.NewBorder(nil, nil, nameBox, nil, value)
 	return container.NewBorder(nil, nil, selectedBox, finderBox, main)
+}
+
+func newCompactNodeToolAttrSeparator() fyne.CanvasObject {
+	separator := canvas.NewRectangle(color.NRGBA{R: 210, G: 210, B: 210, A: 120})
+	separator.SetMinSize(fyne.NewSize(1, 1))
+	return separator
 }
 
 type verticalOffsetLayout struct {
@@ -621,7 +629,8 @@ func (t *AndroidNodeTool) newAndroidNodeAttrRowContent(index int, attr androidNo
 		newCompactNodeToolText(trimMiddle(attr.Value, 28)),
 		methodSelect,
 	)
-	return newCompactNodeToolRow(row, compactNodeToolAttrRowHeight)
+	rowWithSeparator := container.NewBorder(nil, newCompactNodeToolAttrSeparator(), nil, nil, row)
+	return newCompactNodeToolRow(rowWithSeparator, compactNodeToolAttrRowHeight)
 }
 
 func androidNodeAttrSelectable(attr androidNodeAttrRow) bool {
