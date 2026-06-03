@@ -2746,10 +2746,13 @@ func apiRegionParamsObject(x1, y1, x2, y2 int, colorText, sim string, dir int) s
 
 func defaultAPIFormatTemplates() map[string]string {
 	return map[string]string{
-		"FindColor":          "x, y := images.FindColor([参数])",
-		"FindMultiColors":    "x, y := images.FindMultiColors([参数])",
-		"FindMultiColorsAll": "points := images.FindMultiColorsAll([参数])",
-		"CmpColor":           "matched := images.CmpColor([参数])",
+		"FindColor":                     "x, y := images.FindColor([参数])",
+		"FindMultiColors":               "x, y := images.FindMultiColors([参数])",
+		"FindMultiColorsAll":            "points := images.FindMultiColorsAll([参数])",
+		"CmpColor":                      "matched := images.CmpColor([参数])",
+		androidNodeSelectorFuncFindOnce: "acc := uiacc.New([屏幕ID])\nobj := acc[参数].FindOnce()",
+		androidNodeSelectorFuncFind:     "acc := uiacc.New([屏幕ID])\nobjs := acc[参数].Find()",
+		androidNodeSelectorFuncWaitFor:  "acc := uiacc.New([屏幕ID])\nobj := acc[参数].WaitFor([超时])",
 	}
 }
 
@@ -2811,6 +2814,8 @@ func apiFormatValues(functionName, params, colorParams, colorText, sim string, d
 		"[区域_左上]":    fmt.Sprintf("%d, %d", x1, y1),
 		"[区域_右下]":    fmt.Sprintf("%d, %d", x2, y2),
 		"[CmpColor]": fmt.Sprintf("%d, %d, \"%s\", %s, 0", pointX, pointY, colorText, sim),
+		"[调用]":       "",
+		"[超时]":       "",
 	}
 }
 
@@ -2833,6 +2838,8 @@ var apiFormatPlaceholders = []apiFormatPlaceholder{
 	{token: "[坐标_X]", description: "x"},
 	{token: "[坐标_Y]", description: "y"},
 	{token: "[函数名]", description: "函数名称"},
+	{token: "[调用]", description: "FindOnce() / Find() / WaitFor(timeout)"},
+	{token: "[超时]", description: "WaitFor 超时毫秒"},
 }
 
 func sampleAPIFormatValues(functionName string) map[string]string {
@@ -2850,6 +2857,15 @@ func sampleAPIFormatValues(functionName string) map[string]string {
 		colorText := "FFFFFF|CCCCCC-101010"
 		params := "100, 200, \"FFFFFF|CCCCCC-101010\", 0.9, 0"
 		return apiFormatValues(functionName, params, fmt.Sprintf("{100,200,\"%s\",0.9,0}", colorText), colorText, "0.9", 0, 0, 0, 0, 0, 100, 200)
+	case androidNodeSelectorFuncFindOnce:
+		chain := ".Text(\"登录\")"
+		return androidNodeSelectorFormatValues(functionName, chain, androidNodeSelectorCall(functionName, androidNodeSelectorDefaultTimeout), androidNodeSelectorDefaultTimeout, "0")
+	case androidNodeSelectorFuncFind:
+		chain := ".TextContains(\"登录\")"
+		return androidNodeSelectorFormatValues(functionName, chain, androidNodeSelectorCall(functionName, androidNodeSelectorDefaultTimeout), androidNodeSelectorDefaultTimeout, "0")
+	case androidNodeSelectorFuncWaitFor:
+		chain := ".Text(\"登录\")"
+		return androidNodeSelectorFormatValues(functionName, chain, androidNodeSelectorCall(functionName, androidNodeSelectorDefaultTimeout), androidNodeSelectorDefaultTimeout, "0")
 	default:
 		colorText := "ffccff-151515,635,978,ffab2d-101010"
 		params := "0, 0, 0, 0, \"ffccff-151515,635,978,ffab2d-101010\", 0.9, 0, 0"
@@ -2922,7 +2938,15 @@ func insertTextAtEntryCursor(entry *widget.Entry, text string) {
 }
 
 func showAPIFormatDialog(parent fyne.Window, selectedFunction string, saveConfig func()) {
-	functions := []string{"FindMultiColors", "FindColor", "FindMultiColorsAll", "CmpColor"}
+	functions := []string{
+		"FindMultiColors",
+		"FindColor",
+		"FindMultiColorsAll",
+		"CmpColor",
+		androidNodeSelectorFuncFind,
+		androidNodeSelectorFuncFindOnce,
+		androidNodeSelectorFuncWaitFor,
+	}
 	localTemplates := copyAPIFormatTemplates(normalizeAPIFormatTemplates(apiFormatTemplates))
 	defaultTemplates := defaultAPIFormatTemplates()
 	currentFunction := normalizeImagesFunctionName(selectedFunction)
@@ -3099,6 +3123,12 @@ func normalizeImagesFunctionName(name string) string {
 		return "FindMultiColorsAll"
 	case "cmpcolor":
 		return "CmpColor"
+	case "find":
+		return androidNodeSelectorFuncFind
+	case "findonce":
+		return androidNodeSelectorFuncFindOnce
+	case "waitfor":
+		return androidNodeSelectorFuncWaitFor
 	default:
 		return "FindMultiColors"
 	}
@@ -6184,7 +6214,16 @@ func main() {
 		return selectedDevice
 	}, func() *ImageViewer {
 		return imageViewer
-	}, openNodeImageTab)
+	}, openNodeImageTab, func(selectedFunction string, onSaved func()) {
+		showAPIFormatDialog(w, selectedFunction, func() {
+			if saveCurrentConfig != nil {
+				saveCurrentConfig()
+			}
+			if onSaved != nil {
+				onSaved()
+			}
+		})
+	})
 	nodeTool.SetOnOpen(func() {
 		if selectNodeToolTab != nil {
 			selectNodeToolTab()
