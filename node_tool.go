@@ -22,7 +22,7 @@ const compactNodeToolAttrSelectWidth float32 = 40
 const compactNodeToolAttrNameWidth float32 = 68
 const compactNodeToolAttrFinderWidth float32 = 118
 const compactNodeToolTreeRowHeight float32 = 18
-const compactNodeToolAttrRowHeight float32 = 22
+const compactNodeToolAttrRowHeight float32 = 28
 
 const androidNodeSelectorFuncFindOnce = "FindOnce"
 const androidNodeSelectorFuncFind = "Find"
@@ -159,8 +159,12 @@ type compactNodeToolRowRenderer struct {
 func (r *compactNodeToolRowRenderer) Destroy() {}
 
 func (r *compactNodeToolRowRenderer) Layout(size fyne.Size) {
-	r.row.content.Move(fyne.NewPos(0, 0))
-	r.row.content.Resize(size)
+	contentSize := r.row.content.MinSize()
+	if contentSize.Height > size.Height {
+		contentSize.Height = size.Height
+	}
+	r.row.content.Move(fyne.NewPos(0, (size.Height-contentSize.Height)/2))
+	r.row.content.Resize(fyne.NewSize(size.Width, contentSize.Height))
 }
 
 func (r *compactNodeToolRowRenderer) MinSize() fyne.Size {
