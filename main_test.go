@@ -525,6 +525,27 @@ func TestSplitOffsetForFixedRightWidth(t *testing.T) {
 	}
 }
 
+func TestInitialRightPanelSplitOffsetUsesSavedValue(t *testing.T) {
+	config := defaultUserConfig()
+	config.RightPanelSplitOffset = 0.73
+
+	got := initialRightPanelSplitOffset(config, 1000, 190, 340)
+	if got != 0.73 {
+		t.Fatalf("saved split offset was not used: got %v", got)
+	}
+}
+
+func TestInitialRightPanelSplitOffsetFallsBackForInvalidValue(t *testing.T) {
+	config := defaultUserConfig()
+	config.RightPanelSplitOffset = 1.2
+
+	got := initialRightPanelSplitOffset(config, 1000, 190, 340)
+	want := splitOffsetForFixedRightWidth(1000, 190, 340)
+	if got != want {
+		t.Fatalf("split offset fallback mismatch: want %v got %v", want, got)
+	}
+}
+
 func TestBuildImagesAPICodeColorExportUsesOfficialParamOrder(t *testing.T) {
 	withColorPointsForTest(t, []ColorPoint{
 		{Position: "10, 20", Color: "#081029", Offset: "202020", Selected: true},

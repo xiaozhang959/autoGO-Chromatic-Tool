@@ -63,9 +63,9 @@ type UserConfig struct {
 	GridCols      int    `json:"grid_cols"`
 	GridRows      int    `json:"grid_rows"`
 	GridSpacing   int    `json:"grid_spacing"`
-	EnableLogging bool   `json:"enable_logging"`
 
-	FormatTemplates map[string]string `json:"format_templates"`
+	RightPanelSplitOffset float64           `json:"right_panel_split_offset"`
+	FormatTemplates       map[string]string `json:"format_templates"`
 }
 
 // 全局变量定义
@@ -167,6 +167,20 @@ func splitOffsetForFixedRightWidth(totalWidth, leftWidth, rightWidth float32) fl
 		return 0.95
 	}
 	return float64(offset)
+}
+
+func normalizeSplitOffset(offset float64) float64 {
+	if math.IsNaN(offset) || offset <= 0 || offset >= 1 {
+		return 0
+	}
+	return offset
+}
+
+func initialRightPanelSplitOffset(config UserConfig, totalWidth, leftWidth, rightWidth float32) float64 {
+	if offset := normalizeSplitOffset(config.RightPanelSplitOffset); offset > 0 {
+		return offset
+	}
+	return splitOffsetForFixedRightWidth(totalWidth, leftWidth, rightWidth)
 }
 
 // 固定高度的容器布局
@@ -343,7 +357,6 @@ func defaultUserConfig() UserConfig {
 		GridCols:      4,
 		GridRows:      4,
 		GridSpacing:   7,
-		EnableLogging: false,
 
 		FormatTemplates: defaultAPIFormatTemplates(),
 	}
@@ -395,6 +408,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 	if config.GridSpacing <= 0 {
 		config.GridSpacing = defaults.GridSpacing
 	}
+	config.RightPanelSplitOffset = normalizeSplitOffset(config.RightPanelSplitOffset)
 	config.FormatTemplates = normalizeAPIFormatTemplates(config.FormatTemplates)
 	return config
 }
@@ -5218,10 +5232,7 @@ func (r *magnifierRenderer) Destroy() {}
 
 func main() {
 	userConfig := loadUserConfig()
-	setupAppLogging(userConfig.EnableLogging)
-	if userConfig.EnableLogging {
-		log.Printf("应用启动，adb=%q", adb)
-	}
+	setupAppLogging(false)
 
 	// 释放嵌入的 cap.dex 到临时目录
 	extractCapDex()
@@ -5930,6 +5941,7 @@ func main() {
 	// 点阵模式主按钮
 	var gridModeBtn *widget.Button
 	var saveCurrentConfig func()
+	var centerRightSplit *container.Split
 	updateGridBtn := func() {
 		if gridModeEnabled {
 			gridModeBtn.SetText("● 点阵模式")
@@ -6272,16 +6284,6 @@ func main() {
 		}
 	})
 	autoCopyRangeCheck.SetChecked(autoCopyRangeEnabled)
-	loggingCheck := widget.NewCheck("记录日志", func(checked bool) {
-		setAppLoggingEnabled(checked)
-		if checked {
-			log.Printf("日志记录已开启: %s", appLogPath)
-		}
-		if saveCurrentConfig != nil {
-			saveCurrentConfig()
-		}
-	})
-	loggingCheck.SetChecked(userConfig.EnableLogging)
 
 	leftControls := container.NewVBox(
 		deviceSelect,
@@ -6301,7 +6303,6 @@ func main() {
 		container.NewBorder(nil, nil, widget.NewLabel("取色个数"), nil, pickCountEntry),
 		applyRangeCheck,
 		autoCopyRangeCheck,
-		loggingCheck,
 		gridRow,
 		fontLibBtn,
 	)
@@ -6600,6 +6601,10 @@ func main() {
 		showCodeTestDialog(w, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
 	})
 	saveCurrentConfig = func() {
+		rightPanelSplitOffset := 0.0
+		if centerRightSplit != nil {
+			rightPanelSplitOffset = normalizeSplitOffset(centerRightSplit.Offset)
+		}
 		saveUserConfigSilently(UserConfig{
 			Precision:     strings.TrimSpace(precisionEntry.Text),
 			UniformOffset: strings.TrimSpace(uniformOffsetEntry.Text),
@@ -6614,9 +6619,9 @@ func main() {
 			GridCols:      gridColsValue,
 			GridRows:      gridRowsValue,
 			GridSpacing:   gridSpacingValue,
-			EnableLogging: loggingCheck.Checked,
 
-			FormatTemplates: copyAPIFormatTemplates(apiFormatTemplates),
+			RightPanelSplitOffset: rightPanelSplitOffset,
+			FormatTemplates:       copyAPIFormatTemplates(apiFormatTemplates),
 		})
 	}
 
@@ -6653,8 +6658,13 @@ func main() {
 	rightPanel := makeFixedPanel(rightPanelMinWidth, container.NewVScroll(rightTabs))
 
 	// 左工具栏固定宽度；右工具栏默认使用最小宽度，用户可拖拽调整
-	centerRightSplit := container.NewHSplit(tabs, rightPanel)
-	centerRightSplit.Offset = splitOffsetForFixedRightWidth(mainWindowSize.Width, leftPanelWidth, rightPanelMinWidth)
+	centerRightSplit = container.NewHSplit(tabs, rightPanel)
+	centerRightSplit.Offset = initialRightPanelSplitOffset(userConfig, mainWindowSize.Width, leftPanelWidth, rightPanelMinWidth)
+	w.SetOnClosed(func() {
+		if saveCurrentConfig != nil {
+			saveCurrentConfig()
+		}
+	})
 
 	mainContent := container.NewBorder(nil, nil, leftPanel, nil, centerRightSplit)
 	windowContent := container.NewPadded(mainContent)
