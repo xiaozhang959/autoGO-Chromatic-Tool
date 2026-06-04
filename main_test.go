@@ -218,6 +218,63 @@ func TestNormalizeShortcutConfigPreservesBlankOverrides(t *testing.T) {
 	}
 }
 
+func TestNormalizeShortcutConfigAddsCommandDefaults(t *testing.T) {
+	got := normalizeShortcutConfig(nil)
+
+	if got[shortcutActionScreenshot] != "Ctrl+Z" {
+		t.Fatalf("screenshot default shortcut mismatch: %q", got[shortcutActionScreenshot])
+	}
+	if value, ok := got[commandCopyCode]; !ok || value != "" {
+		t.Fatalf("new command shortcut should default to disabled, got value=%q ok=%v", value, ok)
+	}
+}
+
+func TestNormalizeToolButtonConfigsDefaults(t *testing.T) {
+	got := normalizeToolButtonConfigs(nil)
+	want := []string{
+		shortcutActionClearAll,
+		commandCopyCoords,
+		commandPasteCoords,
+		commandApplyOffset,
+		commandClearOffset,
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("default tool button count mismatch: want %d got %d", len(want), len(got))
+	}
+	for i, id := range want {
+		if got[i].CommandID != id {
+			t.Fatalf("default tool button %d mismatch: want %q got %q", i, id, got[i].CommandID)
+		}
+		if !got[i].Visible {
+			t.Fatalf("default tool button %q should be visible", id)
+		}
+		if got[i].Order != i+1 {
+			t.Fatalf("default tool button %q order mismatch: %d", id, got[i].Order)
+		}
+	}
+}
+
+func TestNormalizeToolButtonConfigsPreservesHiddenAndCustomLabel(t *testing.T) {
+	got := normalizeToolButtonConfigs([]ToolButtonConfig{
+		{CommandID: shortcutActionClearAll, Visible: false, Order: 2},
+		{CommandID: commandCopyCode, Label: "出码", Visible: true, Order: 1},
+		{CommandID: "unknown", Visible: true, Order: 3},
+	})
+
+	if got[0].CommandID != commandCopyCode || got[0].Label != "出码" || !got[0].Visible {
+		t.Fatalf("custom command should stay first and visible with label, got %+v", got[0])
+	}
+	if got[1].CommandID != shortcutActionClearAll || got[1].Visible {
+		t.Fatalf("hidden default command should stay hidden, got %+v", got[1])
+	}
+	for _, button := range got {
+		if button.CommandID == "unknown" {
+			t.Fatalf("unknown command should be removed")
+		}
+	}
+}
+
 func TestParsePickCount(t *testing.T) {
 	tests := []struct {
 		text string

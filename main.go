@@ -13,6 +13,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -67,9 +68,17 @@ type UserConfig struct {
 	GridRows      int    `json:"grid_rows"`
 	GridSpacing   int    `json:"grid_spacing"`
 
-	RightPanelSplitOffset float64           `json:"right_panel_split_offset"`
-	FormatTemplates       map[string]string `json:"format_templates"`
-	Shortcuts             map[string]string `json:"shortcuts"`
+	RightPanelSplitOffset float64            `json:"right_panel_split_offset"`
+	FormatTemplates       map[string]string  `json:"format_templates"`
+	Shortcuts             map[string]string  `json:"shortcuts"`
+	ToolButtons           []ToolButtonConfig `json:"tool_buttons"`
+}
+
+type ToolButtonConfig struct {
+	CommandID string `json:"command_id"`
+	Label     string `json:"label,omitempty"`
+	Visible   bool   `json:"visible"`
+	Order     int    `json:"order"`
 }
 
 // 全局变量定义
@@ -150,6 +159,25 @@ const (
 	shortcutActionRange      = "range_select"
 	shortcutActionAutoPick   = "auto_pick"
 	shortcutActionClearAll   = "clear_all"
+	commandCopyCoords        = "copy_coords"
+	commandPasteCoords       = "paste_coords"
+	commandApplyOffset       = "apply_offset"
+	commandClearOffset       = "clear_offset"
+	commandCopyCode          = "copy_code"
+	commandFindTest          = "find_test"
+	commandCodeTest          = "code_test"
+	commandCopyColor         = "copy_color"
+	commandCopyParams        = "copy_params"
+	commandFormatSettings    = "format_settings"
+	commandResetRange        = "reset_range"
+	commandCopyRange         = "copy_range"
+	commandResetZoom         = "reset_zoom"
+	commandOriginalSize      = "original_size"
+	commandClearFindMarks    = "clear_find_marks"
+	commandToggleGrid        = "toggle_grid"
+	commandToggleTheme       = "toggle_theme"
+	commandGrabNode          = "grab_node"
+	commandFontLibrary       = "font_library"
 )
 
 var defaultShortcutTexts = map[string]string{
@@ -158,6 +186,59 @@ var defaultShortcutTexts = map[string]string{
 	shortcutActionRange:      "Ctrl+R",
 	shortcutActionAutoPick:   "Ctrl+A",
 	shortcutActionClearAll:   "Ctrl+E",
+	commandCopyCoords:        "",
+	commandPasteCoords:       "",
+	commandApplyOffset:       "",
+	commandClearOffset:       "",
+	commandCopyCode:          "",
+	commandFindTest:          "",
+	commandCodeTest:          "",
+	commandCopyColor:         "",
+	commandCopyParams:        "",
+	commandFormatSettings:    "",
+	commandResetRange:        "",
+	commandCopyRange:         "",
+	commandResetZoom:         "",
+	commandOriginalSize:      "",
+	commandClearFindMarks:    "",
+	commandToggleGrid:        "",
+	commandToggleTheme:       "",
+	commandGrabNode:          "",
+	commandFontLibrary:       "",
+}
+
+type commandDefinition struct {
+	ID             string
+	Label          string
+	Category       string
+	DefaultToolbar bool
+}
+
+var commandDefinitions = []commandDefinition{
+	{ID: shortcutActionScreenshot, Label: "截图", Category: "图像", DefaultToolbar: false},
+	{ID: shortcutActionImport, Label: "加载图片", Category: "图像", DefaultToolbar: false},
+	{ID: shortcutActionRange, Label: "范围框选", Category: "图像", DefaultToolbar: false},
+	{ID: shortcutActionAutoPick, Label: "自动取色", Category: "图像", DefaultToolbar: false},
+	{ID: shortcutActionClearAll, Label: "清除所有", Category: "取色点", DefaultToolbar: true},
+	{ID: commandCopyCoords, Label: "复制坐标", Category: "取色点", DefaultToolbar: true},
+	{ID: commandPasteCoords, Label: "粘贴坐标", Category: "取色点", DefaultToolbar: true},
+	{ID: commandApplyOffset, Label: "统一偏色", Category: "取色点", DefaultToolbar: true},
+	{ID: commandClearOffset, Label: "清除偏色", Category: "取色点", DefaultToolbar: true},
+	{ID: commandCopyCode, Label: "复制代码", Category: "代码", DefaultToolbar: false},
+	{ID: commandFindTest, Label: "找色测试", Category: "测试", DefaultToolbar: false},
+	{ID: commandCodeTest, Label: "代码测试", Category: "测试", DefaultToolbar: false},
+	{ID: commandCopyColor, Label: "复制颜色", Category: "代码", DefaultToolbar: false},
+	{ID: commandCopyParams, Label: "复制参数", Category: "代码", DefaultToolbar: false},
+	{ID: commandFormatSettings, Label: "格式配置", Category: "代码", DefaultToolbar: false},
+	{ID: commandCopyRange, Label: "复制范围", Category: "范围", DefaultToolbar: false},
+	{ID: commandResetRange, Label: "重置范围", Category: "范围", DefaultToolbar: false},
+	{ID: commandResetZoom, Label: "重置缩放", Category: "图像", DefaultToolbar: false},
+	{ID: commandOriginalSize, Label: "显示原始尺寸", Category: "图像", DefaultToolbar: false},
+	{ID: commandClearFindMarks, Label: "清除查找标记", Category: "图像", DefaultToolbar: false},
+	{ID: commandToggleGrid, Label: "点阵模式", Category: "系统", DefaultToolbar: false},
+	{ID: commandToggleTheme, Label: "切换主题", Category: "系统", DefaultToolbar: false},
+	{ID: commandGrabNode, Label: "抓取节点", Category: "节点", DefaultToolbar: false},
+	{ID: commandFontLibrary, Label: "字库制作", Category: "工具", DefaultToolbar: false},
 }
 
 var pickModeOptions = []string{
@@ -238,6 +319,108 @@ func shortcutText(shortcuts map[string]string, id string) string {
 		return strings.TrimSpace(value)
 	}
 	return defaultShortcutTexts[id]
+}
+
+func commandDefinitionByID(id string) (commandDefinition, bool) {
+	for _, def := range commandDefinitions {
+		if def.ID == id {
+			return def, true
+		}
+	}
+	return commandDefinition{}, false
+}
+
+func commandDefinitionOrder(id string) int {
+	for i, def := range commandDefinitions {
+		if def.ID == id {
+			return i
+		}
+	}
+	return len(commandDefinitions)
+}
+
+func defaultToolButtonConfigs() []ToolButtonConfig {
+	buttons := make([]ToolButtonConfig, 0)
+	for _, def := range commandDefinitions {
+		if !def.DefaultToolbar {
+			continue
+		}
+		buttons = append(buttons, ToolButtonConfig{
+			CommandID: def.ID,
+			Visible:   true,
+			Order:     len(buttons) + 1,
+		})
+	}
+	return buttons
+}
+
+func copyToolButtonConfigs(buttons []ToolButtonConfig) []ToolButtonConfig {
+	copied := make([]ToolButtonConfig, len(buttons))
+	copy(copied, buttons)
+	return copied
+}
+
+func normalizeToolButtonConfigs(buttons []ToolButtonConfig) []ToolButtonConfig {
+	if len(buttons) == 0 {
+		return defaultToolButtonConfigs()
+	}
+
+	normalized := make([]ToolButtonConfig, 0, len(commandDefinitions))
+	seen := make(map[string]bool, len(buttons))
+	nextOrder := 1
+	for _, button := range buttons {
+		id := strings.TrimSpace(button.CommandID)
+		def, ok := commandDefinitionByID(id)
+		if !ok || seen[id] {
+			continue
+		}
+		order := button.Order
+		if order <= 0 {
+			order = nextOrder
+		}
+		nextOrder = max(nextOrder, order+1)
+		label := strings.TrimSpace(button.Label)
+		if label == def.Label {
+			label = ""
+		}
+		normalized = append(normalized, ToolButtonConfig{
+			CommandID: id,
+			Label:     label,
+			Visible:   button.Visible,
+			Order:     order,
+		})
+		seen[id] = true
+	}
+
+	for _, button := range defaultToolButtonConfigs() {
+		if seen[button.CommandID] {
+			continue
+		}
+		button.Order = nextOrder
+		nextOrder++
+		normalized = append(normalized, button)
+	}
+
+	sort.SliceStable(normalized, func(i, j int) bool {
+		if normalized[i].Order == normalized[j].Order {
+			return commandDefinitionOrder(normalized[i].CommandID) < commandDefinitionOrder(normalized[j].CommandID)
+		}
+		return normalized[i].Order < normalized[j].Order
+	})
+	for i := range normalized {
+		normalized[i].Order = i + 1
+	}
+	return normalized
+}
+
+func toolButtonLabel(button ToolButtonConfig) string {
+	if label := strings.TrimSpace(button.Label); label != "" {
+		return label
+	}
+	if def, ok := commandDefinitionByID(button.CommandID); ok {
+		return def.Label
+	}
+	return button.CommandID
 }
 
 func normalizeShortcutKey(text string) (fyne.KeyName, string, bool) {
@@ -580,6 +763,7 @@ func defaultUserConfig() UserConfig {
 
 		FormatTemplates: defaultAPIFormatTemplates(),
 		Shortcuts:       normalizeShortcutConfig(nil),
+		ToolButtons:     defaultToolButtonConfigs(),
 	}
 }
 
@@ -633,6 +817,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 	config.RightPanelSplitOffset = normalizeSplitOffset(config.RightPanelSplitOffset)
 	config.FormatTemplates = normalizeAPIFormatTemplates(config.FormatTemplates)
 	config.Shortcuts = normalizeShortcutConfig(config.Shortcuts)
+	config.ToolButtons = normalizeToolButtonConfigs(config.ToolButtons)
 	return config
 }
 
@@ -6476,9 +6661,10 @@ func main() {
 	cutBtn.Importance = widget.MediumImportance
 
 	// 字库制作按钮
-	fontLibBtn := widget.NewButtonWithIcon("字库制作", theme.GridIcon(), func() {
+	openFontLibrary := func() {
 		openFontLibWindow(w)
-	})
+	}
+	fontLibBtn := widget.NewButtonWithIcon("字库制作", theme.GridIcon(), openFontLibrary)
 	fontLibBtn.Importance = widget.MediumImportance
 
 	// 主题切换按钮使用高重要性，使其更加突出
@@ -6519,6 +6705,7 @@ func main() {
 	triggerGenerateCode = generateCodeFunc
 
 	shortcutConfig := normalizeShortcutConfig(userConfig.Shortcuts)
+	toolButtonConfig := normalizeToolButtonConfigs(userConfig.ToolButtons)
 	shortcutTextFor := func(id string) string {
 		return shortcutText(shortcutConfig, id)
 	}
@@ -6529,38 +6716,66 @@ func main() {
 		}
 		return fmt.Sprintf("%s (%s)", label, shortcut)
 	}
-	type shortcutBinding struct {
+	type appCommand struct {
 		id       string
 		label    string
+		category string
 		action   func()
-		shortcut fyne.Shortcut
 	}
-	var shortcutBindings []shortcutBinding
+	commandByID := make(map[string]appCommand)
+	registerCommand := func(id string, action func()) {
+		def, ok := commandDefinitionByID(id)
+		if !ok {
+			log.Printf("跳过未知命令注册: id=%s", id)
+			return
+		}
+		commandByID[id] = appCommand{
+			id:       id,
+			label:    def.Label,
+			category: def.Category,
+			action:   action,
+		}
+	}
+	commandsForSettings := func() []appCommand {
+		commands := make([]appCommand, 0, len(commandByID))
+		for _, command := range commandByID {
+			commands = append(commands, command)
+		}
+		sort.SliceStable(commands, func(i, j int) bool {
+			return commandDefinitionOrder(commands[i].id) < commandDefinitionOrder(commands[j].id)
+		})
+		return commands
+	}
 	var registeredShortcuts []fyne.Shortcut
 	var refreshShortcutButtonTexts func()
+	var refreshToolButtons func()
 	registerConfiguredShortcuts := func() {
 		for _, shortcut := range registeredShortcuts {
 			w.Canvas().RemoveShortcut(shortcut)
 		}
 		registeredShortcuts = registeredShortcuts[:0]
 
-		for i := range shortcutBindings {
-			shortcut, _, err := parseShortcutText(shortcutTextFor(shortcutBindings[i].id))
+		for _, command := range commandsForSettings() {
+			shortcut, _, err := parseShortcutText(shortcutTextFor(command.id))
 			if err != nil {
-				log.Printf("跳过无效快捷键配置: action=%s shortcut=%q err=%v", shortcutBindings[i].id, shortcutTextFor(shortcutBindings[i].id), err)
+				log.Printf("跳过无效快捷键配置: command=%s shortcut=%q err=%v", command.id, shortcutTextFor(command.id), err)
 				continue
 			}
-			if shortcut == nil {
+			if shortcut == nil || command.action == nil {
 				continue
 			}
-			action := shortcutBindings[i].action
+			action := command.action
 			w.Canvas().AddShortcut(shortcut, func(fyne.Shortcut) {
 				action()
 			})
-			shortcutBindings[i].shortcut = shortcut
 			registeredShortcuts = append(registeredShortcuts, shortcut)
 		}
 	}
+	registerCommand(commandToggleTheme, toggleTheme)
+	registerCommand(commandFontLibrary, openFontLibrary)
+	registerCommand(shortcutActionScreenshot, captureScreenshot)
+	registerCommand(shortcutActionImport, importImage)
+	registerCommand(commandCopyCode, generateCodeFunc)
 	applyThemeMode := func(mode string) {
 		themeModeValue = normalizeThemeMode(mode)
 		isDarkTheme = themeModeIsDark(themeModeValue, a.Settings().ThemeVariant())
@@ -6583,13 +6798,15 @@ func main() {
 		gridModeBtn.Refresh()
 	}
 
-	gridModeBtn = widget.NewButton("○ 点阵模式", func() {
+	toggleGridMode := func() {
 		gridModeEnabled = !gridModeEnabled
 		updateGridBtn()
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
 		}
-	})
+	}
+	gridModeBtn = widget.NewButton("○ 点阵模式", toggleGridMode)
+	registerCommand(commandToggleGrid, toggleGridMode)
 	updateGridBtn() // 初始化按钮状态
 
 	openSystemConfigDialog := func() {
@@ -6655,23 +6872,65 @@ func main() {
 			numberRow("间距", spacingEntry),
 		)
 
-		shortcutEntries := make(map[string]*widget.Entry, len(shortcutBindings))
+		commands := commandsForSettings()
+		shortcutEntries := make(map[string]*widget.Entry, len(commands))
 		shortcutRows := container.NewVBox(
 			widget.NewLabelWithStyle("快捷键管理", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabel("可设置按钮对应的组合快捷键。格式示例：Ctrl+Shift+S；留空表示禁用该快捷键。"),
+			widget.NewLabel("可为已注册功能设置组合快捷键。格式示例：Ctrl+Shift+S；留空表示禁用该快捷键。"),
 			widget.NewSeparator(),
 		)
-		for _, binding := range shortcutBindings {
+		for _, command := range commands {
 			entry := widget.NewEntry()
-			entry.SetText(shortcutTextFor(binding.id))
-			shortcutEntries[binding.id] = entry
+			entry.SetText(shortcutTextFor(command.id))
+			shortcutEntries[command.id] = entry
 			defaultBtn := widget.NewButton("默认", func(id string, target *widget.Entry) func() {
 				return func() {
 					target.SetText(defaultShortcutTexts[id])
 				}
-			}(binding.id, entry))
-			row := container.NewBorder(nil, nil, widget.NewLabel(binding.label), defaultBtn, entry)
+			}(command.id, entry))
+			rowLabel := widget.NewLabel(fmt.Sprintf("%s / %s", command.category, command.label))
+			row := container.NewBorder(nil, nil, rowLabel, defaultBtn, entry)
 			shortcutRows.Add(row)
+		}
+
+		type toolButtonControl struct {
+			visible *widget.Check
+			label   *widget.Entry
+			order   *widget.Entry
+		}
+		toolButtonByID := make(map[string]ToolButtonConfig, len(toolButtonConfig))
+		for _, button := range toolButtonConfig {
+			toolButtonByID[button.CommandID] = button
+		}
+		toolButtonControls := make(map[string]toolButtonControl, len(commands))
+		toolButtonRows := container.NewVBox(
+			widget.NewLabelWithStyle("按钮管理", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabel("控制右侧图色工具按钮栏显示哪些功能，并可修改按钮名称和排序。排序数字越小越靠前。"),
+			widget.NewSeparator(),
+		)
+		for _, command := range commands {
+			current, ok := toolButtonByID[command.id]
+			if !ok {
+				current = ToolButtonConfig{
+					CommandID: command.id,
+					Order:     commandDefinitionOrder(command.id) + 1,
+				}
+			}
+			visibleCheck := widget.NewCheck("显示", nil)
+			visibleCheck.SetChecked(current.Visible)
+			labelEntry := widget.NewEntry()
+			labelEntry.SetText(toolButtonLabel(current))
+			orderEntry := widget.NewEntry()
+			orderEntry.SetText(strconv.Itoa(current.Order))
+			toolButtonControls[command.id] = toolButtonControl{
+				visible: visibleCheck,
+				label:   labelEntry,
+				order:   orderEntry,
+			}
+			orderBox := container.New(&fixedContentWidthLayout{width: 52}, orderEntry)
+			leftLabel := widget.NewLabel(fmt.Sprintf("%s / %s", command.category, command.label))
+			row := container.NewBorder(nil, nil, container.NewHBox(visibleCheck, leftLabel), orderBox, labelEntry)
+			toolButtonRows.Add(row)
 		}
 
 		rightPanel := container.NewMax()
@@ -6682,6 +6941,7 @@ func main() {
 			{title: "系统配置", content: container.NewPadded(systemConfigPanel)},
 			{title: "点阵参数设置", content: container.NewPadded(gridConfigPanel)},
 			{title: "快捷键管理", content: container.NewPadded(container.NewVScroll(shortcutRows))},
+			{title: "按钮管理", content: container.NewPadded(container.NewVScroll(toolButtonRows))},
 		}
 		selectSection := func(id int) {
 			if id < 0 || id >= len(sections) {
@@ -6715,25 +6975,48 @@ func main() {
 		saveBtn := widget.NewButtonWithIcon("保存", theme.DocumentSaveIcon(), func() {
 			newShortcuts := copyShortcutConfig(shortcutConfig)
 			seenShortcuts := make(map[string]string)
-			for _, binding := range shortcutBindings {
-				entry := shortcutEntries[binding.id]
+			for _, command := range commands {
+				entry := shortcutEntries[command.id]
 				if entry == nil {
 					continue
 				}
 				shortcut, formatted, err := parseShortcutText(entry.Text)
 				if err != nil {
-					dialog.ShowError(fmt.Errorf("%s：%v", binding.label, err), w)
+					dialog.ShowError(fmt.Errorf("%s：%v", command.label, err), w)
 					return
 				}
 				if shortcut != nil {
 					shortcutName := shortcut.ShortcutName()
 					if previousLabel, ok := seenShortcuts[shortcutName]; ok {
-						dialog.ShowError(fmt.Errorf("%s 和 %s 使用了相同快捷键", previousLabel, binding.label), w)
+						dialog.ShowError(fmt.Errorf("%s 和 %s 使用了相同快捷键", previousLabel, command.label), w)
 						return
 					}
-					seenShortcuts[shortcutName] = binding.label
+					seenShortcuts[shortcutName] = command.label
 				}
-				newShortcuts[binding.id] = formatted
+				newShortcuts[command.id] = formatted
+			}
+
+			newToolButtons := make([]ToolButtonConfig, 0, len(commands))
+			for _, command := range commands {
+				control, ok := toolButtonControls[command.id]
+				if !ok {
+					continue
+				}
+				order, err := strconv.Atoi(strings.TrimSpace(control.order.Text))
+				if err != nil || order <= 0 {
+					dialog.ShowError(fmt.Errorf("%s 的按钮排序需要输入大于 0 的整数", command.label), w)
+					return
+				}
+				label := strings.TrimSpace(control.label.Text)
+				if label == command.label {
+					label = ""
+				}
+				newToolButtons = append(newToolButtons, ToolButtonConfig{
+					CommandID: command.id,
+					Label:     label,
+					Visible:   control.visible.Checked,
+					Order:     order,
+				})
 			}
 
 			cols, ok := parsePositiveInt("列数", colsEntry.Text)
@@ -6753,9 +7036,13 @@ func main() {
 			gridRowsValue = rows
 			gridSpacingValue = spacing
 			shortcutConfig = normalizeShortcutConfig(newShortcuts)
+			toolButtonConfig = normalizeToolButtonConfigs(newToolButtons)
 			setAppLoggingEnabled(logEnabledCheck.Checked)
 			applyThemeMode(themeModeFromDisplay(themeModeSelect.Selected))
 			registerConfiguredShortcuts()
+			if refreshToolButtons != nil {
+				refreshToolButtons()
+			}
 			if refreshShortcutButtonTexts != nil {
 				refreshShortcutButtonTexts()
 			}
@@ -6824,6 +7111,9 @@ func main() {
 		nodeTool.Capture()
 	})
 	grabNodeBtn.Importance = widget.MediumImportance
+	registerCommand(commandGrabNode, func() {
+		nodeTool.Capture()
+	})
 	makeFixedPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
 		minWidth := canvas.NewRectangle(color.Transparent)
 		minWidth.SetMinSize(fyne.NewSize(width, 1))
@@ -6869,6 +7159,7 @@ func main() {
 		imageViewer.SetRangeSelectMode(!imageViewer.rangeSelectMode)
 	}
 	rangeBtn := widget.NewButton("范围 (CTRL+R)", toggleRangeSelect)
+	registerCommand(shortcutActionRange, toggleRangeSelect)
 	updateRangeButton = func() {
 		if imageViewer != nil && imageViewer.rangeSelectMode {
 			rangeBtn.SetText("选择范围中...")
@@ -6883,31 +7174,41 @@ func main() {
 
 	rectCoordEntry.SetText(defaultRangeText)
 	coordDisplayEntry := rectCoordEntry
-	copyResetRow := container.NewGridWithColumns(2, widget.NewButton("复制", func() {
+	copyRange := func() {
 		w.Clipboard().SetContent(coordDisplayEntry.Text)
-	}), widget.NewButton("重置", func() {
+	}
+	resetRange := func() {
 		if imageViewer != nil {
 			imageViewer.ResetRangeSelection()
 			return
 		}
 		setRectCoordText(defaultRangeText)
-	}))
-	resetZoomBtn := widget.NewButton("重置缩放", func() {
+	}
+	registerCommand(commandCopyRange, copyRange)
+	registerCommand(commandResetRange, resetRange)
+	copyResetRow := container.NewGridWithColumns(2, widget.NewButton("复制", copyRange), widget.NewButton("重置", resetRange))
+	resetZoom := func() {
 		if imageViewer != nil {
 			imageViewer.FitToView()
 		}
-	})
-	originalSizeBtn := widget.NewButton("显示原始尺寸", func() {
+	}
+	resetZoomBtn := widget.NewButton("重置缩放", resetZoom)
+	registerCommand(commandResetZoom, resetZoom)
+	showOriginalSize := func() {
 		if imageViewer != nil {
 			imageViewer.ShowOriginalSize()
 		}
-	})
-	clearFindMarksBtn := widget.NewButton("清除查找标记", func() {
+	}
+	originalSizeBtn := widget.NewButton("显示原始尺寸", showOriginalSize)
+	registerCommand(commandOriginalSize, showOriginalSize)
+	clearFindMarks := func() {
 		if imageViewer != nil {
 			imageViewer.ClearFindTestHighlights()
 		}
-	})
+	}
+	clearFindMarksBtn := widget.NewButton("清除查找标记", clearFindMarks)
 	clearFindMarksBtn.Importance = widget.MediumImportance
+	registerCommand(commandClearFindMarks, clearFindMarks)
 
 	pickModeSelect := widget.NewSelect(pickModeOptions, func(string) {
 		if saveCurrentConfig != nil {
@@ -7001,6 +7302,7 @@ func main() {
 	}
 	autoPickBtn := widget.NewButton(buttonTextWithShortcut("自动取色", shortcutActionAutoPick), startAutoPick)
 	autoPickBtn.Importance = widget.MediumImportance
+	registerCommand(shortcutActionAutoPick, startAutoPick)
 	applyRangeCheck := widget.NewCheck("选取后应用范围", func(bool) {
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
@@ -7217,22 +7519,16 @@ func main() {
 		colorPoints = colorPoints[:0]
 		updateTableSelection()
 	}
-	clearAllBtn := widget.NewButton(buttonTextWithShortcut("清除所有", shortcutActionClearAll), clearAllPoints)
-	shortcutBindings = []shortcutBinding{
-		{id: shortcutActionScreenshot, label: "截图", action: captureScreenshot},
-		{id: shortcutActionImport, label: "加载图片", action: importImage},
-		{id: shortcutActionRange, label: "范围框选", action: toggleRangeSelect},
-		{id: shortcutActionAutoPick, label: "自动取色", action: startAutoPick},
-		{id: shortcutActionClearAll, label: "清除所有", action: clearAllPoints},
-	}
+	registerCommand(shortcutActionClearAll, clearAllPoints)
 	refreshShortcutButtonTexts = func() {
 		screenshotBtn.button.SetText(buttonTextWithShortcut("截图", shortcutActionScreenshot))
 		importBtn.SetText(buttonTextWithShortcut("加载", shortcutActionImport))
 		updateRangeButton()
 		autoPickBtn.SetText(buttonTextWithShortcut("自动取色", shortcutActionAutoPick))
-		clearAllBtn.SetText(buttonTextWithShortcut("清除所有", shortcutActionClearAll))
+		if refreshToolButtons != nil {
+			refreshToolButtons()
+		}
 	}
-	registerConfiguredShortcuts()
 	uniformOffsetEntry := makeEntry(userConfig.UniformOffset)
 	uniformOffsetEntry.OnChanged = func(value string) {
 		defaultColorPointOffset = strings.TrimSpace(value)
@@ -7241,11 +7537,12 @@ func main() {
 		}
 	}
 	defaultColorPointOffset = strings.TrimSpace(uniformOffsetEntry.Text)
-	copyCoordsBtn := widget.NewButton("复制坐标", func() {
+	copyCoords := func() {
 		w.Canvas().Unfocus()
 		w.Clipboard().SetContent(colorPointCoordinatesText())
-	})
-	pasteCoordsBtn := widget.NewButton("粘贴坐标", func() {
+	}
+	registerCommand(commandCopyCoords, copyCoords)
+	pasteCoords := func() {
 		w.Canvas().Unfocus()
 		points := parsePointPositionsText(w.Clipboard().Content())
 		if len(points) == 0 {
@@ -7253,8 +7550,9 @@ func main() {
 		}
 		defaultColorPointOffset = strings.TrimSpace(uniformOffsetEntry.Text)
 		replaceColorPointsByPositions(points, defaultColorPointOffset)
-	})
-	uniformOffsetBtn := widget.NewButton("统一偏色", func() {
+	}
+	registerCommand(commandPasteCoords, pasteCoords)
+	applyUniformOffset := func() {
 		defaultColorPointOffset = strings.TrimSpace(uniformOffsetEntry.Text)
 		for i := range colorPoints {
 			colorPoints[i].Offset = defaultColorPointOffset
@@ -7263,8 +7561,9 @@ func main() {
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
 		}
-	})
-	clearOffsetBtn := widget.NewButton("清除偏色", func() {
+	}
+	registerCommand(commandApplyOffset, applyUniformOffset)
+	clearOffset := func() {
 		uniformOffsetEntry.SetText("000000")
 		defaultColorPointOffset = "000000"
 		for i := range colorPoints {
@@ -7274,7 +7573,8 @@ func main() {
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
 		}
-	})
+	}
+	registerCommand(commandClearOffset, clearOffset)
 
 	precisionEntry := makeEntry(userConfig.Precision)
 	precisionEntry.OnChanged = func(string) {
@@ -7331,7 +7631,7 @@ func main() {
 		}
 		return code
 	}
-	findTestBtn := widget.NewButton("找色测试", func() {
+	runFindTest := func() {
 		if updateImagesAPIFields != nil {
 			updateImagesAPIFields()
 		}
@@ -7345,10 +7645,67 @@ func main() {
 		if imageViewer != nil {
 			imageViewer.SetFindTestHighlights(highlights)
 		}
-	})
-	codeTestBtn := widget.NewButton("代码测试", func() {
+	}
+	registerCommand(commandFindTest, runFindTest)
+	findTestBtn := widget.NewButton("找色测试", runFindTest)
+	openCodeTest := func() {
 		showCodeTestDialog(w, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
-	})
+	}
+	registerCommand(commandCodeTest, openCodeTest)
+	codeTestBtn := widget.NewButton("代码测试", openCodeTest)
+	copyColor := func() {
+		w.Clipboard().SetContent(colorEntry.Text)
+	}
+	registerCommand(commandCopyColor, copyColor)
+	openFormatSettings := func() {
+		showAPIFormatDialog(w, functionSelect.Selected, saveCurrentConfig)
+	}
+	registerCommand(commandFormatSettings, openFormatSettings)
+	copyParams := func() {
+		w.Clipboard().SetContent(paramsEntry.Text)
+	}
+	registerCommand(commandCopyParams, copyParams)
+	toolButtonsContainer := container.NewVBox()
+	refreshToolButtons = func() {
+		currentButtons := normalizeToolButtonConfigs(toolButtonConfig)
+		rows := make([]fyne.CanvasObject, 0)
+		rowButtons := make([]fyne.CanvasObject, 0, 3)
+		flushRow := func() {
+			if len(rowButtons) == 0 {
+				return
+			}
+			rows = append(rows, container.NewGridWithColumns(3, rowButtons...))
+			rowButtons = make([]fyne.CanvasObject, 0, 3)
+		}
+
+		for _, button := range currentButtons {
+			if !button.Visible {
+				continue
+			}
+			command, ok := commandByID[button.CommandID]
+			if !ok || command.action == nil {
+				continue
+			}
+			label := toolButtonLabel(button)
+			commandID := button.CommandID
+			action := command.action
+			btn := widget.NewButton(buttonTextWithShortcut(label, commandID), action)
+			btn.Importance = widget.MediumImportance
+			rowButtons = append(rowButtons, btn)
+			if len(rowButtons) == 3 {
+				flushRow()
+			}
+		}
+		flushRow()
+
+		if len(rows) == 0 {
+			rows = append(rows, widget.NewLabel("未启用自定义工具按钮，可在系统配置 > 按钮管理中开启。"))
+		}
+		toolButtonsContainer.Objects = rows
+		toolButtonsContainer.Refresh()
+	}
+	refreshToolButtons()
+	registerConfiguredShortcuts()
 	saveCurrentConfig = func() {
 		rightPanelSplitOffset := 0.0
 		if centerRightSplit != nil {
@@ -7374,25 +7731,20 @@ func main() {
 			RightPanelSplitOffset: rightPanelSplitOffset,
 			FormatTemplates:       copyAPIFormatTemplates(apiFormatTemplates),
 			Shortcuts:             copyShortcutConfig(shortcutConfig),
+			ToolButtons:           copyToolButtonConfigs(toolButtonConfig),
 		})
 	}
 
 	toolForm := container.NewVBox(
-		container.NewGridWithColumns(2, clearAllBtn, container.NewGridWithColumns(2, copyCoordsBtn, pasteCoordsBtn)),
-		container.NewBorder(nil, nil, container.NewHBox(clearOffsetBtn, uniformOffsetBtn), nil, uniformOffsetEntry),
+		toolButtonsContainer,
+		container.NewBorder(nil, nil, widget.NewLabel("默认偏色"), nil, uniformOffsetEntry),
 		container.NewAppTabs(
 			container.NewTabItem("图色面板", container.NewVBox(
 				container.NewBorder(nil, nil, widget.NewLabel("精度"), nil, precisionEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, functionSelect),
 				container.NewBorder(nil, nil, widget.NewLabel("方向"), nil, directionSelect),
-				container.NewBorder(nil, nil, widget.NewLabel("颜色"), widget.NewButton("复制颜色", func() {
-					w.Clipboard().SetContent(colorEntry.Text)
-				}), colorEntry),
-				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(widget.NewButton("格式", func() {
-					showAPIFormatDialog(w, functionSelect.Selected, saveCurrentConfig)
-				}), widget.NewButton("复制参数", func() {
-					w.Clipboard().SetContent(paramsEntry.Text)
-				})), paramsEntry),
+				container.NewBorder(nil, nil, widget.NewLabel("颜色"), widget.NewButton("复制颜色", copyColor), colorEntry),
+				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(widget.NewButton("格式", openFormatSettings), widget.NewButton("复制参数", copyParams)), paramsEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
 				container.NewGridWithColumns(4, copyCodeBtn, findTestBtn, codeTestBtn, makeButton("图片查找")),
 			)),
