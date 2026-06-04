@@ -68,6 +68,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            fyne-master/go.sum
 
       - name: Setup MSYS2 MinGW toolchain
         uses: msys2/setup-msys2@v2
@@ -82,16 +85,12 @@ jobs:
           $goBin = Join-Path (go env GOPATH) "bin"
           Add-Content -Path $env:GITHUB_PATH -Value $goBin
 
-      - name: Install Fyne CLI from repository
-        working-directory: fyne-master
+      - name: Install Windows resource tool
         shell: pwsh
-        run: go install ./cmd/fyne
+        run: go install github.com/akavel/rsrc@latest
 
       - name: Package Windows app
         shell: pwsh
-        env:
-          VERSION: ${{ needs.metadata.outputs.version }}
-          BUILD_NUMBER: ${{ needs.metadata.outputs.build }}
         run: |
           $ErrorActionPreference = "Stop"
           $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
@@ -101,34 +100,27 @@ jobs:
           $env:CC = "gcc"
 
           New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
-          go build -ldflags "$env:LDFLAGS -H windowsgui" -o dist\windows\autogo.exe .
+          $resourceFile = "rsrc_windows_amd64.syso"
+          $windowsExe = "dist\windows\$env:APP_NAME.exe"
 
-          fyne package `
-            -os windows `
-            -executable dist\windows\autogo.exe `
-            -name "$env:APP_NAME" `
-            -icon "$env:ICON_PATH" `
-            -appID "$env:APP_ID" `
-            -appVersion "$env:VERSION" `
-            -appBuild "$env:BUILD_NUMBER" `
-            -release
+          try {
+            rsrc -ico "build\logo.ico" -manifest "windows_icon.manifest" -arch amd64 -o $resourceFile
+            go build -ldflags "$env:LDFLAGS -H=windowsgui" -o $windowsExe .
+          } finally {
+            Remove-Item $resourceFile -ErrorAction SilentlyContinue
+          }
 
-          $packagedExe = "$env:APP_NAME.exe"
-          if (Test-Path $packagedExe) {
-            Move-Item -Force $packagedExe "dist\windows\$env:APP_NAME.exe"
-          } elseif (Test-Path "dist\windows\autogo.exe") {
-            Move-Item -Force "dist\windows\autogo.exe" "dist\windows\$env:APP_NAME.exe"
-          } else {
+          if (!(Test-Path $windowsExe)) {
             throw "Windows executable was not generated."
           }
 
           Copy-Item `
-            -Path "dist\windows\$env:APP_NAME.exe" `
+            -Path $windowsExe `
             -Destination "dist\AutoGo-Chromatic-Tool-windows-amd64.exe" `
             -Force
 
           Compress-Archive `
-            -Path "dist\windows\$env:APP_NAME.exe" `
+            -Path "dist\AutoGo-Chromatic-Tool-windows-amd64.exe" `
             -DestinationPath "dist\AutoGo-Chromatic-Tool-windows-amd64.zip" `
             -Force
 
@@ -140,11 +132,18 @@ jobs:
             dist/AutoGo-Chromatic-Tool-windows-amd64.exe
             dist/AutoGo-Chromatic-Tool-windows-amd64.zip
           if-no-files-found: error
+          compression-level: 0
 
   build-macos:
-    name: Build macOS packages
+    name: Build macOS ${{ matrix.arch }}
     runs-on: macos-latest
     needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - arm64
+          - amd64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -154,6 +153,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            fyne-master/go.sum
 
       - name: Add Go tools to PATH
         shell: bash
@@ -169,40 +171,40 @@ jobs:
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
           BUILD_NUMBER: ${{ needs.metadata.outputs.build }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           mkdir -p dist/macos
 
-          for arch in arm64 amd64; do
-            tmp_dir="dist/macos/$arch"
-            mkdir -p "$tmp_dir"
-            GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 go build -ldflags "$LDFLAGS" -o "$tmp_dir/autogo" .
+          tmp_dir="dist/macos/$ARCH"
+          mkdir -p "$tmp_dir"
+          GOOS=darwin GOARCH="$ARCH" CGO_ENABLED=1 go build -ldflags "$LDFLAGS" -o "$tmp_dir/autogo" .
 
-            rm -rf "$APP_NAME.app"
-            fyne package \
-              -os darwin \
-              -executable "$tmp_dir/autogo" \
-              -name "$APP_NAME" \
-              -icon "$ICON_PATH" \
-              -appID "$APP_ID" \
-              -appVersion "$VERSION" \
-              -appBuild "$BUILD_NUMBER" \
-              -release
+          rm -rf "$APP_NAME.app"
+          fyne package \
+            -os darwin \
+            -executable "$tmp_dir/autogo" \
+            -name "$APP_NAME" \
+            -icon "$ICON_PATH" \
+            -appID "$APP_ID" \
+            -appVersion "$VERSION" \
+            -appBuild "$BUILD_NUMBER" \
+            -release
 
-            app_dir="dist/macos/$APP_NAME-macos-$arch.app"
-            rm -rf "$app_dir"
-            mv "$APP_NAME.app" "$app_dir"
-            ditto -c -k --sequesterRsrc --keepParent \
-              "$app_dir" \
-              "dist/AutoGo-Chromatic-Tool-macos-$arch.zip"
-          done
+          app_dir="dist/macos/$APP_NAME-macos-$ARCH.app"
+          rm -rf "$app_dir"
+          mv "$APP_NAME.app" "$app_dir"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app_dir" \
+            "dist/AutoGo-Chromatic-Tool-macos-$ARCH.zip"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos
-          path: dist/AutoGo-Chromatic-Tool-macos-*.zip
+          name: macos-${{ matrix.arch }}
+          path: dist/AutoGo-Chromatic-Tool-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
+          compression-level: 0
 
   release:
     name: Publish GitHub Release
