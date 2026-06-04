@@ -939,6 +939,9 @@ type commitEntry struct {
 
 type shortcutCaptureEntry struct {
 	widget.Entry
+	beforeCapture  string
+	capturing      bool
+	captureChanged bool
 }
 
 func newShortcutCaptureEntry() *shortcutCaptureEntry {
@@ -950,10 +953,22 @@ func newShortcutCaptureEntry() *shortcutCaptureEntry {
 
 func (e *shortcutCaptureEntry) FocusGained() {
 	e.Entry.FocusGained()
+	if !e.capturing {
+		e.beforeCapture = e.Text
+		e.captureChanged = false
+		e.capturing = true
+		e.SetText("")
+	}
 	e.SetPlaceHolder("请按下组合快捷键；Backspace/Delete 清空")
 }
 
 func (e *shortcutCaptureEntry) FocusLost() {
+	if e.capturing && !e.captureChanged {
+		e.SetText(e.beforeCapture)
+	}
+	e.capturing = false
+	e.captureChanged = false
+	e.beforeCapture = ""
 	e.Entry.FocusLost()
 	e.SetPlaceHolder("点击后按组合键；Backspace/Delete 清空")
 }
@@ -961,6 +976,7 @@ func (e *shortcutCaptureEntry) FocusLost() {
 func (e *shortcutCaptureEntry) TypedKey(key *fyne.KeyEvent) {
 	switch key.Name {
 	case fyne.KeyBackspace, fyne.KeyDelete, fyne.KeyEscape:
+		e.captureChanged = true
 		e.SetText("")
 		return
 	default:
@@ -978,6 +994,7 @@ func (e *shortcutCaptureEntry) TypedShortcut(shortcut fyne.Shortcut) {
 		return
 	}
 	if text, ok := shortcutTextFromKeyboardShortcut(keyboardShortcut); ok {
+		e.captureChanged = true
 		e.SetText(text)
 	}
 }

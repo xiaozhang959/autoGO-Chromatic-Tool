@@ -249,6 +249,50 @@ func TestShortcutTextFromKeyboardShortcut(t *testing.T) {
 	}
 }
 
+func TestShortcutCaptureEntryRestoresValueWhenUnchanged(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	entry := newShortcutCaptureEntry()
+	entry.SetText("Ctrl+Z")
+	entry.FocusGained()
+	if entry.Text != "" {
+		t.Fatalf("focused shortcut entry should show placeholder by clearing display text, got %q", entry.Text)
+	}
+
+	entry.FocusLost()
+	if entry.Text != "Ctrl+Z" {
+		t.Fatalf("unchanged shortcut entry should restore previous value, got %q", entry.Text)
+	}
+}
+
+func TestShortcutCaptureEntryKeepsCapturedShortcut(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	entry := newShortcutCaptureEntry()
+	entry.SetText("Ctrl+Z")
+	entry.FocusGained()
+	entry.TypedShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: fyne.KeyModifierControl | fyne.KeyModifierShift})
+	entry.FocusLost()
+
+	if entry.Text != "Ctrl+Shift+S" {
+		t.Fatalf("captured shortcut mismatch: %q", entry.Text)
+	}
+}
+
+func TestShortcutCaptureEntryKeepsClearedShortcut(t *testing.T) {
+	fynetest.NewTempApp(t)
+
+	entry := newShortcutCaptureEntry()
+	entry.SetText("Ctrl+Z")
+	entry.FocusGained()
+	entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDelete})
+	entry.FocusLost()
+
+	if entry.Text != "" {
+		t.Fatalf("cleared shortcut should stay empty, got %q", entry.Text)
+	}
+}
+
 func TestNormalizeShortcutConfigPreservesBlankOverrides(t *testing.T) {
 	got := normalizeShortcutConfig(map[string]string{
 		shortcutActionScreenshot: "",
