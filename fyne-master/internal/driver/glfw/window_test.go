@@ -1793,6 +1793,13 @@ func TestWindow_Shortcut(t *testing.T) {
 	assert.Equal(t, 0, len(content.capturedShortcuts))
 	assert.Equal(t, "canvas", called)
 
+	called = "obj"
+	w.Canvas().Focus(content)
+	trigger()
+	assert.Equal(t, 0, len(content.capturedShortcuts))
+	assert.Equal(t, "canvas", called)
+	w.Canvas().Unfocus()
+
 	if runtime.GOOS == "darwin" { // macOS menus are special
 		return
 	}

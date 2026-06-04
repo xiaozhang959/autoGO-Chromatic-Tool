@@ -1711,6 +1711,9 @@ func restoreTabData(tab *container.TabItem) {
 		if imageViewer.onActivated != nil {
 			imageViewer.onActivated()
 		}
+		if imageViewer.window != nil {
+			imageViewer.window.Canvas().Focus(imageViewer)
+		}
 	}
 
 	// 恢复生成的代码
@@ -4387,8 +4390,7 @@ func (v *ImageViewer) TypedRune(r rune) {}
 
 // 处理键盘按键事件
 func (v *ImageViewer) TypedKey(key *fyne.KeyEvent) {
-	// 只有在鼠标在图片框上时才处理方向键
-	if !v.mouseInWidget || v.image == nil || v.window == nil || v.nodeToolOnly {
+	if v.image == nil || v.window == nil || v.nodeToolOnly {
 		return
 	}
 
@@ -5862,7 +5864,11 @@ func main() {
 
 	// 创建左侧工具栏按钮 - 使用带动画的截图按钮
 	var screenshotBtn *AnimatedScreenshotButton
-	screenshotBtn = NewAnimatedScreenshotButton("截图", theme.ContentCopyIcon(), func() {
+	captureScreenshot := func() {
+		if screenshotBtn == nil || screenshotBtn.IsLoading() {
+			return
+		}
+
 		// 启动加载动画
 		screenshotBtn.StartLoading()
 
@@ -5932,6 +5938,7 @@ func main() {
 				// 更新当前的imageViewer引用为新标签页的viewer
 				imageViewer = newImageViewer
 				fitImageToView(newImageViewer)
+				w.Canvas().Focus(newImageViewer)
 
 				// 清空颜色点列表和矩形区域
 				colorPoints = make([]ColorPoint, 0)
@@ -5948,9 +5955,10 @@ func main() {
 				}
 			})
 		}()
-	})
+	}
+	screenshotBtn = NewAnimatedScreenshotButton("截图", theme.ContentCopyIcon(), captureScreenshot)
 
-	importBtn := widget.NewButtonWithIcon("载入", theme.FolderOpenIcon(), func() {
+	importImage := func() {
 		// 使用系统原生文件打开对话框
 		go func() {
 			filePath, err := nativedialog.File().
@@ -6041,6 +6049,7 @@ func main() {
 				// 更新当前imageViewer引用
 				imageViewer = newImageViewer
 				fitImageToView(newImageViewer)
+				w.Canvas().Focus(newImageViewer)
 
 				// 清空颜色点列表和矩形区域
 				colorPoints = make([]ColorPoint, 0)
@@ -6057,7 +6066,8 @@ func main() {
 				}
 			})
 		}()
-	})
+	}
+	importBtn := widget.NewButtonWithIcon("载入", theme.FolderOpenIcon(), importImage)
 	importBtn.Importance = widget.MediumImportance
 
 	saveBtn := widget.NewButtonWithIcon("保存", theme.DocumentSaveIcon(), func() {
@@ -6229,6 +6239,7 @@ func main() {
 		// 更新当前的imageViewer引用为新标签页的viewer
 		imageViewer = newImageViewer
 		fitImageToView(newImageViewer)
+		w.Canvas().Focus(newImageViewer)
 
 		// 清空颜色点列表和矩形区域
 		colorPoints = make([]ColorPoint, 0)
@@ -6472,6 +6483,13 @@ func main() {
 
 	screenshotBtn.button.SetText("截图 (CTRL+Z)")
 	importBtn.SetText("加载 (CTRL+L)")
+	addShortcut := func(shortcut fyne.Shortcut, action func()) {
+		w.Canvas().AddShortcut(shortcut, func(fyne.Shortcut) {
+			action()
+		})
+	}
+	addShortcut(&fyne.ShortcutUndo{}, captureScreenshot)
+	addShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyL, Modifier: fyne.KeyModifierControl}, importImage)
 
 	rotateLeftBtn := widget.NewButtonWithIcon("", theme.ContentUndoIcon(), func() {
 		if imageViewer == nil || imageViewer.originalImage == nil {
@@ -6487,12 +6505,13 @@ func main() {
 	})
 	rotateRow := container.NewGridWithColumns(2, rotateLeftBtn, rotateRightBtn)
 
-	rangeBtn := widget.NewButton("范围 (CTRL+R)", func() {
+	toggleRangeSelect := func() {
 		if imageViewer == nil || imageViewer.image == nil {
 			return
 		}
 		imageViewer.SetRangeSelectMode(!imageViewer.rangeSelectMode)
-	})
+	}
+	rangeBtn := widget.NewButton("范围 (CTRL+R)", toggleRangeSelect)
 	updateRangeButton = func() {
 		if imageViewer != nil && imageViewer.rangeSelectMode {
 			rangeBtn.SetText("选择范围中...")
@@ -6504,12 +6523,7 @@ func main() {
 		rangeBtn.Refresh()
 	}
 	updateRangeButton()
-	w.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyR, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) {
-		if imageViewer == nil || imageViewer.image == nil {
-			return
-		}
-		imageViewer.SetRangeSelectMode(!imageViewer.rangeSelectMode)
-	})
+	addShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyR, Modifier: fyne.KeyModifierControl}, toggleRangeSelect)
 
 	rectCoordEntry.SetText(defaultRangeText)
 	coordDisplayEntry := rectCoordEntry
@@ -6631,9 +6645,7 @@ func main() {
 	}
 	autoPickBtn := widget.NewButton("自动取色 (CTRL+A)", startAutoPick)
 	autoPickBtn.Importance = widget.MediumImportance
-	w.Canvas().AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyA, Modifier: fyne.KeyModifierControl}, func(fyne.Shortcut) {
-		startAutoPick()
-	})
+	addShortcut(&fyne.ShortcutSelectAll{}, startAutoPick)
 	applyRangeCheck := widget.NewCheck("选取后应用范围", func(bool) {
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
@@ -6841,7 +6853,7 @@ func main() {
 	tableBlock := container.NewBorder(tableHeader, nil, nil, nil, tableScroll)
 	tableArea := newFixedHeightContainer(tableBlock, 230)
 
-	clearAllBtn := widget.NewButton("清除所有 (CTRL+E)", func() {
+	clearAllPoints := func() {
 		w.Canvas().Unfocus()
 		if imageViewer != nil {
 			imageViewer.ClearMarks()
@@ -6849,7 +6861,9 @@ func main() {
 		}
 		colorPoints = colorPoints[:0]
 		updateTableSelection()
-	})
+	}
+	clearAllBtn := widget.NewButton("清除所有 (CTRL+E)", clearAllPoints)
+	addShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyE, Modifier: fyne.KeyModifierControl}, clearAllPoints)
 	uniformOffsetEntry := makeEntry(userConfig.UniformOffset)
 	uniformOffsetEntry.OnChanged = func(value string) {
 		defaultColorPointOffset = strings.TrimSpace(value)
@@ -7145,6 +7159,7 @@ func main() {
 					// 更新当前imageViewer引用
 					imageViewer = newImageViewer
 					fitImageToView(newImageViewer)
+					w.Canvas().Focus(newImageViewer)
 
 					// 清空颜色点列表和矩形区域
 					colorPoints = make([]ColorPoint, 0)

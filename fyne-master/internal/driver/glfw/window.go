@@ -831,6 +831,9 @@ func (w *window) triggersShortcut(localizedKeyName fyne.KeyName, key fyne.KeyNam
 		if w.triggerMainMenuShortcut(shortcut) {
 			return true
 		}
+		if w.canvas.TriggerShortcut(shortcut) {
+			return true
+		}
 		if focused, ok := w.canvas.Focused().(fyne.Shortcutable); ok {
 			shouldRunShortcut := true
 			type selectableText interface {

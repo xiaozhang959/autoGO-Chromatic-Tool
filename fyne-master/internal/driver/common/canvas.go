@@ -394,6 +394,12 @@ func (c *Canvas) TypedShortcut(shortcut fyne.Shortcut) {
 	c.shortcut.TypedShortcut(shortcut)
 }
 
+// TriggerShortcut handles the registered shortcut and reports whether the
+// canvas had a matching handler.
+func (c *Canvas) TriggerShortcut(shortcut fyne.Shortcut) bool {
+	return c.shortcut.TriggerShortcut(shortcut)
+}
+
 // Unfocus unfocuses all the objects in the canvas.
 func (c *Canvas) Unfocus() {
 	mgr := c.focusManager()
