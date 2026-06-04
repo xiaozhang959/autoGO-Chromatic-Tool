@@ -177,6 +177,22 @@ const (
 	commandToggleGrid        = "toggle_grid"
 	commandToggleTheme       = "toggle_theme"
 	commandGrabNode          = "grab_node"
+	commandNodeCaptureSimple = "node_capture_simple"
+	commandNodeSearch        = "node_search"
+	commandNodePrevious      = "node_previous"
+	commandNodeNext          = "node_next"
+	commandNodeSelectAll     = "node_select_all"
+	commandNodeClearSelected = "node_clear_selected"
+	commandNodeTestSelector  = "node_test_selector"
+	commandNodeGenerateCode  = "node_generate_code"
+	commandNodeCopyCode      = "node_copy_code"
+	commandNodeCopyParams    = "node_copy_params"
+	commandNodeFormat        = "node_format"
+	commandAppInfoQuery      = "app_info_query"
+	commandAppInfoCopyName   = "app_info_copy_name"
+	commandAppInfoCopyPkg    = "app_info_copy_package"
+	commandAppInfoCopyLaunch = "app_info_copy_launcher"
+	commandAppInfoCopyActs   = "app_info_copy_activities"
 	commandFontLibrary       = "font_library"
 )
 
@@ -204,6 +220,22 @@ var defaultShortcutTexts = map[string]string{
 	commandToggleGrid:        "",
 	commandToggleTheme:       "",
 	commandGrabNode:          "",
+	commandNodeCaptureSimple: "",
+	commandNodeSearch:        "",
+	commandNodePrevious:      "",
+	commandNodeNext:          "",
+	commandNodeSelectAll:     "",
+	commandNodeClearSelected: "",
+	commandNodeTestSelector:  "",
+	commandNodeGenerateCode:  "",
+	commandNodeCopyCode:      "",
+	commandNodeCopyParams:    "",
+	commandNodeFormat:        "",
+	commandAppInfoQuery:      "",
+	commandAppInfoCopyName:   "",
+	commandAppInfoCopyPkg:    "",
+	commandAppInfoCopyLaunch: "",
+	commandAppInfoCopyActs:   "",
 	commandFontLibrary:       "",
 }
 
@@ -238,6 +270,22 @@ var commandDefinitions = []commandDefinition{
 	{ID: commandToggleGrid, Label: "点阵模式", Category: "系统", DefaultToolbar: false},
 	{ID: commandToggleTheme, Label: "切换主题", Category: "系统", DefaultToolbar: false},
 	{ID: commandGrabNode, Label: "抓取节点", Category: "节点", DefaultToolbar: false},
+	{ID: commandNodeCaptureSimple, Label: "简单节点抓取", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeSearch, Label: "搜索", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodePrevious, Label: "上一个", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeNext, Label: "下一个", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeSelectAll, Label: "全部勾选", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeClearSelected, Label: "清除全选", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeTestSelector, Label: "查找测试", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeGenerateCode, Label: "生成代码", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeCopyCode, Label: "复制代码", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeCopyParams, Label: "复制参数", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandNodeFormat, Label: "格式配置", Category: "节点工具", DefaultToolbar: false},
+	{ID: commandAppInfoQuery, Label: "查询应用", Category: "App信息", DefaultToolbar: false},
+	{ID: commandAppInfoCopyName, Label: "复制应用名称", Category: "App信息", DefaultToolbar: false},
+	{ID: commandAppInfoCopyPkg, Label: "复制应用包名", Category: "App信息", DefaultToolbar: false},
+	{ID: commandAppInfoCopyLaunch, Label: "复制界面名称", Category: "App信息", DefaultToolbar: false},
+	{ID: commandAppInfoCopyActs, Label: "复制其它界面", Category: "App信息", DefaultToolbar: false},
 	{ID: commandFontLibrary, Label: "字库制作", Category: "工具", DefaultToolbar: false},
 }
 
@@ -7172,6 +7220,22 @@ func main() {
 	appInfoTool := newAndroidAppInfoTool(w, func() string {
 		return selectedAndroidDeviceID()
 	})
+	registerCommand(commandNodeCaptureSimple, nodeTool.CaptureSimple)
+	registerCommand(commandNodeSearch, nodeTool.Search)
+	registerCommand(commandNodePrevious, nodeTool.SelectPrevious)
+	registerCommand(commandNodeNext, nodeTool.SelectNext)
+	registerCommand(commandNodeSelectAll, nodeTool.SelectAllAttrs)
+	registerCommand(commandNodeClearSelected, nodeTool.ClearSelectedAttrs)
+	registerCommand(commandNodeTestSelector, nodeTool.TestSelector)
+	registerCommand(commandNodeGenerateCode, nodeTool.GenerateSelectorCode)
+	registerCommand(commandNodeCopyCode, nodeTool.CopySelectorCode)
+	registerCommand(commandNodeCopyParams, nodeTool.CopySelectorParams)
+	registerCommand(commandNodeFormat, nodeTool.OpenFormatSettings)
+	registerCommand(commandAppInfoQuery, appInfoTool.Query)
+	registerCommand(commandAppInfoCopyName, appInfoTool.CopyName)
+	registerCommand(commandAppInfoCopyPkg, appInfoTool.CopyPackage)
+	registerCommand(commandAppInfoCopyLaunch, appInfoTool.CopyLauncher)
+	registerCommand(commandAppInfoCopyActs, appInfoTool.CopyActivities)
 	grabNodeBtn := widget.NewButton("抓取节点", func() {
 		nodeTool.Capture()
 	})

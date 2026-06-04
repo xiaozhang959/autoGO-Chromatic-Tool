@@ -321,6 +321,37 @@ func TestNormalizeShortcutConfigAddsCommandDefaults(t *testing.T) {
 	}
 }
 
+func TestNodeAndAppInfoCommandsAreConfigurable(t *testing.T) {
+	ids := []string{
+		commandNodeCaptureSimple,
+		commandNodeSearch,
+		commandNodePrevious,
+		commandNodeNext,
+		commandNodeSelectAll,
+		commandNodeClearSelected,
+		commandNodeTestSelector,
+		commandNodeGenerateCode,
+		commandNodeCopyCode,
+		commandNodeCopyParams,
+		commandNodeFormat,
+		commandAppInfoQuery,
+		commandAppInfoCopyName,
+		commandAppInfoCopyPkg,
+		commandAppInfoCopyLaunch,
+		commandAppInfoCopyActs,
+	}
+	shortcuts := normalizeShortcutConfig(nil)
+
+	for _, id := range ids {
+		if _, ok := commandDefinitionByID(id); !ok {
+			t.Fatalf("missing command definition for %q", id)
+		}
+		if value, ok := shortcuts[id]; !ok || value != "" {
+			t.Fatalf("command %q should default to disabled shortcut, got value=%q ok=%v", id, value, ok)
+		}
+	}
+}
+
 func TestNormalizeToolButtonConfigsDefaults(t *testing.T) {
 	got := normalizeToolButtonConfigs(nil)
 	want := []string{

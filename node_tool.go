@@ -397,13 +397,13 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	tool.searchEntry = widget.NewEntry()
 	tool.searchEntry.SetPlaceHolder("搜索 text / desc / id / class")
 	searchBtn := widget.NewButton("搜索", func() {
-		tool.applySearch()
+		tool.Search()
 	})
 	prevBtn := widget.NewButton("上一个", func() {
-		tool.selectRelative(-1)
+		tool.SelectPrevious()
 	})
 	nextBtn := widget.NewButton("下一个", func() {
-		tool.selectRelative(1)
+		tool.SelectNext()
 	})
 
 	tool.statusLabel = widget.NewLabel("未抓取节点")
@@ -470,33 +470,22 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	tool.attrList = container.NewVBox()
 
 	tool.selectAllBtn = widget.NewButton("全部勾选", func() {
-		tool.setAllAttrRows(true)
+		tool.SelectAllAttrs()
 	})
 	tool.clearSelectedBtn = widget.NewButton("清除全选", func() {
-		tool.setAllAttrRows(false)
+		tool.ClearSelectedAttrs()
 	})
 	tool.testSelectorBtn = widget.NewButton("查找测试", func() {
-		tool.testSelectedAttrs()
+		tool.TestSelector()
 	})
 	generateSelectorBtn := widget.NewButton("生成代码", func() {
-		code, err := tool.selectedSelectorCode()
-		if err != nil {
-			tool.selectorEntry.SetText("生成失败: " + err.Error())
-			tool.setStatus("生成代码失败: " + err.Error())
-			return
-		}
-		if strings.TrimSpace(code) == "" {
-			tool.setStatus("请先勾选至少一个有效属性")
-			return
-		}
-		tool.selectorEntry.SetText(code)
-		tool.setStatus("已生成 uiacc 代码")
+		tool.GenerateSelectorCode()
 	})
 	tool.copySelectorBtn = widget.NewButton("复制代码", func() {
-		tool.copySelectedSelectorCode()
+		tool.CopySelectorCode()
 	})
 	tool.copyAttrsBtn = widget.NewButton("复制参数", func() {
-		tool.copySelectedSelectorParams()
+		tool.CopySelectorParams()
 	})
 
 	tool.selectorFunc = widget.NewSelect([]string{
@@ -520,15 +509,7 @@ func newAndroidNodeTool(w fyne.Window, getSelectedDevice func() string, getImage
 	}
 	tool.refreshSelectorFormat()
 	formatBtn := widget.NewButton("格式", func() {
-		onSaved := func() {
-			tool.refreshSelectorFormat()
-			tool.refreshSelector()
-		}
-		if tool.openFormatDialog != nil {
-			tool.openFormatDialog(tool.selectedSelectorFunction(), onSaved)
-			return
-		}
-		showAPIFormatDialog(tool.window, tool.selectedSelectorFunction(), onSaved)
+		tool.OpenFormatSettings()
 	})
 
 	tool.selectorEntry = widget.NewMultiLineEntry()
@@ -574,6 +555,65 @@ func (t *AndroidNodeTool) Capture() {
 
 func (t *AndroidNodeTool) CaptureSimple() {
 	t.capture(true)
+}
+
+func (t *AndroidNodeTool) Search() {
+	t.applySearch()
+}
+
+func (t *AndroidNodeTool) SelectPrevious() {
+	t.selectRelative(-1)
+}
+
+func (t *AndroidNodeTool) SelectNext() {
+	t.selectRelative(1)
+}
+
+func (t *AndroidNodeTool) SelectAllAttrs() {
+	t.setAllAttrRows(true)
+}
+
+func (t *AndroidNodeTool) ClearSelectedAttrs() {
+	t.setAllAttrRows(false)
+}
+
+func (t *AndroidNodeTool) TestSelector() {
+	t.testSelectedAttrs()
+}
+
+func (t *AndroidNodeTool) GenerateSelectorCode() {
+	code, err := t.selectedSelectorCode()
+	if err != nil {
+		t.selectorEntry.SetText("生成失败: " + err.Error())
+		t.setStatus("生成代码失败: " + err.Error())
+		return
+	}
+	if strings.TrimSpace(code) == "" {
+		t.setStatus("请先勾选至少一个有效属性")
+		return
+	}
+	t.selectorEntry.SetText(code)
+	t.setStatus("已生成 uiacc 代码")
+}
+
+func (t *AndroidNodeTool) CopySelectorCode() {
+	t.copySelectedSelectorCode()
+}
+
+func (t *AndroidNodeTool) CopySelectorParams() {
+	t.copySelectedSelectorParams()
+}
+
+func (t *AndroidNodeTool) OpenFormatSettings() {
+	onSaved := func() {
+		t.refreshSelectorFormat()
+		t.refreshSelector()
+	}
+	if t.openFormatDialog != nil {
+		t.openFormatDialog(t.selectedSelectorFunction(), onSaved)
+		return
+	}
+	showAPIFormatDialog(t.window, t.selectedSelectorFunction(), onSaved)
 }
 
 func (t *AndroidNodeTool) capture(compressed bool) {

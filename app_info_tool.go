@@ -242,26 +242,26 @@ func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *Andr
 	}
 
 	copyNameBtn := widget.NewButton("复制", func() {
-		tool.copyText("应用名称", tool.nameField.Text())
+		tool.CopyName()
 	})
 	copyPackageBtn := widget.NewButton("复制", func() {
-		tool.copyText("应用包名", tool.packageField.Text())
+		tool.CopyPackage()
 	})
 	copyLauncherBtn := widget.NewButton("复制", func() {
-		tool.copyText("界面名称", tool.launcherField.Text())
+		tool.CopyLauncher()
 	})
 	copyActivitiesBtn := widget.NewButton("复制全部", func() {
-		tool.copyText("其它界面", strings.Join(tool.selectedActivities, "\n"))
+		tool.CopyActivities()
 	})
 
 	tool.nameField = newAppInfoDisplayBox(func() {
-		tool.copyText("应用名称", tool.nameField.Text())
+		tool.CopyName()
 	})
 	tool.packageField = newAppInfoDisplayBox(func() {
-		tool.copyText("应用包名", tool.packageField.Text())
+		tool.CopyPackage()
 	})
 	tool.launcherField = newAppInfoDisplayBox(func() {
-		tool.copyText("界面名称", tool.launcherField.Text())
+		tool.CopyLauncher()
 	})
 
 	tool.activitiesList = widget.NewList(
@@ -298,16 +298,16 @@ func newAndroidAppInfoTool(w fyne.Window, getSelectedDevice func() string) *Andr
 	detailPanel := container.NewVBox(
 		widget.NewLabel("应用详情"),
 		container.NewBorder(nil, nil, newAppInfoCopyLabel("名称", func() {
-			tool.copyText("应用名称", tool.nameField.Text())
+			tool.CopyName()
 		}), copyNameBtn, tool.nameField),
 		container.NewBorder(nil, nil, newAppInfoCopyLabel("包名", func() {
-			tool.copyText("应用包名", tool.packageField.Text())
+			tool.CopyPackage()
 		}), copyPackageBtn, tool.packageField),
 		container.NewBorder(nil, nil, newAppInfoCopyLabel("界面", func() {
-			tool.copyText("界面名称", tool.launcherField.Text())
+			tool.CopyLauncher()
 		}), copyLauncherBtn, tool.launcherField),
 		container.NewBorder(nil, nil, nil, copyActivitiesBtn, newAppInfoCopyLabel("其它界面", func() {
-			tool.copyText("其它界面", strings.Join(tool.selectedActivities, "\n"))
+			tool.CopyActivities()
 		})),
 		newFixedHeightContainer(container.NewBorder(nil, nil, nil, nil, tool.activitiesList), 150),
 	)
@@ -357,6 +357,22 @@ func (t *AndroidAppInfoTool) Query() {
 			t.applySearch()
 		})
 	}()
+}
+
+func (t *AndroidAppInfoTool) CopyName() {
+	t.copyText("应用名称", t.nameField.Text())
+}
+
+func (t *AndroidAppInfoTool) CopyPackage() {
+	t.copyText("应用包名", t.packageField.Text())
+}
+
+func (t *AndroidAppInfoTool) CopyLauncher() {
+	t.copyText("界面名称", t.launcherField.Text())
+}
+
+func (t *AndroidAppInfoTool) CopyActivities() {
+	t.copyText("其它界面", strings.Join(t.selectedActivities, "\n"))
 }
 
 func (t *AndroidAppInfoTool) applySearch() {
