@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/driver/desktop"
 	fynetest "fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
@@ -41,20 +40,6 @@ func assertImagePoints(t *testing.T, got, want []image.Point) {
 		if got[i] != want[i] {
 			t.Fatalf("point %d mismatch: want %v got %v", i, want[i], got[i])
 		}
-	}
-}
-
-func TestSplitMinWidthLayoutIgnoresChildWidth(t *testing.T) {
-	child := canvas.NewRectangle(color.Transparent)
-	child.SetMinSize(fyne.NewSize(640, 48))
-
-	layout := &splitMinWidthLayout{width: 260}
-	minSize := layout.MinSize([]fyne.CanvasObject{child})
-	if minSize.Width != 260 {
-		t.Fatalf("min width mismatch: want 260 got %.1f", minSize.Width)
-	}
-	if minSize.Height != 48 {
-		t.Fatalf("min height mismatch: want 48 got %.1f", minSize.Height)
 	}
 }
 

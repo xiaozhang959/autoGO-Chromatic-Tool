@@ -7428,7 +7428,7 @@ func main() {
 		}
 	}
 
-	copyCodeBtn := widget.NewButtonWithIcon("复制代码", theme.ContentCopyIcon(), generateCodeFunc)
+	copyCodeBtn := widget.NewButtonWithIcon("复制", theme.ContentCopyIcon(), generateCodeFunc)
 	copyCodeBtn.Importance = widget.HighImportance
 
 	// 设置全局触发生成代码函数，供键盘快捷键使用
@@ -8154,8 +8154,10 @@ func main() {
 	registerCommand(commandGrabNode, func() {
 		nodeTool.Capture()
 	})
-	makeMinWidthPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
-		return container.New(&splitMinWidthLayout{width: width}, content)
+	makeFixedPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
+		minWidth := canvas.NewRectangle(color.Transparent)
+		minWidth.SetMinSize(fyne.NewSize(width, 1))
+		return container.NewStack(minWidth, content)
 	}
 	makeFixedWidthPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
 		return container.New(&fixedWidthLayout{width: width}, content)
@@ -8558,7 +8560,7 @@ func main() {
 		updateTableSelection()
 	}
 	registerCommand(shortcutActionClearAll, clearAllPoints)
-	clearAllBtn := widget.NewButton(buttonTextWithShortcut("清除所有", shortcutActionClearAll), clearAllPoints)
+	clearAllBtn := widget.NewButton("清空", clearAllPoints)
 	uniformOffsetEntry := makeEntry(userConfig.UniformOffset)
 	uniformOffsetEntry.OnChanged = func(value string) {
 		defaultColorPointOffset = strings.TrimSpace(value)
@@ -8572,7 +8574,7 @@ func main() {
 		w.Clipboard().SetContent(colorPointCoordinatesText())
 	}
 	registerCommand(commandCopyCoords, copyCoords)
-	copyCoordsBtn := widget.NewButton(buttonTextWithShortcut("复制坐标", commandCopyCoords), copyCoords)
+	copyCoordsBtn := widget.NewButton("复制", copyCoords)
 	pasteCoords := func() {
 		w.Canvas().Unfocus()
 		points := parsePointPositionsText(w.Clipboard().Content())
@@ -8583,7 +8585,7 @@ func main() {
 		replaceColorPointsByPositions(points, defaultColorPointOffset)
 	}
 	registerCommand(commandPasteCoords, pasteCoords)
-	pasteCoordsBtn := widget.NewButton(buttonTextWithShortcut("粘贴坐标", commandPasteCoords), pasteCoords)
+	pasteCoordsBtn := widget.NewButton("粘贴", pasteCoords)
 	applyUniformOffset := func() {
 		defaultColorPointOffset = strings.TrimSpace(uniformOffsetEntry.Text)
 		for i := range colorPoints {
@@ -8595,7 +8597,7 @@ func main() {
 		}
 	}
 	registerCommand(commandApplyOffset, applyUniformOffset)
-	uniformOffsetBtn := widget.NewButton(buttonTextWithShortcut("统一偏色", commandApplyOffset), applyUniformOffset)
+	uniformOffsetBtn := widget.NewButton("统一", applyUniformOffset)
 	clearOffset := func() {
 		uniformOffsetEntry.SetText("000000")
 		defaultColorPointOffset = "000000"
@@ -8608,17 +8610,17 @@ func main() {
 		}
 	}
 	registerCommand(commandClearOffset, clearOffset)
-	clearOffsetBtn := widget.NewButton(buttonTextWithShortcut("清除偏色", commandClearOffset), clearOffset)
+	clearOffsetBtn := widget.NewButton("清偏", clearOffset)
 	refreshShortcutButtonTexts = func() {
 		screenshotBtn.button.SetText(buttonTextWithShortcut("截图", shortcutActionScreenshot))
 		importBtn.SetText(buttonTextWithShortcut("加载", shortcutActionImport))
 		updateRangeButton()
 		autoPickBtn.SetText(buttonTextWithShortcut("自动取色", shortcutActionAutoPick))
-		clearAllBtn.SetText(buttonTextWithShortcut("清除所有", shortcutActionClearAll))
-		copyCoordsBtn.SetText(buttonTextWithShortcut("复制坐标", commandCopyCoords))
-		pasteCoordsBtn.SetText(buttonTextWithShortcut("粘贴坐标", commandPasteCoords))
-		uniformOffsetBtn.SetText(buttonTextWithShortcut("统一偏色", commandApplyOffset))
-		clearOffsetBtn.SetText(buttonTextWithShortcut("清除偏色", commandClearOffset))
+		clearAllBtn.SetText("清空")
+		copyCoordsBtn.SetText("复制")
+		pasteCoordsBtn.SetText("粘贴")
+		uniformOffsetBtn.SetText("统一")
+		clearOffsetBtn.SetText("清偏")
 	}
 
 	precisionEntry := makeEntry(userConfig.Precision)
@@ -8692,12 +8694,12 @@ func main() {
 		}
 	}
 	registerCommand(commandFindTest, runFindTest)
-	findTestBtn := widget.NewButton("找色测试", runFindTest)
+	findTestBtn := widget.NewButton("找色", runFindTest)
 	openCodeTest := func() {
 		showCodeTestDialog(w, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
 	}
 	registerCommand(commandCodeTest, openCodeTest)
-	codeTestBtn := widget.NewButton("代码测试", openCodeTest)
+	codeTestBtn := widget.NewButton("测试", openCodeTest)
 	copyColor := func() {
 		w.Clipboard().SetContent(colorEntry.Text)
 	}
@@ -8743,17 +8745,17 @@ func main() {
 	}
 
 	toolForm := container.NewVBox(
-		container.NewGridWithColumns(2, clearAllBtn, container.NewGridWithColumns(2, copyCoordsBtn, pasteCoordsBtn)),
+		container.NewGridWithColumns(3, clearAllBtn, copyCoordsBtn, pasteCoordsBtn),
 		container.NewBorder(nil, nil, container.NewHBox(clearOffsetBtn, uniformOffsetBtn), nil, uniformOffsetEntry),
 		container.NewAppTabs(
 			container.NewTabItem("图色面板", container.NewVBox(
 				container.NewBorder(nil, nil, widget.NewLabel("精度"), nil, precisionEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("函数"), nil, functionSelect),
 				container.NewBorder(nil, nil, widget.NewLabel("方向"), nil, directionSelect),
-				container.NewBorder(nil, nil, widget.NewLabel("颜色"), widget.NewButton("复制颜色", copyColor), colorEntry),
-				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(widget.NewButton("格式", openFormatSettings), widget.NewButton("复制参数", copyParams)), paramsEntry),
+				container.NewBorder(nil, nil, widget.NewLabel("颜色"), widget.NewButton("复制", copyColor), colorEntry),
+				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(widget.NewButton("格式", openFormatSettings), widget.NewButton("复制", copyParams)), paramsEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
-				container.NewGridWithColumns(4, copyCodeBtn, findTestBtn, codeTestBtn, makeButton("图片查找")),
+				container.NewGridWithColumns(4, copyCodeBtn, findTestBtn, codeTestBtn, makeButton("查图")),
 			)),
 			container.NewTabItem("点阵OCR", container.NewCenter(widget.NewLabel("点阵OCR布局待实现"))),
 			container.NewTabItem("光学OCR", container.NewCenter(widget.NewLabel("光学OCR布局待实现"))),
@@ -8779,7 +8781,7 @@ func main() {
 			rightTabs.Select(nodeTabItem)
 		}
 	}
-	rightPanel := makeMinWidthPanel(rightPanelMinWidth, container.NewVScroll(rightTabs))
+	rightPanel := makeFixedPanel(rightPanelMinWidth, container.NewVScroll(rightTabs))
 
 	// 左工具栏固定宽度；右工具栏默认使用最小宽度，用户可拖拽调整
 	centerRightSplit = container.NewHSplit(tabs, rightPanel)
@@ -9034,26 +9036,6 @@ func (l *fixedContentWidthLayout) Layout(objects []fyne.CanvasObject, containerS
 	}
 	objects[0].Move(fyne.NewPos(0, 0))
 	objects[0].Resize(fyne.NewSize(l.width, containerSize.Height))
-}
-
-type splitMinWidthLayout struct {
-	width float32
-}
-
-func (l *splitMinWidthLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
-	height := float32(1)
-	if len(objects) > 0 {
-		height = objects[0].MinSize().Height
-	}
-	return fyne.NewSize(l.width, height)
-}
-
-func (l *splitMinWidthLayout) Layout(objects []fyne.CanvasObject, containerSize fyne.Size) {
-	if len(objects) == 0 {
-		return
-	}
-	objects[0].Move(fyne.NewPos(0, 0))
-	objects[0].Resize(containerSize)
 }
 
 // 固定宽度布局
