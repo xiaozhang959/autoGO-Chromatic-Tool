@@ -1,0 +1,259 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布标签，例如 v1.0.5"
+        required: true
+        type: string
+      prerelease:
+        description: "是否标记为预发布"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: AutoGo图色助手
+  APP_ID: com.autogo.imagetool
+  ICON_PATH: build/logo.png
+  LDFLAGS: -s -w
+
+jobs:
+  metadata:
+    name: Prepare release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      build: ${{ steps.meta.outputs.build }}
+    steps:
+      - name: Resolve tag and version
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${{ github.ref_name }}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "Release tag must be vMAJOR, vMAJOR.MINOR, or vMAJOR.MINOR.PATCH, got: $tag" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          build="${{ github.run_number }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    name: Build Windows amd64
+    runs-on: windows-latest
+    needs: metadata
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup MSYS2 MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Add Go tools to PATH
+        shell: pwsh
+        run: |
+          $goBin = Join-Path (go env GOPATH) "bin"
+          Add-Content -Path $env:GITHUB_PATH -Value $goBin
+
+      - name: Install Fyne CLI from repository
+        working-directory: fyne-master
+        shell: pwsh
+        run: go install ./cmd/fyne
+
+      - name: Test
+        shell: pwsh
+        run: go test .
+
+      - name: Package Windows app
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          BUILD_NUMBER: ${{ needs.metadata.outputs.build }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
+          $env:CGO_ENABLED = "1"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CC = "gcc"
+
+          New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
+          go build -ldflags "$env:LDFLAGS -H windowsgui" -o dist\windows\autogo.exe .
+
+          fyne package `
+            -os windows `
+            -executable dist\windows\autogo.exe `
+            -name "$env:APP_NAME" `
+            -icon "$env:ICON_PATH" `
+            -appID "$env:APP_ID" `
+            -appVersion "$env:VERSION" `
+            -appBuild "$env:BUILD_NUMBER" `
+            -release
+
+          $packagedExe = "$env:APP_NAME.exe"
+          if (Test-Path $packagedExe) {
+            Move-Item -Force $packagedExe "dist\windows\$env:APP_NAME.exe"
+          } elseif (Test-Path "dist\windows\autogo.exe") {
+            Move-Item -Force "dist\windows\autogo.exe" "dist\windows\$env:APP_NAME.exe"
+          } else {
+            throw "Windows executable was not generated."
+          }
+
+          Compress-Archive `
+            -Path "dist\windows\$env:APP_NAME.exe" `
+            -DestinationPath "dist\AutoGo-Chromatic-Tool-windows-amd64.zip" `
+            -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: dist/AutoGo-Chromatic-Tool-windows-amd64.zip
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS packages
+    runs-on: macos-latest
+    needs: metadata
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Add Go tools to PATH
+        shell: bash
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Fyne CLI from repository
+        working-directory: fyne-master
+        shell: bash
+        run: go install ./cmd/fyne
+
+      - name: Test
+        shell: bash
+        run: go test .
+
+      - name: Package macOS apps
+        shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          BUILD_NUMBER: ${{ needs.metadata.outputs.build }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/macos
+
+          for arch in arm64 amd64; do
+            tmp_dir="dist/macos/$arch"
+            mkdir -p "$tmp_dir"
+            GOOS=darwin GOARCH="$arch" CGO_ENABLED=1 go build -ldflags "$LDFLAGS" -o "$tmp_dir/autogo" .
+
+            rm -rf "$APP_NAME.app"
+            fyne package \
+              -os darwin \
+              -executable "$tmp_dir/autogo" \
+              -name "$APP_NAME" \
+              -icon "$ICON_PATH" \
+              -appID "$APP_ID" \
+              -appVersion "$VERSION" \
+              -appBuild "$BUILD_NUMBER" \
+              -release
+
+            app_dir="dist/macos/$APP_NAME-macos-$arch.app"
+            rm -rf "$app_dir"
+            mv "$APP_NAME.app" "$app_dir"
+            hdiutil create \
+              -volname "$APP_NAME" \
+              -srcfolder "$app_dir" \
+              -ov \
+              -format UDZO \
+              "dist/AutoGo-Chromatic-Tool-macos-$arch.dmg"
+          done
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/AutoGo-Chromatic-Tool-macos-*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - metadata
+      - build-windows
+      - build-macos
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+          PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+        run: |
+          set -euo pipefail
+          find release-assets -maxdepth 1 -type f -print
+
+          cat > release-notes.md <<EOF
+          自动构建发布 $RELEASE_VERSION。
+
+          包含文件：
+          - AutoGo-Chromatic-Tool-windows-amd64.zip
+          - AutoGo-Chromatic-Tool-macos-arm64.dmg
+          - AutoGo-Chromatic-Tool-macos-amd64.dmg
+          EOF
+
+          prerelease_flag=()
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_flag+=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          else
+            gh release create "$RELEASE_TAG" release-assets/* \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md \
+              --target "$GITHUB_SHA" \
+              "${prerelease_flag[@]}"
+          fi
+
