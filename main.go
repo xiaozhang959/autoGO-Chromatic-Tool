@@ -1388,6 +1388,39 @@ func newMyTheme(scheme string, isDark bool) fyne.Theme {
 	}
 }
 
+type compactButtonTheme struct{}
+
+func compactButtonBaseTheme() fyne.Theme {
+	if app := fyne.CurrentApp(); app != nil {
+		if currentTheme := app.Settings().Theme(); currentTheme != nil {
+			return currentTheme
+		}
+	}
+	return theme.DefaultTheme()
+}
+
+func (compactButtonTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	return compactButtonBaseTheme().Color(name, variant)
+}
+
+func (compactButtonTheme) Font(style fyne.TextStyle) fyne.Resource {
+	return compactButtonBaseTheme().Font(style)
+}
+
+func (compactButtonTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
+	return compactButtonBaseTheme().Icon(name)
+}
+
+func (compactButtonTheme) Size(name fyne.ThemeSizeName) float32 {
+	if name == theme.SizeNameInnerPadding {
+		return 2
+	}
+	if name == theme.SizeNamePadding {
+		return 2
+	}
+	return compactButtonBaseTheme().Size(name)
+}
+
 // 自定义可点击表格行
 type ClickableTableRow struct {
 	widget.BaseWidget
@@ -7428,7 +7461,7 @@ func main() {
 		}
 	}
 
-	copyCodeBtn := widget.NewButtonWithIcon("复制", theme.ContentCopyIcon(), generateCodeFunc)
+	copyCodeBtn := widget.NewButtonWithIcon("复制代码", theme.ContentCopyIcon(), generateCodeFunc)
 	copyCodeBtn.Importance = widget.HighImportance
 
 	// 设置全局触发生成代码函数，供键盘快捷键使用
@@ -8574,7 +8607,7 @@ func main() {
 		w.Clipboard().SetContent(colorPointCoordinatesText())
 	}
 	registerCommand(commandCopyCoords, copyCoords)
-	copyCoordsBtn := widget.NewButton("复制", copyCoords)
+	copyCoordsBtn := widget.NewButton("复制坐标", copyCoords)
 	pasteCoords := func() {
 		w.Canvas().Unfocus()
 		points := parsePointPositionsText(w.Clipboard().Content())
@@ -8585,7 +8618,7 @@ func main() {
 		replaceColorPointsByPositions(points, defaultColorPointOffset)
 	}
 	registerCommand(commandPasteCoords, pasteCoords)
-	pasteCoordsBtn := widget.NewButton("粘贴", pasteCoords)
+	pasteCoordsBtn := widget.NewButton("粘贴坐标", pasteCoords)
 	applyUniformOffset := func() {
 		defaultColorPointOffset = strings.TrimSpace(uniformOffsetEntry.Text)
 		for i := range colorPoints {
@@ -8597,7 +8630,7 @@ func main() {
 		}
 	}
 	registerCommand(commandApplyOffset, applyUniformOffset)
-	uniformOffsetBtn := widget.NewButton("统一", applyUniformOffset)
+	uniformOffsetBtn := widget.NewButton("统一偏色", applyUniformOffset)
 	clearOffset := func() {
 		uniformOffsetEntry.SetText("000000")
 		defaultColorPointOffset = "000000"
@@ -8610,17 +8643,17 @@ func main() {
 		}
 	}
 	registerCommand(commandClearOffset, clearOffset)
-	clearOffsetBtn := widget.NewButton("清偏", clearOffset)
+	clearOffsetBtn := widget.NewButton("清除偏色", clearOffset)
 	refreshShortcutButtonTexts = func() {
 		screenshotBtn.button.SetText(buttonTextWithShortcut("截图", shortcutActionScreenshot))
 		importBtn.SetText(buttonTextWithShortcut("加载", shortcutActionImport))
 		updateRangeButton()
 		autoPickBtn.SetText(buttonTextWithShortcut("自动取色", shortcutActionAutoPick))
 		clearAllBtn.SetText("清空")
-		copyCoordsBtn.SetText("复制")
-		pasteCoordsBtn.SetText("粘贴")
-		uniformOffsetBtn.SetText("统一")
-		clearOffsetBtn.SetText("清偏")
+		copyCoordsBtn.SetText("复制坐标")
+		pasteCoordsBtn.SetText("粘贴坐标")
+		uniformOffsetBtn.SetText("统一偏色")
+		clearOffsetBtn.SetText("清除偏色")
 	}
 
 	precisionEntry := makeEntry(userConfig.Precision)
@@ -8694,12 +8727,12 @@ func main() {
 		}
 	}
 	registerCommand(commandFindTest, runFindTest)
-	findTestBtn := widget.NewButton("找色", runFindTest)
+	findTestBtn := widget.NewButton("找色测试", runFindTest)
 	openCodeTest := func() {
 		showCodeTestDialog(w, functionSelect.Selected, precisionEntry.Text, directionSelect.Selected)
 	}
 	registerCommand(commandCodeTest, openCodeTest)
-	codeTestBtn := widget.NewButton("测试", openCodeTest)
+	codeTestBtn := widget.NewButton("代码测试", openCodeTest)
 	copyColor := func() {
 		w.Clipboard().SetContent(colorEntry.Text)
 	}
@@ -8744,6 +8777,11 @@ func main() {
 		})
 	}
 
+	bottomActionButtons := container.NewThemeOverride(
+		container.NewGridWithColumns(4, copyCodeBtn, findTestBtn, codeTestBtn, makeButton("查图测试")),
+		compactButtonTheme{},
+	)
+
 	toolForm := container.NewVBox(
 		container.NewGridWithColumns(3, clearAllBtn, copyCoordsBtn, pasteCoordsBtn),
 		container.NewBorder(nil, nil, container.NewHBox(clearOffsetBtn, uniformOffsetBtn), nil, uniformOffsetEntry),
@@ -8755,7 +8793,7 @@ func main() {
 				container.NewBorder(nil, nil, widget.NewLabel("颜色"), widget.NewButton("复制", copyColor), colorEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("参数"), container.NewHBox(widget.NewButton("格式", openFormatSettings), widget.NewButton("复制", copyParams)), paramsEntry),
 				container.NewBorder(nil, nil, widget.NewLabel("结果"), nil, resultEntry),
-				container.NewGridWithColumns(4, copyCodeBtn, findTestBtn, codeTestBtn, makeButton("查图")),
+				bottomActionButtons,
 			)),
 			container.NewTabItem("点阵OCR", container.NewCenter(widget.NewLabel("点阵OCR布局待实现"))),
 			container.NewTabItem("光学OCR", container.NewCenter(widget.NewLabel("光学OCR布局待实现"))),
