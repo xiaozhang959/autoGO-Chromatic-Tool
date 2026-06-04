@@ -6903,12 +6903,39 @@ func main() {
 			action:   action,
 		}
 	}
+	shortcutSettingsGroup := func(command appCommand) string {
+		switch command.category {
+		case "节点", "节点工具":
+			return "节点工具"
+		case "App信息":
+			return "App信息"
+		default:
+			return "图色工具"
+		}
+	}
+	shortcutSettingsGroupOrder := func(group string) int {
+		switch group {
+		case "图色工具":
+			return 0
+		case "节点工具":
+			return 1
+		case "App信息":
+			return 2
+		default:
+			return 3
+		}
+	}
 	commandsForSettings := func() []appCommand {
 		commands := make([]appCommand, 0, len(commandByID))
 		for _, command := range commandByID {
 			commands = append(commands, command)
 		}
 		sort.SliceStable(commands, func(i, j int) bool {
+			leftGroup := shortcutSettingsGroup(commands[i])
+			rightGroup := shortcutSettingsGroup(commands[j])
+			if leftGroup != rightGroup {
+				return shortcutSettingsGroupOrder(leftGroup) < shortcutSettingsGroupOrder(rightGroup)
+			}
 			return commandDefinitionOrder(commands[i].id) < commandDefinitionOrder(commands[j].id)
 		})
 		return commands
@@ -7058,7 +7085,16 @@ func main() {
 			widget.NewLabel("点击快捷键框后直接按组合键自动录入；Backspace、Delete 或 Escape 清空该快捷键。"),
 			widget.NewSeparator(),
 		)
+		currentShortcutGroup := ""
 		for _, command := range commands {
+			group := shortcutSettingsGroup(command)
+			if group != currentShortcutGroup {
+				if currentShortcutGroup != "" {
+					shortcutRows.Add(widget.NewSeparator())
+				}
+				shortcutRows.Add(widget.NewLabelWithStyle(group, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+				currentShortcutGroup = group
+			}
 			entry := newShortcutCaptureEntry()
 			entry.SetText(shortcutTextFor(command.id))
 			shortcutEntries[command.id] = entry
@@ -7067,7 +7103,7 @@ func main() {
 					target.SetText(defaultShortcutTexts[id])
 				}
 			}(command.id, entry))
-			rowLabel := widget.NewLabel(fmt.Sprintf("%s / %s", command.category, command.label))
+			rowLabel := widget.NewLabel(command.label)
 			row := container.NewBorder(nil, nil, rowLabel, defaultBtn, entry)
 			shortcutRows.Add(row)
 		}
