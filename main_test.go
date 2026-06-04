@@ -231,35 +231,40 @@ func TestFormatAndroidDeviceID(t *testing.T) {
 
 func TestParseShortcutText(t *testing.T) {
 	tests := []struct {
-		name             string
-		text             string
-		wantFormatted    string
-		wantShortcutName string
-		wantErr          bool
+		name          string
+		text          string
+		wantFormatted string
+		wantModifier  fyne.KeyModifier
+		wantKey       fyne.KeyName
+		wantErr       bool
 	}{
 		{
-			name:             "custom combo",
-			text:             "Ctrl + Shift + S",
-			wantFormatted:    "Ctrl+Shift+S",
-			wantShortcutName: "CustomDesktop:Shift+Control+S",
+			name:          "custom combo",
+			text:          "Ctrl + Shift + S",
+			wantFormatted: "Ctrl+Shift+S",
+			wantModifier:  fyne.KeyModifierControl | fyne.KeyModifierShift,
+			wantKey:       fyne.KeyS,
 		},
 		{
-			name:             "builtin select all",
-			text:             "Ctrl+A",
-			wantFormatted:    "Ctrl+A",
-			wantShortcutName: "SelectAll",
+			name:          "builtin select all",
+			text:          "Ctrl+A",
+			wantFormatted: "Ctrl+A",
+			wantModifier:  fyne.KeyModifierControl,
+			wantKey:       fyne.KeyA,
 		},
 		{
-			name:             "builtin undo",
-			text:             "Ctrl+Z",
-			wantFormatted:    "Ctrl+Z",
-			wantShortcutName: "Undo",
+			name:          "builtin undo",
+			text:          "Ctrl+Z",
+			wantFormatted: "Ctrl+Z",
+			wantModifier:  fyne.KeyModifierControl,
+			wantKey:       fyne.KeyZ,
 		},
 		{
-			name:             "function key combo",
-			text:             "Ctrl+F1",
-			wantFormatted:    "Ctrl+F1",
-			wantShortcutName: "CustomDesktop:Control+F1",
+			name:          "function key combo",
+			text:          "Ctrl+F1",
+			wantFormatted: "Ctrl+F1",
+			wantModifier:  fyne.KeyModifierControl,
+			wantKey:       fyne.KeyF1,
 		},
 		{
 			name:    "missing modifier",
@@ -287,7 +292,7 @@ func TestParseShortcutText(t *testing.T) {
 			if formatted != tt.wantFormatted {
 				t.Fatalf("formatted shortcut mismatch: want %q got %q", tt.wantFormatted, formatted)
 			}
-			if tt.wantShortcutName == "" {
+			if tt.wantKey == "" {
 				if shortcut != nil {
 					t.Fatalf("expected nil shortcut, got %s", shortcut.ShortcutName())
 				}
@@ -296,8 +301,15 @@ func TestParseShortcutText(t *testing.T) {
 			if shortcut == nil {
 				t.Fatalf("expected shortcut")
 			}
-			if got := shortcut.ShortcutName(); got != tt.wantShortcutName {
-				t.Fatalf("shortcut name mismatch: want %q got %q", tt.wantShortcutName, got)
+			keyboardShortcut, ok := shortcut.(fyne.KeyboardShortcut)
+			if !ok {
+				t.Fatalf("expected keyboard shortcut, got %T", shortcut)
+			}
+			if got := keyboardShortcut.Mod(); got != tt.wantModifier {
+				t.Fatalf("shortcut modifier mismatch: want %v got %v", tt.wantModifier, got)
+			}
+			if got := keyboardShortcut.Key(); got != tt.wantKey {
+				t.Fatalf("shortcut key mismatch: want %q got %q", tt.wantKey, got)
 			}
 		})
 	}

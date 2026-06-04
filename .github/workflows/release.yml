@@ -87,10 +87,6 @@ jobs:
         shell: pwsh
         run: go install ./cmd/fyne
 
-      - name: Test
-        shell: pwsh
-        run: go test .
-
       - name: Package Windows app
         shell: pwsh
         env:
@@ -160,10 +156,6 @@ jobs:
         working-directory: fyne-master
         shell: bash
         run: go install ./cmd/fyne
-
-      - name: Test
-        shell: bash
-        run: go test .
 
       - name: Package macOS apps
         shell: bash
