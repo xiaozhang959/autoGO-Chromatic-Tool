@@ -178,6 +178,14 @@ const (
 )
 
 const (
+	aboutContactEmail = "tp9527@qq.com"
+	aboutProjectURL   = "https://github.com/xiaozhang959/autoGO-Chromatic-Tool.git"
+	aboutReleaseNotes = `暂无版本更新日志。
+
+后续发布版本时，可以在这里维护每个版本的更新内容。`
+)
+
+const (
 	shortcutActionScreenshot = "screenshot"
 	shortcutActionImport     = "import_image"
 	shortcutActionRange      = "range_select"
@@ -7930,6 +7938,29 @@ func main() {
 			shortcutRows.Add(row)
 		}
 
+		emailLabel := widget.NewLabel("邮箱：" + aboutContactEmail)
+		emailLabel.Wrapping = fyne.TextWrapWord
+		projectURLLabel := widget.NewLabel("项目地址：" + aboutProjectURL)
+		projectURLLabel.Wrapping = fyne.TextWrapWord
+		releaseNotesLabel := widget.NewLabel(aboutReleaseNotes)
+		releaseNotesLabel.Wrapping = fyne.TextWrapWord
+		releaseNotesScroll := container.NewVScroll(container.NewPadded(releaseNotesLabel))
+		releaseNotesBox := widget.NewCard("", "", newFixedHeightContainer(releaseNotesScroll, 260))
+		checkUpdateBtn := widget.NewButtonWithIcon("检查更新", theme.ViewRefreshIcon(), func() {
+			dialog.ShowInformation("检查更新", "检查更新功能预留中，后续可在这里对接软件更新。", w)
+		})
+		aboutPanel := container.NewVBox(
+			widget.NewLabelWithStyle("关于软件", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabel("软件联系方式与项目地址。"),
+			widget.NewSeparator(),
+			emailLabel,
+			projectURLLabel,
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle("版本更新日志", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			container.New(&fixedContentWidthLayout{width: 560}, releaseNotesBox),
+			container.NewHBox(checkUpdateBtn),
+		)
+
 		rightPanel := container.NewMax()
 		scrollSection := func(content fyne.CanvasObject) fyne.CanvasObject {
 			return container.NewVScroll(container.NewPadded(content))
@@ -7941,6 +7972,7 @@ func main() {
 			{title: "系统配置", content: scrollSection(systemConfigPanel)},
 			{title: "点阵参数设置", content: scrollSection(gridConfigPanel)},
 			{title: "快捷键管理", content: scrollSection(shortcutRows)},
+			{title: "关于软件", content: scrollSection(aboutPanel)},
 		}
 		selectSection := func(id int) {
 			if id < 0 || id >= len(sections) {
