@@ -7772,6 +7772,12 @@ func main() {
 			})
 			return container.NewBorder(nil, nil, widget.NewLabel(label), pickBtn, entry)
 		}
+		customColorGrid := container.NewGridWithColumns(2,
+			colorEntryRow("主色", customPrimaryEntry),
+			colorEntryRow("背景", customBackgroundEntry),
+			colorEntryRow("按钮", customButtonEntry),
+			colorEntryRow("表头", customHeaderEntry),
+		)
 		newCustomBtn := widget.NewButton("新增方案", func() {
 			updateCustomDraftFromFields()
 			usedIDs := map[string]bool{}
@@ -7882,10 +7888,7 @@ func main() {
 			widget.NewLabel("可新增多个自定义方案，并设置主色、背景、按钮、表头。颜色格式：#RRGGBB。"),
 			container.NewBorder(nil, nil, widget.NewLabel("自定义方案"), container.NewHBox(newCustomBtn, updateCustomBtn, deleteCustomBtn), customSchemeSelect),
 			container.NewBorder(nil, nil, widget.NewLabel("方案名称"), nil, customNameEntry),
-			colorEntryRow("主色", customPrimaryEntry),
-			colorEntryRow("背景", customBackgroundEntry),
-			colorEntryRow("按钮", customButtonEntry),
-			colorEntryRow("表头", customHeaderEntry),
+			customColorGrid,
 		)
 
 		gridConfigPanel := container.NewVBox(
@@ -7928,13 +7931,16 @@ func main() {
 		}
 
 		rightPanel := container.NewMax()
+		scrollSection := func(content fyne.CanvasObject) fyne.CanvasObject {
+			return container.NewVScroll(container.NewPadded(content))
+		}
 		sections := []struct {
 			title   string
 			content fyne.CanvasObject
 		}{
-			{title: "系统配置", content: container.NewPadded(systemConfigPanel)},
-			{title: "点阵参数设置", content: container.NewPadded(gridConfigPanel)},
-			{title: "快捷键管理", content: container.NewPadded(container.NewVScroll(shortcutRows))},
+			{title: "系统配置", content: scrollSection(systemConfigPanel)},
+			{title: "点阵参数设置", content: scrollSection(gridConfigPanel)},
+			{title: "快捷键管理", content: scrollSection(shortcutRows)},
 		}
 		selectSection := func(id int) {
 			if id < 0 || id >= len(sections) {
