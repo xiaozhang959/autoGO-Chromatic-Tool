@@ -8154,10 +8154,8 @@ func main() {
 	registerCommand(commandGrabNode, func() {
 		nodeTool.Capture()
 	})
-	makeFixedPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
-		minWidth := canvas.NewRectangle(color.Transparent)
-		minWidth.SetMinSize(fyne.NewSize(width, 1))
-		return container.NewStack(minWidth, content)
+	makeMinWidthPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
+		return container.New(&splitMinWidthLayout{width: width}, content)
 	}
 	makeFixedWidthPanel := func(width float32, content fyne.CanvasObject) *fyne.Container {
 		return container.New(&fixedWidthLayout{width: width}, content)
@@ -8383,13 +8381,13 @@ func main() {
 	)
 	const (
 		leftPanelWidth     float32 = 190
-		rightPanelMinWidth float32 = 340
+		rightPanelMinWidth float32 = 260
 	)
 	leftPanel := makeFixedWidthPanel(leftPanelWidth, container.New(&compactPaddedLayout{padding: 2}, container.NewVScroll(container.New(&fixedContentWidthLayout{width: 170}, leftControls))))
 
 	// 右侧工具栏布局：模拟图色工具 / 节点工具面板
 	headerBg = canvas.NewRectangle(getHeaderBgColor(isDarkTheme))
-	headerBg.SetMinSize(fyne.NewSize(360, 28))
+	headerBg.SetMinSize(fyne.NewSize(rightPanelMinWidth, 28))
 
 	idHeader = canvas.NewText("", getTextColor(isDarkTheme))
 	checkHeader := canvas.NewText("勾选", getTextColor(isDarkTheme))
@@ -8781,7 +8779,7 @@ func main() {
 			rightTabs.Select(nodeTabItem)
 		}
 	}
-	rightPanel := makeFixedPanel(rightPanelMinWidth, container.NewVScroll(rightTabs))
+	rightPanel := makeMinWidthPanel(rightPanelMinWidth, container.NewVScroll(rightTabs))
 
 	// 左工具栏固定宽度；右工具栏默认使用最小宽度，用户可拖拽调整
 	centerRightSplit = container.NewHSplit(tabs, rightPanel)
@@ -9036,6 +9034,26 @@ func (l *fixedContentWidthLayout) Layout(objects []fyne.CanvasObject, containerS
 	}
 	objects[0].Move(fyne.NewPos(0, 0))
 	objects[0].Resize(fyne.NewSize(l.width, containerSize.Height))
+}
+
+type splitMinWidthLayout struct {
+	width float32
+}
+
+func (l *splitMinWidthLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	height := float32(1)
+	if len(objects) > 0 {
+		height = objects[0].MinSize().Height
+	}
+	return fyne.NewSize(l.width, height)
+}
+
+func (l *splitMinWidthLayout) Layout(objects []fyne.CanvasObject, containerSize fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	objects[0].Move(fyne.NewPos(0, 0))
+	objects[0].Resize(containerSize)
 }
 
 // 固定宽度布局
