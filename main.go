@@ -69,10 +69,11 @@ type UserConfig struct {
 	GridRows      int    `json:"grid_rows"`
 	GridSpacing   int    `json:"grid_spacing"`
 
-	RightPanelSplitOffset float64            `json:"right_panel_split_offset"`
-	FormatTemplates       map[string]string  `json:"format_templates"`
-	Shortcuts             map[string]string  `json:"shortcuts"`
-	ToolButtons           []ToolButtonConfig `json:"tool_buttons"`
+	RightPanelSplitOffset float64                   `json:"right_panel_split_offset"`
+	CustomThemeSchemes    []CustomThemeSchemeConfig `json:"custom_theme_schemes"`
+	FormatTemplates       map[string]string         `json:"format_templates"`
+	Shortcuts             map[string]string         `json:"shortcuts"`
+	ToolButtons           []ToolButtonConfig        `json:"tool_buttons"`
 }
 
 type ToolButtonConfig struct {
@@ -80,6 +81,15 @@ type ToolButtonConfig struct {
 	Label     string `json:"label,omitempty"`
 	Visible   bool   `json:"visible"`
 	Order     int    `json:"order"`
+}
+
+type CustomThemeSchemeConfig struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Primary          string `json:"primary"`
+	Background       string `json:"background"`
+	Button           string `json:"button"`
+	HeaderBackground string `json:"header_background"`
 }
 
 // 全局变量定义
@@ -91,8 +101,9 @@ var (
 	linkedRowBgColor  = color.NRGBA{255, 215, 0, 110} // 图像点和列表联动行背景色
 
 	// 主题状态变量 - 初始值会在程序启动时根据系统主题设置
-	isDarkTheme          = false
-	currentThemeSchemeID = appThemeSchemeClassicBlue
+	isDarkTheme               = false
+	currentThemeSchemeID      = appThemeSchemeClassicBlue
+	currentCustomThemeSchemes []CustomThemeSchemeConfig
 
 	// 设备选择相关变量
 	deviceSelect         *widget.Select
@@ -159,6 +170,11 @@ const (
 	appThemeSchemeViolet      = "violet"
 	appThemeSchemeAmber       = "amber"
 	appThemeSchemeCyber       = "cyber"
+)
+
+const (
+	appThemeCustomSchemePrefix        = "custom:"
+	appThemeCustomSchemeDisplayPrefix = "自定义："
 )
 
 const (
@@ -519,7 +535,21 @@ var appThemeSchemes = []appThemeScheme{
 	},
 }
 
-var appThemeSchemeOptions = themeSchemeDisplayOptions()
+func themeSchemeDisplayOptions() []string {
+	return themeSchemeDisplayOptionsFor(currentCustomThemeSchemes)
+}
+
+func themeSchemeDisplayOptionsFor(customSchemes []CustomThemeSchemeConfig) []string {
+	customSchemes = normalizeCustomThemeSchemes(customSchemes)
+	options := make([]string, 0, len(appThemeSchemes)+len(customSchemes))
+	for _, scheme := range appThemeSchemes {
+		options = append(options, scheme.Name)
+	}
+	for _, scheme := range customSchemes {
+		options = append(options, customThemeSchemeDisplayName(scheme.Name))
+	}
+	return options
+}
 
 func normalizeThemeMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
@@ -558,15 +588,11 @@ func themeModeIsDark(mode string, systemVariant fyne.ThemeVariant) bool {
 	}
 }
 
-func themeSchemeDisplayOptions() []string {
-	options := make([]string, 0, len(appThemeSchemes))
-	for _, scheme := range appThemeSchemes {
-		options = append(options, scheme.Name)
-	}
-	return options
+func normalizeThemeScheme(scheme string) string {
+	return normalizeThemeSchemeWithCustom(scheme, currentCustomThemeSchemes)
 }
 
-func normalizeThemeScheme(scheme string) string {
+func normalizeThemeSchemeWithCustom(scheme string, customSchemes []CustomThemeSchemeConfig) string {
 	trimmed := strings.TrimSpace(scheme)
 	lower := strings.ToLower(trimmed)
 	for _, item := range appThemeSchemes {
@@ -574,36 +600,65 @@ func normalizeThemeScheme(scheme string) string {
 			return item.ID
 		}
 	}
+
+	for _, item := range normalizeCustomThemeSchemes(customSchemes) {
+		displayName := customThemeSchemeDisplayName(item.Name)
+		if trimmed == item.ID || lower == strings.ToLower(item.ID) || trimmed == displayName || trimmed == item.Name {
+			return item.ID
+		}
+	}
 	return appThemeSchemeClassicBlue
 }
 
 func themeSchemeDisplay(scheme string) string {
-	id := normalizeThemeScheme(scheme)
+	return themeSchemeDisplayFor(scheme, currentCustomThemeSchemes)
+}
+
+func themeSchemeDisplayFor(scheme string, customSchemes []CustomThemeSchemeConfig) string {
+	id := normalizeThemeSchemeWithCustom(scheme, customSchemes)
 	for _, item := range appThemeSchemes {
 		if item.ID == id {
 			return item.Name
+		}
+	}
+	for _, item := range normalizeCustomThemeSchemes(customSchemes) {
+		if item.ID == id {
+			return customThemeSchemeDisplayName(item.Name)
 		}
 	}
 	return appThemeSchemes[0].Name
 }
 
 func themeSchemeFromDisplay(display string) string {
-	return normalizeThemeScheme(display)
+	return themeSchemeFromDisplayFor(display, currentCustomThemeSchemes)
+}
+
+func themeSchemeFromDisplayFor(display string, customSchemes []CustomThemeSchemeConfig) string {
+	return normalizeThemeSchemeWithCustom(display, customSchemes)
 }
 
 func nextThemeScheme(scheme string) string {
-	id := normalizeThemeScheme(scheme)
-	for i, item := range appThemeSchemes {
+	return nextThemeSchemeWithCustom(scheme, currentCustomThemeSchemes)
+}
+
+func nextThemeSchemeWithCustom(scheme string, customSchemes []CustomThemeSchemeConfig) string {
+	schemes := allThemeSchemes(customSchemes)
+	id := normalizeThemeSchemeWithCustom(scheme, customSchemes)
+	for i, item := range schemes {
 		if item.ID == id {
-			return appThemeSchemes[(i+1)%len(appThemeSchemes)].ID
+			return schemes[(i+1)%len(schemes)].ID
 		}
 	}
-	return appThemeSchemes[0].ID
+	return schemes[0].ID
 }
 
 func themeSchemeByID(scheme string) appThemeScheme {
-	id := normalizeThemeScheme(scheme)
-	for _, item := range appThemeSchemes {
+	return themeSchemeByIDWithCustom(scheme, currentCustomThemeSchemes)
+}
+
+func themeSchemeByIDWithCustom(scheme string, customSchemes []CustomThemeSchemeConfig) appThemeScheme {
+	id := normalizeThemeSchemeWithCustom(scheme, customSchemes)
+	for _, item := range allThemeSchemes(customSchemes) {
 		if item.ID == id {
 			return item
 		}
@@ -612,7 +667,11 @@ func themeSchemeByID(scheme string) appThemeScheme {
 }
 
 func themePaletteFor(scheme string, isDark bool) appThemePalette {
-	item := themeSchemeByID(scheme)
+	return themePaletteForWithCustom(scheme, isDark, currentCustomThemeSchemes)
+}
+
+func themePaletteForWithCustom(scheme string, isDark bool, customSchemes []CustomThemeSchemeConfig) appThemePalette {
+	item := themeSchemeByIDWithCustom(scheme, customSchemes)
 	if isDark {
 		return item.Dark
 	}
@@ -621,6 +680,215 @@ func themePaletteFor(scheme string, isDark bool) appThemePalette {
 
 func currentThemePalette(isDark bool) appThemePalette {
 	return themePaletteFor(currentThemeSchemeID, isDark)
+}
+
+func allThemeSchemes(customSchemes []CustomThemeSchemeConfig) []appThemeScheme {
+	customSchemes = normalizeCustomThemeSchemes(customSchemes)
+	schemes := make([]appThemeScheme, 0, len(appThemeSchemes)+len(customSchemes))
+	schemes = append(schemes, appThemeSchemes...)
+	for _, scheme := range customSchemes {
+		schemes = append(schemes, customThemeSchemeToAppThemeScheme(scheme))
+	}
+	return schemes
+}
+
+func customThemeSchemeToAppThemeScheme(scheme CustomThemeSchemeConfig) appThemeScheme {
+	palette := paletteFromCustomThemeScheme(scheme)
+	return appThemeScheme{
+		ID:    scheme.ID,
+		Name:  customThemeSchemeDisplayName(scheme.Name),
+		Light: palette,
+		Dark:  palette,
+	}
+}
+
+func paletteFromCustomThemeScheme(scheme CustomThemeSchemeConfig) appThemePalette {
+	base := appThemeSchemes[0].Light
+	primary := mustThemeColor(scheme.Primary, base.Primary)
+	background := mustThemeColor(scheme.Background, base.Background)
+	button := mustThemeColor(scheme.Button, base.Button)
+	header := mustThemeColor(scheme.HeaderBackground, base.HeaderBackground)
+	foreground := contrastNRGBA(background)
+
+	return appThemePalette{
+		Primary:          primary,
+		Foreground:       foreground,
+		ForegroundOnKey:  contrastNRGBA(primary),
+		Background:       background,
+		Button:           button,
+		InputBackground:  blendNRGBA(background, button, 0.65),
+		InputBorder:      blendNRGBA(background, primary, 0.55),
+		HeaderBackground: header,
+		Selection:        blendNRGBA(background, primary, 0.35),
+		Hover:            blendNRGBA(button, primary, 0.18),
+		Focus:            withAlphaNRGBA(primary, 92),
+		Separator:        blendNRGBA(background, primary, 0.25),
+		Placeholder:      blendNRGBA(background, foreground, 0.58),
+		Shadow:           color.NRGBA{0, 0, 0, customThemeShadowAlpha(background)},
+	}
+}
+
+func customThemeSchemeDisplayName(name string) string {
+	return appThemeCustomSchemeDisplayPrefix + strings.TrimSpace(name)
+}
+
+func normalizeCustomThemeSchemes(schemes []CustomThemeSchemeConfig) []CustomThemeSchemeConfig {
+	usedIDs := map[string]bool{}
+	usedNames := map[string]bool{}
+	normalized := make([]CustomThemeSchemeConfig, 0, len(schemes))
+	for _, scheme := range schemes {
+		primary, okPrimary := normalizeThemeHex(scheme.Primary)
+		background, okBackground := normalizeThemeHex(scheme.Background)
+		button, okButton := normalizeThemeHex(scheme.Button)
+		header, okHeader := normalizeThemeHex(scheme.HeaderBackground)
+		if !okPrimary || !okBackground || !okButton || !okHeader {
+			continue
+		}
+
+		id := strings.TrimSpace(scheme.ID)
+		if !strings.HasPrefix(strings.ToLower(id), appThemeCustomSchemePrefix) || usedIDs[id] {
+			id = nextCustomThemeSchemeID(usedIDs)
+		}
+		usedIDs[id] = true
+
+		name := uniqueCustomThemeSchemeName(scheme.Name, len(normalized)+1, usedNames)
+		normalized = append(normalized, CustomThemeSchemeConfig{
+			ID:               id,
+			Name:             name,
+			Primary:          primary,
+			Background:       background,
+			Button:           button,
+			HeaderBackground: header,
+		})
+	}
+	return normalized
+}
+
+func validateCustomThemeSchemes(schemes []CustomThemeSchemeConfig) error {
+	for _, scheme := range schemes {
+		name := strings.TrimSpace(scheme.Name)
+		if name == "" {
+			return fmt.Errorf("自定义配色方案名称不能为空")
+		}
+		fields := []struct {
+			label string
+			value string
+		}{
+			{label: "主色", value: scheme.Primary},
+			{label: "背景", value: scheme.Background},
+			{label: "按钮", value: scheme.Button},
+			{label: "表头", value: scheme.HeaderBackground},
+		}
+		for _, field := range fields {
+			if _, ok := normalizeThemeHex(field.value); !ok {
+				return fmt.Errorf("自定义配色 %q 的%s需要输入 #RRGGBB 格式颜色", name, field.label)
+			}
+		}
+	}
+	return nil
+}
+
+func copyCustomThemeSchemes(schemes []CustomThemeSchemeConfig) []CustomThemeSchemeConfig {
+	copied := make([]CustomThemeSchemeConfig, len(schemes))
+	copy(copied, schemes)
+	return copied
+}
+
+func nextCustomThemeSchemeID(usedIDs map[string]bool) string {
+	for i := 1; ; i++ {
+		id := fmt.Sprintf("%s%d", appThemeCustomSchemePrefix, i)
+		if !usedIDs[id] {
+			return id
+		}
+	}
+}
+
+func uniqueCustomThemeSchemeName(name string, index int, usedNames map[string]bool) string {
+	base := strings.TrimSpace(name)
+	if base == "" {
+		base = fmt.Sprintf("自定义配色%d", index)
+	}
+	candidate := base
+	for i := 2; usedNames[candidate]; i++ {
+		candidate = fmt.Sprintf("%s %d", base, i)
+	}
+	usedNames[candidate] = true
+	return candidate
+}
+
+func normalizeThemeHex(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	trimmed = strings.TrimPrefix(trimmed, "#")
+	if len(trimmed) != 6 {
+		return "", false
+	}
+	if _, err := strconv.ParseUint(trimmed, 16, 32); err != nil {
+		return "", false
+	}
+	return "#" + strings.ToUpper(trimmed), true
+}
+
+func colorFromThemeHex(value string) (color.NRGBA, bool) {
+	hex, ok := normalizeThemeHex(value)
+	if !ok {
+		return color.NRGBA{}, false
+	}
+	parsed, err := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)
+	if err != nil {
+		return color.NRGBA{}, false
+	}
+	return color.NRGBA{R: uint8(parsed >> 16), G: uint8(parsed >> 8), B: uint8(parsed), A: 255}, true
+}
+
+func mustThemeColor(value string, fallback color.NRGBA) color.NRGBA {
+	if c, ok := colorFromThemeHex(value); ok {
+		return c
+	}
+	return fallback
+}
+
+func hexFromColor(c color.Color) string {
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02X%02X%02X", uint8(r>>8), uint8(g>>8), uint8(b>>8))
+}
+
+func contrastNRGBA(c color.NRGBA) color.NRGBA {
+	if colorBrightness(c) > 128 {
+		return color.NRGBA{0, 0, 0, 255}
+	}
+	return color.NRGBA{255, 255, 255, 255}
+}
+
+func colorBrightness(c color.NRGBA) float64 {
+	return 0.299*float64(c.R) + 0.587*float64(c.G) + 0.114*float64(c.B)
+}
+
+func blendNRGBA(base, overlay color.NRGBA, overlayRatio float64) color.NRGBA {
+	if overlayRatio < 0 {
+		overlayRatio = 0
+	}
+	if overlayRatio > 1 {
+		overlayRatio = 1
+	}
+	baseRatio := 1 - overlayRatio
+	return color.NRGBA{
+		R: uint8(float64(base.R)*baseRatio + float64(overlay.R)*overlayRatio),
+		G: uint8(float64(base.G)*baseRatio + float64(overlay.G)*overlayRatio),
+		B: uint8(float64(base.B)*baseRatio + float64(overlay.B)*overlayRatio),
+		A: 255,
+	}
+}
+
+func withAlphaNRGBA(c color.NRGBA, alpha uint8) color.NRGBA {
+	c.A = alpha
+	return c
+}
+
+func customThemeShadowAlpha(background color.NRGBA) uint8 {
+	if colorBrightness(background) > 128 {
+		return 45
+	}
+	return 120
 }
 
 func copyShortcutConfig(shortcuts map[string]string) map[string]string {
@@ -1197,7 +1465,8 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 		config.DirectionMode = defaults.DirectionMode
 	}
 	config.ThemeMode = normalizeThemeMode(config.ThemeMode)
-	config.ThemeScheme = normalizeThemeScheme(config.ThemeScheme)
+	config.CustomThemeSchemes = normalizeCustomThemeSchemes(config.CustomThemeSchemes)
+	config.ThemeScheme = normalizeThemeSchemeWithCustom(config.ThemeScheme, config.CustomThemeSchemes)
 	if config.GridCols <= 0 {
 		config.GridCols = defaults.GridCols
 	}
@@ -6416,7 +6685,9 @@ func main() {
 	// 检测系统当前主题并更新isDarkTheme变量
 	currentTheme := a.Settings().ThemeVariant()
 	themeModeValue := normalizeThemeMode(userConfig.ThemeMode)
-	themeSchemeValue := normalizeThemeScheme(userConfig.ThemeScheme)
+	customThemeSchemesValue := copyCustomThemeSchemes(userConfig.CustomThemeSchemes)
+	currentCustomThemeSchemes = copyCustomThemeSchemes(customThemeSchemesValue)
+	themeSchemeValue := normalizeThemeSchemeWithCustom(userConfig.ThemeScheme, customThemeSchemesValue)
 	isDarkTheme = themeModeIsDark(themeModeValue, currentTheme)
 	currentThemeSchemeID = themeSchemeValue
 
@@ -6602,7 +6873,7 @@ func main() {
 
 	// 主题切换功能
 	toggleTheme := func() {
-		themeSchemeValue = nextThemeScheme(themeSchemeValue)
+		themeSchemeValue = nextThemeSchemeWithCustom(themeSchemeValue, customThemeSchemesValue)
 		currentThemeSchemeID = themeSchemeValue
 		a.Settings().SetTheme(newMyTheme(themeSchemeValue, isDarkTheme))
 
@@ -7254,9 +7525,11 @@ func main() {
 	registerCommand(shortcutActionScreenshot, captureScreenshot)
 	registerCommand(shortcutActionImport, importImage)
 	registerCommand(commandCopyCode, generateCodeFunc)
-	applyThemeSettings := func(mode, scheme string) {
+	applyThemeSettings := func(mode, scheme string, customSchemes []CustomThemeSchemeConfig) {
 		themeModeValue = normalizeThemeMode(mode)
-		themeSchemeValue = normalizeThemeScheme(scheme)
+		customThemeSchemesValue = normalizeCustomThemeSchemes(customSchemes)
+		currentCustomThemeSchemes = copyCustomThemeSchemes(customThemeSchemesValue)
+		themeSchemeValue = normalizeThemeSchemeWithCustom(scheme, customThemeSchemesValue)
 		currentThemeSchemeID = themeSchemeValue
 		isDarkTheme = themeModeIsDark(themeModeValue, a.Settings().ThemeVariant())
 		a.Settings().SetTheme(newMyTheme(themeSchemeValue, isDarkTheme))
@@ -7310,9 +7583,28 @@ func main() {
 		logPathLabel.Wrapping = fyne.TextWrapWord
 		themeModeSelect := widget.NewSelect(appThemeModeOptions, nil)
 		themeModeSelect.SetSelected(themeModeDisplay(themeModeValue))
-		themeSchemeSelect := widget.NewSelect(appThemeSchemeOptions, nil)
-		themeSchemeSelect.SetSelected(themeSchemeDisplay(themeSchemeValue))
+		customSchemesDraft := copyCustomThemeSchemes(customThemeSchemesValue)
+		selectedThemeSchemeID := normalizeThemeSchemeWithCustom(themeSchemeValue, customSchemesDraft)
+		themeSchemeSelect := widget.NewSelect(themeSchemeDisplayOptionsFor(customSchemesDraft), nil)
+		themeSchemeSelect.SetSelected(themeSchemeDisplayFor(selectedThemeSchemeID, customSchemesDraft))
 		themePreviewRow := container.NewHBox()
+		customSchemeSelect := widget.NewSelect(nil, nil)
+		customNameEntry := widget.NewEntry()
+		customNameEntry.SetPlaceHolder("如: 我的配色")
+		customPrimaryEntry := widget.NewEntry()
+		customPrimaryEntry.SetPlaceHolder("#1D4ED8")
+		customBackgroundEntry := widget.NewEntry()
+		customBackgroundEntry.SetPlaceHolder("#F1F5F9")
+		customButtonEntry := widget.NewEntry()
+		customButtonEntry.SetPlaceHolder("#E2E8F0")
+		customHeaderEntry := widget.NewEntry()
+		customHeaderEntry.SetPlaceHolder("#D7E2F2")
+		var selectedCustomThemeID string
+		var updateCustomBtn *widget.Button
+		var deleteCustomBtn *widget.Button
+		customEditorUpdating := false
+		var refreshThemePreview func()
+
 		newThemeSwatch := func(label string, c color.Color) fyne.CanvasObject {
 			swatch := canvas.NewRectangle(c)
 			swatch.SetMinSize(fyne.NewSize(34, 18))
@@ -7320,10 +7612,40 @@ func main() {
 			swatch.StrokeWidth = 1
 			return container.NewHBox(swatch, widget.NewLabel(label))
 		}
-		refreshThemePreview := func() {
+		findCustomSchemeIndex := func(id string) int {
+			for i, scheme := range customSchemesDraft {
+				if scheme.ID == id {
+					return i
+				}
+			}
+			return -1
+		}
+		customSchemeOptions := func() []string {
+			options := make([]string, 0, len(customSchemesDraft))
+			for i, scheme := range customSchemesDraft {
+				name := strings.TrimSpace(scheme.Name)
+				if name == "" {
+					name = fmt.Sprintf("未命名%d", i+1)
+				}
+				options = append(options, customThemeSchemeDisplayName(name))
+			}
+			return options
+		}
+		customSchemeIDFromDisplay := func(display string) string {
+			for i, scheme := range customSchemesDraft {
+				name := strings.TrimSpace(scheme.Name)
+				if name == "" {
+					name = fmt.Sprintf("未命名%d", i+1)
+				}
+				if display == customThemeSchemeDisplayName(name) {
+					return scheme.ID
+				}
+			}
+			return ""
+		}
+		refreshThemePreview = func() {
 			mode := themeModeFromDisplay(themeModeSelect.Selected)
-			scheme := themeSchemeFromDisplay(themeSchemeSelect.Selected)
-			palette := themePaletteFor(scheme, themeModeIsDark(mode, a.Settings().ThemeVariant()))
+			palette := themePaletteForWithCustom(selectedThemeSchemeID, themeModeIsDark(mode, a.Settings().ThemeVariant()), customSchemesDraft)
 			themePreviewRow.Objects = []fyne.CanvasObject{
 				newThemeSwatch("主色", palette.Primary),
 				newThemeSwatch("背景", palette.Background),
@@ -7332,12 +7654,184 @@ func main() {
 			}
 			themePreviewRow.Refresh()
 		}
+		refreshThemeSchemeSelect := func() {
+			selectedThemeSchemeID = normalizeThemeSchemeWithCustom(selectedThemeSchemeID, customSchemesDraft)
+			themeSchemeSelect.SetOptions(themeSchemeDisplayOptionsFor(customSchemesDraft))
+			themeSchemeSelect.SetSelected(themeSchemeDisplayFor(selectedThemeSchemeID, customSchemesDraft))
+			refreshThemePreview()
+		}
+		refreshCustomSchemeSelect := func() {
+			customSchemeSelect.SetOptions(customSchemeOptions())
+			if selectedCustomThemeID != "" {
+				idx := findCustomSchemeIndex(selectedCustomThemeID)
+				if idx >= 0 {
+					name := strings.TrimSpace(customSchemesDraft[idx].Name)
+					if name == "" {
+						name = fmt.Sprintf("未命名%d", idx+1)
+					}
+					customSchemeSelect.SetSelected(customThemeSchemeDisplayName(name))
+				}
+			}
+		}
+		setCustomEditorEnabled := func(enabled bool) {
+			for _, entry := range []*widget.Entry{customNameEntry, customPrimaryEntry, customBackgroundEntry, customButtonEntry, customHeaderEntry} {
+				if enabled {
+					entry.Enable()
+				} else {
+					entry.Disable()
+				}
+			}
+			if updateCustomBtn != nil {
+				if enabled {
+					updateCustomBtn.Enable()
+				} else {
+					updateCustomBtn.Disable()
+				}
+			}
+			if deleteCustomBtn != nil {
+				if enabled {
+					deleteCustomBtn.Enable()
+				} else {
+					deleteCustomBtn.Disable()
+				}
+			}
+		}
+		loadCustomEditor := func(id string) {
+			customEditorUpdating = true
+			defer func() { customEditorUpdating = false }()
+			selectedCustomThemeID = id
+			idx := findCustomSchemeIndex(id)
+			if idx < 0 {
+				customNameEntry.SetText("")
+				customPrimaryEntry.SetText("")
+				customBackgroundEntry.SetText("")
+				customButtonEntry.SetText("")
+				customHeaderEntry.SetText("")
+				setCustomEditorEnabled(false)
+				return
+			}
+			scheme := customSchemesDraft[idx]
+			setCustomEditorEnabled(true)
+			customNameEntry.SetText(scheme.Name)
+			customPrimaryEntry.SetText(scheme.Primary)
+			customBackgroundEntry.SetText(scheme.Background)
+			customButtonEntry.SetText(scheme.Button)
+			customHeaderEntry.SetText(scheme.HeaderBackground)
+		}
+		updateCustomDraftFromFields := func() {
+			if customEditorUpdating || selectedCustomThemeID == "" {
+				return
+			}
+			idx := findCustomSchemeIndex(selectedCustomThemeID)
+			if idx < 0 {
+				return
+			}
+			customSchemesDraft[idx].Name = customNameEntry.Text
+			customSchemesDraft[idx].Primary = customPrimaryEntry.Text
+			customSchemesDraft[idx].Background = customBackgroundEntry.Text
+			customSchemesDraft[idx].Button = customButtonEntry.Text
+			customSchemesDraft[idx].HeaderBackground = customHeaderEntry.Text
+		}
+		for _, entry := range []*widget.Entry{customNameEntry, customPrimaryEntry, customBackgroundEntry, customButtonEntry, customHeaderEntry} {
+			entry.OnChanged = func(string) {
+				updateCustomDraftFromFields()
+			}
+		}
+		applyCustomEditor := func() bool {
+			updateCustomDraftFromFields()
+			idx := findCustomSchemeIndex(selectedCustomThemeID)
+			if idx < 0 {
+				dialog.ShowInformation("提示", "请先新增或选择一个自定义配色方案", w)
+				return false
+			}
+			if err := validateCustomThemeSchemes([]CustomThemeSchemeConfig{customSchemesDraft[idx]}); err != nil {
+				dialog.ShowError(err, w)
+				return false
+			}
+			customSchemesDraft = normalizeCustomThemeSchemes(customSchemesDraft)
+			refreshCustomSchemeSelect()
+			refreshThemeSchemeSelect()
+			loadCustomEditor(selectedCustomThemeID)
+			return true
+		}
+		openThemeColorPicker := func(title string, entry *widget.Entry) {
+			initial, ok := colorFromThemeHex(entry.Text)
+			if !ok {
+				initial = color.NRGBA{255, 255, 255, 255}
+			}
+			picker := dialog.NewColorPicker(title, "选择颜色", func(c color.Color) {
+				entry.SetText(hexFromColor(c))
+			}, w)
+			picker.Advanced = true
+			picker.SetColor(initial)
+			picker.Show()
+		}
+		colorEntryRow := func(label string, entry *widget.Entry) fyne.CanvasObject {
+			pickBtn := widget.NewButton("选择", func() {
+				openThemeColorPicker(label, entry)
+			})
+			return container.NewBorder(nil, nil, widget.NewLabel(label), pickBtn, entry)
+		}
+		newCustomBtn := widget.NewButton("新增方案", func() {
+			updateCustomDraftFromFields()
+			usedIDs := map[string]bool{}
+			usedNames := map[string]bool{}
+			for _, scheme := range customSchemesDraft {
+				usedIDs[scheme.ID] = true
+				if strings.TrimSpace(scheme.Name) != "" {
+					usedNames[strings.TrimSpace(scheme.Name)] = true
+				}
+			}
+			mode := themeModeFromDisplay(themeModeSelect.Selected)
+			palette := themePaletteForWithCustom(selectedThemeSchemeID, themeModeIsDark(mode, a.Settings().ThemeVariant()), customSchemesDraft)
+			scheme := CustomThemeSchemeConfig{
+				ID:               nextCustomThemeSchemeID(usedIDs),
+				Name:             uniqueCustomThemeSchemeName("", len(customSchemesDraft)+1, usedNames),
+				Primary:          hexFromColor(palette.Primary),
+				Background:       hexFromColor(palette.Background),
+				Button:           hexFromColor(palette.Button),
+				HeaderBackground: hexFromColor(palette.HeaderBackground),
+			}
+			customSchemesDraft = append(customSchemesDraft, scheme)
+			selectedCustomThemeID = scheme.ID
+			selectedThemeSchemeID = scheme.ID
+			refreshCustomSchemeSelect()
+			refreshThemeSchemeSelect()
+			loadCustomEditor(scheme.ID)
+		})
+		updateCustomBtn = widget.NewButton("更新方案", func() {
+			applyCustomEditor()
+		})
+		deleteCustomBtn = widget.NewButton("删除方案", func() {
+			idx := findCustomSchemeIndex(selectedCustomThemeID)
+			if idx < 0 {
+				return
+			}
+			deletedID := customSchemesDraft[idx].ID
+			customSchemesDraft = append(customSchemesDraft[:idx], customSchemesDraft[idx+1:]...)
+			if selectedThemeSchemeID == deletedID {
+				selectedThemeSchemeID = appThemeSchemeClassicBlue
+			}
+			selectedCustomThemeID = ""
+			refreshCustomSchemeSelect()
+			refreshThemeSchemeSelect()
+			loadCustomEditor("")
+		})
+		customSchemeSelect.OnChanged = func(display string) {
+			loadCustomEditor(customSchemeIDFromDisplay(display))
+		}
 		themeModeSelect.OnChanged = func(string) {
 			refreshThemePreview()
 		}
-		themeSchemeSelect.OnChanged = func(string) {
+		themeSchemeSelect.OnChanged = func(display string) {
+			selectedThemeSchemeID = themeSchemeFromDisplayFor(display, customSchemesDraft)
 			refreshThemePreview()
 		}
+		if len(customSchemesDraft) > 0 {
+			selectedCustomThemeID = customSchemesDraft[0].ID
+		}
+		refreshCustomSchemeSelect()
+		loadCustomEditor(selectedCustomThemeID)
 		refreshThemePreview()
 
 		colsEntry := widget.NewEntry()
@@ -7379,10 +7873,19 @@ func main() {
 			logPathLabel,
 			widget.NewSeparator(),
 			widget.NewLabelWithStyle("配色管理", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabel("主题按钮会在内置配色方案间循环切换；亮暗模式仍可单独设置。"),
+			widget.NewLabel("主题按钮会在所有内置和自定义配色方案间循环切换；亮暗模式仍可单独设置。"),
 			container.NewBorder(nil, nil, widget.NewLabel("亮暗模式"), nil, themeModeSelect),
 			container.NewBorder(nil, nil, widget.NewLabel("配色方案"), nil, themeSchemeSelect),
 			container.NewBorder(nil, nil, widget.NewLabel("方案预览"), nil, themePreviewRow),
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle("自定义配色", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabel("可新增多个自定义方案，并设置主色、背景、按钮、表头。颜色格式：#RRGGBB。"),
+			container.NewBorder(nil, nil, widget.NewLabel("自定义方案"), container.NewHBox(newCustomBtn, updateCustomBtn, deleteCustomBtn), customSchemeSelect),
+			container.NewBorder(nil, nil, widget.NewLabel("方案名称"), nil, customNameEntry),
+			colorEntryRow("主色", customPrimaryEntry),
+			colorEntryRow("背景", customBackgroundEntry),
+			colorEntryRow("按钮", customButtonEntry),
+			colorEntryRow("表头", customHeaderEntry),
 		)
 
 		gridConfigPanel := container.NewVBox(
@@ -7499,12 +8002,18 @@ func main() {
 				return
 			}
 
+			updateCustomDraftFromFields()
+			if err := validateCustomThemeSchemes(customSchemesDraft); err != nil {
+				dialog.ShowError(err, w)
+				return
+			}
+
 			gridColsValue = cols
 			gridRowsValue = rows
 			gridSpacingValue = spacing
 			shortcutConfig = normalizeShortcutConfig(newShortcuts)
 			setAppLoggingEnabled(logEnabledCheck.Checked)
-			applyThemeSettings(themeModeFromDisplay(themeModeSelect.Selected), themeSchemeFromDisplay(themeSchemeSelect.Selected))
+			applyThemeSettings(themeModeFromDisplay(themeModeSelect.Selected), selectedThemeSchemeID, customSchemesDraft)
 			registerConfiguredShortcuts()
 			shortcutsRestored = true
 			if refreshShortcutButtonTexts != nil {
@@ -7859,7 +8368,7 @@ func main() {
 	updateTableHeader = func() {
 		headerBg.FillColor = getHeaderBgColor(isDarkTheme)
 		headerBg.Refresh()
-		textColor := getTextColor(isDarkTheme)
+		textColor := getContrastColor(headerBg.FillColor)
 		for _, header := range []*canvas.Text{idHeader, checkHeader, posHeader, colorHeader, statusHeader, offsetHeader} {
 			header.Color = textColor
 			header.Refresh()
@@ -8178,6 +8687,7 @@ func main() {
 			GridSpacing:   gridSpacingValue,
 
 			RightPanelSplitOffset: rightPanelSplitOffset,
+			CustomThemeSchemes:    copyCustomThemeSchemes(customThemeSchemesValue),
 			FormatTemplates:       copyAPIFormatTemplates(apiFormatTemplates),
 			Shortcuts:             copyShortcutConfig(shortcutConfig),
 			ToolButtons:           copyToolButtonConfigs(toolButtonConfig),

@@ -109,6 +109,61 @@ func TestMyThemeUsesSchemePalette(t *testing.T) {
 	assertColorNRGBA(t, th.Color(theme.ColorNameHeaderBackground, theme.VariantLight), palette.HeaderBackground)
 }
 
+func TestNormalizeUserConfigCustomThemeSchemes(t *testing.T) {
+	config := normalizeUserConfig(UserConfig{
+		ThemeScheme: "custom:1",
+		CustomThemeSchemes: []CustomThemeSchemeConfig{
+			{
+				ID:               "custom:1",
+				Name:             "夜间红",
+				Primary:          "aa0000",
+				Background:       "#101010",
+				Button:           "#202020",
+				HeaderBackground: "#300000",
+			},
+		},
+	})
+
+	if config.ThemeScheme != "custom:1" {
+		t.Fatalf("theme scheme mismatch: want %q got %q", "custom:1", config.ThemeScheme)
+	}
+	if len(config.CustomThemeSchemes) != 1 {
+		t.Fatalf("custom theme count mismatch: want 1 got %d", len(config.CustomThemeSchemes))
+	}
+	custom := config.CustomThemeSchemes[0]
+	if custom.Primary != "#AA0000" {
+		t.Fatalf("custom primary should be normalized, got %q", custom.Primary)
+	}
+
+	palette := themePaletteForWithCustom(config.ThemeScheme, false, config.CustomThemeSchemes)
+	assertColorNRGBA(t, palette.Primary, color.NRGBA{R: 0xaa, A: 0xff})
+	assertColorNRGBA(t, palette.Background, color.NRGBA{R: 0x10, G: 0x10, B: 0x10, A: 0xff})
+	assertColorNRGBA(t, palette.HeaderBackground, color.NRGBA{R: 0x30, A: 0xff})
+}
+
+func TestThemeSchemeDisplayAndNextIncludesCustomSchemes(t *testing.T) {
+	custom := normalizeCustomThemeSchemes([]CustomThemeSchemeConfig{
+		{
+			ID:               "custom:1",
+			Name:             "夜间红",
+			Primary:          "#AA0000",
+			Background:       "#101010",
+			Button:           "#202020",
+			HeaderBackground: "#300000",
+		},
+	})
+
+	if got := themeSchemeDisplayFor("custom:1", custom); got != "自定义：夜间红" {
+		t.Fatalf("custom display mismatch: want %q got %q", "自定义：夜间红", got)
+	}
+	if got := themeSchemeFromDisplayFor("自定义：夜间红", custom); got != "custom:1" {
+		t.Fatalf("custom display lookup mismatch: want %q got %q", "custom:1", got)
+	}
+	if got := nextThemeSchemeWithCustom(appThemeSchemeCyber, custom); got != "custom:1" {
+		t.Fatalf("custom scheme should follow built-ins: want %q got %q", "custom:1", got)
+	}
+}
+
 func TestAndroidCapDexMainArgsUsesClasspathAppProcess(t *testing.T) {
 	got := androidCapDexMainArgs("2", "7", "/sdcard/screenshot.png")
 	want := []string{
