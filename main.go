@@ -1388,39 +1388,6 @@ func newMyTheme(scheme string, isDark bool) fyne.Theme {
 	}
 }
 
-type compactButtonTheme struct{}
-
-func compactButtonBaseTheme() fyne.Theme {
-	if app := fyne.CurrentApp(); app != nil {
-		if currentTheme := app.Settings().Theme(); currentTheme != nil {
-			return currentTheme
-		}
-	}
-	return theme.DefaultTheme()
-}
-
-func (compactButtonTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
-	return compactButtonBaseTheme().Color(name, variant)
-}
-
-func (compactButtonTheme) Font(style fyne.TextStyle) fyne.Resource {
-	return compactButtonBaseTheme().Font(style)
-}
-
-func (compactButtonTheme) Icon(name fyne.ThemeIconName) fyne.Resource {
-	return compactButtonBaseTheme().Icon(name)
-}
-
-func (compactButtonTheme) Size(name fyne.ThemeSizeName) float32 {
-	if name == theme.SizeNameInnerPadding {
-		return 2
-	}
-	if name == theme.SizeNamePadding {
-		return 2
-	}
-	return compactButtonBaseTheme().Size(name)
-}
-
 // 自定义可点击表格行
 type ClickableTableRow struct {
 	widget.BaseWidget
@@ -8777,9 +8744,14 @@ func main() {
 		})
 	}
 
-	bottomActionButtons := container.NewThemeOverride(
-		container.NewGridWithColumns(4, copyCodeBtn, findTestBtn, codeTestBtn, makeButton("查图测试")),
-		compactButtonTheme{},
+	compactBottomButton := func(button fyne.CanvasObject) fyne.CanvasObject {
+		return container.New(&compactButtonWidthLayout{reduce: 16}, button)
+	}
+	bottomActionButtons := container.NewGridWithColumns(4,
+		compactBottomButton(copyCodeBtn),
+		compactBottomButton(findTestBtn),
+		compactBottomButton(codeTestBtn),
+		compactBottomButton(makeButton("找图测试")),
 	)
 
 	toolForm := container.NewVBox(
@@ -9074,6 +9046,27 @@ func (l *fixedContentWidthLayout) Layout(objects []fyne.CanvasObject, containerS
 	}
 	objects[0].Move(fyne.NewPos(0, 0))
 	objects[0].Resize(fyne.NewSize(l.width, containerSize.Height))
+}
+
+type compactButtonWidthLayout struct {
+	reduce float32
+}
+
+func (l *compactButtonWidthLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	if len(objects) == 0 {
+		return fyne.NewSize(0, 0)
+	}
+	size := objects[0].MinSize()
+	size.Width = fyne.Max(1, size.Width-l.reduce)
+	return size
+}
+
+func (l *compactButtonWidthLayout) Layout(objects []fyne.CanvasObject, containerSize fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	objects[0].Move(fyne.NewPos(0, 0))
+	objects[0].Resize(containerSize)
 }
 
 // 固定宽度布局
