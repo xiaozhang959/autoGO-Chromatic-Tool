@@ -133,6 +133,91 @@ func TestFormatAndroidDeviceID(t *testing.T) {
 	}
 }
 
+func TestParseShortcutText(t *testing.T) {
+	tests := []struct {
+		name             string
+		text             string
+		wantFormatted    string
+		wantShortcutName string
+		wantErr          bool
+	}{
+		{
+			name:             "custom combo",
+			text:             "Ctrl + Shift + S",
+			wantFormatted:    "Ctrl+Shift+S",
+			wantShortcutName: "CustomDesktop:Shift+Control+S",
+		},
+		{
+			name:             "builtin select all",
+			text:             "Ctrl+A",
+			wantFormatted:    "Ctrl+A",
+			wantShortcutName: "SelectAll",
+		},
+		{
+			name:             "builtin undo",
+			text:             "Ctrl+Z",
+			wantFormatted:    "Ctrl+Z",
+			wantShortcutName: "Undo",
+		},
+		{
+			name:    "missing modifier",
+			text:    "A",
+			wantErr: true,
+		},
+		{
+			name: "empty disables shortcut",
+			text: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shortcut, formatted, err := parseShortcutText(tt.text)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if formatted != tt.wantFormatted {
+				t.Fatalf("formatted shortcut mismatch: want %q got %q", tt.wantFormatted, formatted)
+			}
+			if tt.wantShortcutName == "" {
+				if shortcut != nil {
+					t.Fatalf("expected nil shortcut, got %s", shortcut.ShortcutName())
+				}
+				return
+			}
+			if shortcut == nil {
+				t.Fatalf("expected shortcut")
+			}
+			if got := shortcut.ShortcutName(); got != tt.wantShortcutName {
+				t.Fatalf("shortcut name mismatch: want %q got %q", tt.wantShortcutName, got)
+			}
+		})
+	}
+}
+
+func TestNormalizeShortcutConfigPreservesBlankOverrides(t *testing.T) {
+	got := normalizeShortcutConfig(map[string]string{
+		shortcutActionScreenshot: "",
+		shortcutActionRange:      "Ctrl+Shift+R",
+	})
+
+	if got[shortcutActionScreenshot] != "" {
+		t.Fatalf("blank shortcut override should be preserved, got %q", got[shortcutActionScreenshot])
+	}
+	if got[shortcutActionRange] != "Ctrl+Shift+R" {
+		t.Fatalf("custom shortcut mismatch: %q", got[shortcutActionRange])
+	}
+	if got[shortcutActionImport] != defaultShortcutTexts[shortcutActionImport] {
+		t.Fatalf("missing shortcut should use default, got %q", got[shortcutActionImport])
+	}
+}
+
 func TestParsePickCount(t *testing.T) {
 	tests := []struct {
 		text string

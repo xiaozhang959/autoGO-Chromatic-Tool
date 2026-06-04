@@ -57,6 +57,8 @@ type UserConfig struct {
 	PickMode      string `json:"pick_mode"`
 	FunctionMode  string `json:"function_mode"`
 	DirectionMode string `json:"direction_mode"`
+	LogEnabled    bool   `json:"log_enabled"`
+	ThemeMode     string `json:"theme_mode"`
 	ShowMagnifier bool   `json:"show_magnifier"`
 	AutoCopyRange bool   `json:"auto_copy_range"`
 	ApplyRange    bool   `json:"apply_range"`
@@ -67,6 +69,7 @@ type UserConfig struct {
 
 	RightPanelSplitOffset float64           `json:"right_panel_split_offset"`
 	FormatTemplates       map[string]string `json:"format_templates"`
+	Shortcuts             map[string]string `json:"shortcuts"`
 }
 
 // 全局变量定义
@@ -135,6 +138,28 @@ var (
 const deviceSelectPrompt = "--设备选择--"
 const displaySelectPrompt = "--虚拟屏选择--"
 
+const (
+	appThemeModeSystem = "system"
+	appThemeModeLight  = "light"
+	appThemeModeDark   = "dark"
+)
+
+const (
+	shortcutActionScreenshot = "screenshot"
+	shortcutActionImport     = "import_image"
+	shortcutActionRange      = "range_select"
+	shortcutActionAutoPick   = "auto_pick"
+	shortcutActionClearAll   = "clear_all"
+)
+
+var defaultShortcutTexts = map[string]string{
+	shortcutActionScreenshot: "Ctrl+Z",
+	shortcutActionImport:     "Ctrl+L",
+	shortcutActionRange:      "Ctrl+R",
+	shortcutActionAutoPick:   "Ctrl+A",
+	shortcutActionClearAll:   "Ctrl+E",
+}
+
 var pickModeOptions = []string{
 	"随机取点",
 	"轮廓取点",
@@ -142,6 +167,187 @@ var pickModeOptions = []string{
 	"高饱和取点",
 	"颜色分类轮廓",
 	"颜色分类随机",
+}
+
+var appThemeModeOptions = []string{
+	"跟随系统",
+	"浅色",
+	"深色",
+}
+
+func normalizeThemeMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case appThemeModeLight, "浅色":
+		return appThemeModeLight
+	case appThemeModeDark, "深色":
+		return appThemeModeDark
+	default:
+		return appThemeModeSystem
+	}
+}
+
+func themeModeDisplay(mode string) string {
+	switch normalizeThemeMode(mode) {
+	case appThemeModeLight:
+		return "浅色"
+	case appThemeModeDark:
+		return "深色"
+	default:
+		return "跟随系统"
+	}
+}
+
+func themeModeFromDisplay(display string) string {
+	return normalizeThemeMode(display)
+}
+
+func themeModeIsDark(mode string, systemVariant fyne.ThemeVariant) bool {
+	switch normalizeThemeMode(mode) {
+	case appThemeModeLight:
+		return false
+	case appThemeModeDark:
+		return true
+	default:
+		return systemVariant == theme.VariantDark
+	}
+}
+
+func copyShortcutConfig(shortcuts map[string]string) map[string]string {
+	copied := make(map[string]string, len(shortcuts))
+	for key, value := range shortcuts {
+		copied[key] = value
+	}
+	return copied
+}
+
+func normalizeShortcutConfig(shortcuts map[string]string) map[string]string {
+	normalized := copyShortcutConfig(shortcuts)
+	if normalized == nil {
+		normalized = make(map[string]string, len(defaultShortcutTexts))
+	}
+	for key, value := range defaultShortcutTexts {
+		if _, ok := normalized[key]; !ok {
+			normalized[key] = value
+		}
+	}
+	return normalized
+}
+
+func shortcutText(shortcuts map[string]string, id string) string {
+	if value, ok := shortcuts[id]; ok {
+		return strings.TrimSpace(value)
+	}
+	return defaultShortcutTexts[id]
+}
+
+func normalizeShortcutKey(text string) (fyne.KeyName, string, bool) {
+	key := strings.TrimSpace(text)
+	if key == "" {
+		return fyne.KeyUnknown, "", false
+	}
+	upper := strings.ToUpper(key)
+	if len([]rune(upper)) == 1 {
+		r := []rune(upper)[0]
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return fyne.KeyName(string(r)), string(r), true
+		}
+	}
+
+	switch strings.ToLower(key) {
+	case "space", "空格":
+		return fyne.KeySpace, "Space", true
+	case "enter", "return", "回车":
+		return fyne.KeyReturn, "Enter", true
+	case "esc", "escape":
+		return fyne.KeyEscape, "Escape", true
+	case "up", "arrowup", "上":
+		return fyne.KeyUp, "Up", true
+	case "down", "arrowdown", "下":
+		return fyne.KeyDown, "Down", true
+	case "left", "arrowleft", "左":
+		return fyne.KeyLeft, "Left", true
+	case "right", "arrowright", "右":
+		return fyne.KeyRight, "Right", true
+	case "tab":
+		return fyne.KeyTab, "Tab", true
+	}
+	return fyne.KeyUnknown, "", false
+}
+
+func shortcutForKey(modifier fyne.KeyModifier, key fyne.KeyName) fyne.Shortcut {
+	if modifier == fyne.KeyModifierShortcutDefault {
+		switch key {
+		case fyne.KeyA:
+			return &fyne.ShortcutSelectAll{}
+		case fyne.KeyZ:
+			return &fyne.ShortcutUndo{}
+		case fyne.KeyY:
+			return &fyne.ShortcutRedo{}
+		}
+	}
+	return &desktop.CustomShortcut{KeyName: key, Modifier: modifier}
+}
+
+func formatShortcutText(modifier fyne.KeyModifier, keyLabel string) string {
+	parts := make([]string, 0, 5)
+	if modifier&fyne.KeyModifierControl != 0 {
+		parts = append(parts, "Ctrl")
+	}
+	if modifier&fyne.KeyModifierShift != 0 {
+		parts = append(parts, "Shift")
+	}
+	if modifier&fyne.KeyModifierAlt != 0 {
+		parts = append(parts, "Alt")
+	}
+	if modifier&fyne.KeyModifierSuper != 0 {
+		parts = append(parts, "Super")
+	}
+	parts = append(parts, keyLabel)
+	return strings.Join(parts, "+")
+}
+
+func parseShortcutText(text string) (fyne.Shortcut, string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, "", nil
+	}
+
+	var modifier fyne.KeyModifier
+	var key fyne.KeyName
+	keyLabel := ""
+	for _, rawPart := range strings.Split(text, "+") {
+		part := strings.TrimSpace(rawPart)
+		if part == "" {
+			return nil, "", fmt.Errorf("快捷键格式无效")
+		}
+		switch strings.ToLower(part) {
+		case "ctrl", "control", "控制":
+			modifier |= fyne.KeyModifierControl
+		case "shift":
+			modifier |= fyne.KeyModifierShift
+		case "alt":
+			modifier |= fyne.KeyModifierAlt
+		case "super", "win", "windows", "meta", "cmd", "command":
+			modifier |= fyne.KeyModifierSuper
+		default:
+			if key != "" && key != fyne.KeyUnknown {
+				return nil, "", fmt.Errorf("快捷键只能包含一个主按键")
+			}
+			normalizedKey, normalizedLabel, ok := normalizeShortcutKey(part)
+			if !ok {
+				return nil, "", fmt.Errorf("不支持的按键: %s", part)
+			}
+			key = normalizedKey
+			keyLabel = normalizedLabel
+		}
+	}
+	if modifier == 0 {
+		return nil, "", fmt.Errorf("快捷键至少需要包含 Ctrl、Shift、Alt 或 Super 中的一个组合键")
+	}
+	if key == "" || key == fyne.KeyUnknown {
+		return nil, "", fmt.Errorf("快捷键缺少主按键")
+	}
+	return shortcutForKey(modifier, key), formatShortcutText(modifier, keyLabel), nil
 }
 
 func initialWindowSize(widthRatio, heightRatio float32) fyne.Size {
@@ -362,6 +568,8 @@ func defaultUserConfig() UserConfig {
 		PickMode:      "轮廓取点",
 		FunctionMode:  "findMultiColor",
 		DirectionMode: "0: 从左到右，从上到下",
+		LogEnabled:    false,
+		ThemeMode:     appThemeModeSystem,
 		ShowMagnifier: true,
 		AutoCopyRange: true,
 		ApplyRange:    false,
@@ -371,6 +579,7 @@ func defaultUserConfig() UserConfig {
 		GridSpacing:   7,
 
 		FormatTemplates: defaultAPIFormatTemplates(),
+		Shortcuts:       normalizeShortcutConfig(nil),
 	}
 }
 
@@ -411,6 +620,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 	if strings.TrimSpace(config.DirectionMode) == "" {
 		config.DirectionMode = defaults.DirectionMode
 	}
+	config.ThemeMode = normalizeThemeMode(config.ThemeMode)
 	if config.GridCols <= 0 {
 		config.GridCols = defaults.GridCols
 	}
@@ -422,6 +632,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 	}
 	config.RightPanelSplitOffset = normalizeSplitOffset(config.RightPanelSplitOffset)
 	config.FormatTemplates = normalizeAPIFormatTemplates(config.FormatTemplates)
+	config.Shortcuts = normalizeShortcutConfig(config.Shortcuts)
 	return config
 }
 
@@ -5554,7 +5765,7 @@ func (r *magnifierRenderer) Destroy() {}
 
 func main() {
 	userConfig := loadUserConfig()
-	setupAppLogging(false)
+	setupAppLogging(userConfig.LogEnabled)
 
 	// 释放嵌入的 cap.dex 到临时目录
 	extractCapDex()
@@ -5564,7 +5775,8 @@ func main() {
 
 	// 检测系统当前主题并更新isDarkTheme变量
 	currentTheme := a.Settings().ThemeVariant()
-	isDarkTheme = currentTheme == theme.VariantDark
+	themeModeValue := normalizeThemeMode(userConfig.ThemeMode)
+	isDarkTheme = themeModeIsDark(themeModeValue, currentTheme)
 
 	// 设置自定义主题
 	a.Settings().SetTheme(newMyTheme())
@@ -5733,6 +5945,7 @@ func main() {
 
 	// 初始化空的颜色点列表，不再使用generateSampleData
 	colorPoints = make([]ColorPoint, 0)
+	var saveCurrentConfig func()
 
 	// 设置刷新表格的函数
 	refreshColorList = func() {
@@ -5750,16 +5963,21 @@ func main() {
 		if isDarkTheme {
 			// 切换到亮色主题
 			isDarkTheme = false
+			themeModeValue = appThemeModeLight
 			a.Settings().SetTheme(newMyTheme())
 		} else {
 			// 切换到深色主题
 			isDarkTheme = true
+			themeModeValue = appThemeModeDark
 			a.Settings().SetTheme(newMyTheme())
 		}
 
 		// 切换主题后更新表头和列表
 		updateTableHeader()
 		updateTableSelection()
+		if saveCurrentConfig != nil {
+			saveCurrentConfig()
+		}
 	}
 
 	// 创建区域坐标显示控件
@@ -6300,9 +6518,59 @@ func main() {
 	// 设置全局触发生成代码函数，供键盘快捷键使用
 	triggerGenerateCode = generateCodeFunc
 
+	shortcutConfig := normalizeShortcutConfig(userConfig.Shortcuts)
+	shortcutTextFor := func(id string) string {
+		return shortcutText(shortcutConfig, id)
+	}
+	buttonTextWithShortcut := func(label, id string) string {
+		shortcut := shortcutTextFor(id)
+		if shortcut == "" {
+			return label
+		}
+		return fmt.Sprintf("%s (%s)", label, shortcut)
+	}
+	type shortcutBinding struct {
+		id       string
+		label    string
+		action   func()
+		shortcut fyne.Shortcut
+	}
+	var shortcutBindings []shortcutBinding
+	var registeredShortcuts []fyne.Shortcut
+	var refreshShortcutButtonTexts func()
+	registerConfiguredShortcuts := func() {
+		for _, shortcut := range registeredShortcuts {
+			w.Canvas().RemoveShortcut(shortcut)
+		}
+		registeredShortcuts = registeredShortcuts[:0]
+
+		for i := range shortcutBindings {
+			shortcut, _, err := parseShortcutText(shortcutTextFor(shortcutBindings[i].id))
+			if err != nil {
+				log.Printf("跳过无效快捷键配置: action=%s shortcut=%q err=%v", shortcutBindings[i].id, shortcutTextFor(shortcutBindings[i].id), err)
+				continue
+			}
+			if shortcut == nil {
+				continue
+			}
+			action := shortcutBindings[i].action
+			w.Canvas().AddShortcut(shortcut, func(fyne.Shortcut) {
+				action()
+			})
+			shortcutBindings[i].shortcut = shortcut
+			registeredShortcuts = append(registeredShortcuts, shortcut)
+		}
+	}
+	applyThemeMode := func(mode string) {
+		themeModeValue = normalizeThemeMode(mode)
+		isDarkTheme = themeModeIsDark(themeModeValue, a.Settings().ThemeVariant())
+		a.Settings().SetTheme(newMyTheme())
+		updateTableHeader()
+		updateTableSelection()
+	}
+
 	// 点阵模式主按钮
 	var gridModeBtn *widget.Button
-	var saveCurrentConfig func()
 	var centerRightSplit *container.Split
 	updateGridBtn := func() {
 		if gridModeEnabled {
@@ -6324,93 +6592,189 @@ func main() {
 	})
 	updateGridBtn() // 初始化按钮状态
 
-	// 点阵设置按钮（小按钮）
-	gridSettingsBtn := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
-		// 创建列数输入框和按钮
+	openSystemConfigDialog := func() {
+		logEnabledCheck := widget.NewCheck("开启日志文件", nil)
+		logEnabledCheck.SetChecked(appLoggingEnabled)
+		logPathText := "日志关闭时仅输出到控制台。"
+		if appLogPath != "" {
+			logPathText = "日志文件：" + appLogPath
+		}
+		logPathLabel := widget.NewLabel(logPathText)
+		logPathLabel.Wrapping = fyne.TextWrapWord
+		themeModeSelect := widget.NewSelect(appThemeModeOptions, nil)
+		themeModeSelect.SetSelected(themeModeDisplay(themeModeValue))
+
 		colsEntry := widget.NewEntry()
 		colsEntry.SetText(fmt.Sprintf("%d", gridColsValue))
-		colsMinusBtn := widget.NewButton("-", func() {
-			if val, err := strconv.Atoi(colsEntry.Text); err == nil && val > 1 {
-				colsEntry.SetText(fmt.Sprintf("%d", val-1))
-			}
-		})
-
-		colsPlusBtn := widget.NewButton("+", func() {
-			if val, err := strconv.Atoi(colsEntry.Text); err == nil {
-				colsEntry.SetText(fmt.Sprintf("%d", val+1))
-			}
-		})
-
-		colsBtnContainer := container.NewGridWithColumns(2, colsMinusBtn, colsPlusBtn)
-		colsRow := container.NewBorder(nil, nil, nil, colsBtnContainer, colsEntry)
-
-		// 创建行数输入框和按钮
 		rowsEntry := widget.NewEntry()
 		rowsEntry.SetText(fmt.Sprintf("%d", gridRowsValue))
-		rowsMinusBtn := widget.NewButton("-", func() {
-			if val, err := strconv.Atoi(rowsEntry.Text); err == nil && val > 1 {
-				rowsEntry.SetText(fmt.Sprintf("%d", val-1))
-			}
-		})
-
-		rowsPlusBtn := widget.NewButton("+", func() {
-			if val, err := strconv.Atoi(rowsEntry.Text); err == nil {
-				rowsEntry.SetText(fmt.Sprintf("%d", val+1))
-			}
-		})
-
-		rowsBtnContainer := container.NewGridWithColumns(2, rowsMinusBtn, rowsPlusBtn)
-		rowsRow := container.NewBorder(nil, nil, nil, rowsBtnContainer, rowsEntry)
-
-		// 创建间距输入框和按钮
 		spacingEntry := widget.NewEntry()
 		spacingEntry.SetText(fmt.Sprintf("%d", gridSpacingValue))
-		spacingMinusBtn := widget.NewButton("-", func() {
-			if val, err := strconv.Atoi(spacingEntry.Text); err == nil && val > 1 {
-				spacingEntry.SetText(fmt.Sprintf("%d", val-1))
+
+		parsePositiveInt := func(label, value string) (int, bool) {
+			parsed, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || parsed <= 0 {
+				dialog.ShowError(fmt.Errorf("%s需要输入大于 0 的整数", label), w)
+				return 0, false
 			}
-		})
-
-		spacingPlusBtn := widget.NewButton("+", func() {
-			if val, err := strconv.Atoi(spacingEntry.Text); err == nil {
-				spacingEntry.SetText(fmt.Sprintf("%d", val+1))
-			}
-		})
-
-		spacingBtnContainer := container.NewGridWithColumns(2, spacingMinusBtn, spacingPlusBtn)
-		spacingRow := container.NewBorder(nil, nil, nil, spacingBtnContainer, spacingEntry)
-
-		// 创建表单
-		formItems := []*widget.FormItem{
-			widget.NewFormItem("列数:", colsRow),
-			widget.NewFormItem("行数:", rowsRow),
-			widget.NewFormItem("间距:", spacingRow),
+			return parsed, true
+		}
+		numberRow := func(label string, entry *widget.Entry) fyne.CanvasObject {
+			minusBtn := widget.NewButton("-", func() {
+				if val, err := strconv.Atoi(strings.TrimSpace(entry.Text)); err == nil && val > 1 {
+					entry.SetText(fmt.Sprintf("%d", val-1))
+				}
+			})
+			plusBtn := widget.NewButton("+", func() {
+				if val, err := strconv.Atoi(strings.TrimSpace(entry.Text)); err == nil {
+					entry.SetText(fmt.Sprintf("%d", val+1))
+				}
+			})
+			stepBtns := container.NewGridWithColumns(2, minusBtn, plusBtn)
+			return container.NewBorder(nil, nil, widget.NewLabel(label), stepBtns, entry)
 		}
 
-		// 创建对话框
-		d := dialog.NewForm("点阵参数设置", "确定", "取消", formItems, func(confirmed bool) {
-			if confirmed {
-				// 解析并保存参数
-				if cols, err := strconv.Atoi(strings.TrimSpace(colsEntry.Text)); err == nil && cols > 0 {
-					gridColsValue = cols
-				}
-				if rows, err := strconv.Atoi(strings.TrimSpace(rowsEntry.Text)); err == nil && rows > 0 {
-					gridRowsValue = rows
-				}
-				if spacing, err := strconv.Atoi(strings.TrimSpace(spacingEntry.Text)); err == nil && spacing > 0 {
-					gridSpacingValue = spacing
-				}
+		systemConfigPanel := container.NewVBox(
+			widget.NewLabelWithStyle("系统配置", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabel("配置应用级行为。保存后立即生效。"),
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle("日志功能", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			logEnabledCheck,
+			logPathLabel,
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle("配色管理", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			container.NewBorder(nil, nil, widget.NewLabel("配色模式"), nil, themeModeSelect),
+		)
 
-				log.Printf("点阵参数已更新: %dx%d/%d", gridColsValue, gridRowsValue, gridSpacingValue)
-				if saveCurrentConfig != nil {
-					saveCurrentConfig()
+		gridConfigPanel := container.NewVBox(
+			widget.NewLabelWithStyle("点阵参数设置", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabel("配置点阵模式生成取色点时使用的列数、行数和间距。"),
+			widget.NewSeparator(),
+			numberRow("列数", colsEntry),
+			numberRow("行数", rowsEntry),
+			numberRow("间距", spacingEntry),
+		)
+
+		shortcutEntries := make(map[string]*widget.Entry, len(shortcutBindings))
+		shortcutRows := container.NewVBox(
+			widget.NewLabelWithStyle("快捷键管理", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabel("可设置按钮对应的组合快捷键。格式示例：Ctrl+Shift+S；留空表示禁用该快捷键。"),
+			widget.NewSeparator(),
+		)
+		for _, binding := range shortcutBindings {
+			entry := widget.NewEntry()
+			entry.SetText(shortcutTextFor(binding.id))
+			shortcutEntries[binding.id] = entry
+			defaultBtn := widget.NewButton("默认", func(id string, target *widget.Entry) func() {
+				return func() {
+					target.SetText(defaultShortcutTexts[id])
 				}
+			}(binding.id, entry))
+			row := container.NewBorder(nil, nil, widget.NewLabel(binding.label), defaultBtn, entry)
+			shortcutRows.Add(row)
+		}
+
+		rightPanel := container.NewMax()
+		sections := []struct {
+			title   string
+			content fyne.CanvasObject
+		}{
+			{title: "系统配置", content: container.NewPadded(systemConfigPanel)},
+			{title: "点阵参数设置", content: container.NewPadded(gridConfigPanel)},
+			{title: "快捷键管理", content: container.NewPadded(container.NewVScroll(shortcutRows))},
+		}
+		selectSection := func(id int) {
+			if id < 0 || id >= len(sections) {
+				return
 			}
-		}, w)
+			rightPanel.Objects = []fyne.CanvasObject{sections[id].content}
+			rightPanel.Refresh()
+		}
+		sectionList := widget.NewList(
+			func() int { return len(sections) },
+			func() fyne.CanvasObject {
+				return widget.NewLabel("")
+			},
+			func(id widget.ListItemID, item fyne.CanvasObject) {
+				item.(*widget.Label).SetText(sections[id].title)
+			},
+		)
+		sectionList.OnSelected = func(id widget.ListItemID) {
+			selectSection(id)
+		}
+		selectSection(0)
+		sectionList.Select(0)
 
-		d.Resize(fyne.NewSize(300, 240))
-		d.Show()
-	})
+		body := container.NewHSplit(
+			container.New(&fixedContentWidthLayout{width: 150}, sectionList),
+			rightPanel,
+		)
+		body.Offset = 0.28
+
+		var configDialog dialog.Dialog
+		saveBtn := widget.NewButtonWithIcon("保存", theme.DocumentSaveIcon(), func() {
+			newShortcuts := copyShortcutConfig(shortcutConfig)
+			seenShortcuts := make(map[string]string)
+			for _, binding := range shortcutBindings {
+				entry := shortcutEntries[binding.id]
+				if entry == nil {
+					continue
+				}
+				shortcut, formatted, err := parseShortcutText(entry.Text)
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("%s：%v", binding.label, err), w)
+					return
+				}
+				if shortcut != nil {
+					shortcutName := shortcut.ShortcutName()
+					if previousLabel, ok := seenShortcuts[shortcutName]; ok {
+						dialog.ShowError(fmt.Errorf("%s 和 %s 使用了相同快捷键", previousLabel, binding.label), w)
+						return
+					}
+					seenShortcuts[shortcutName] = binding.label
+				}
+				newShortcuts[binding.id] = formatted
+			}
+
+			cols, ok := parsePositiveInt("列数", colsEntry.Text)
+			if !ok {
+				return
+			}
+			rows, ok := parsePositiveInt("行数", rowsEntry.Text)
+			if !ok {
+				return
+			}
+			spacing, ok := parsePositiveInt("间距", spacingEntry.Text)
+			if !ok {
+				return
+			}
+
+			gridColsValue = cols
+			gridRowsValue = rows
+			gridSpacingValue = spacing
+			shortcutConfig = normalizeShortcutConfig(newShortcuts)
+			setAppLoggingEnabled(logEnabledCheck.Checked)
+			applyThemeMode(themeModeFromDisplay(themeModeSelect.Selected))
+			registerConfiguredShortcuts()
+			if refreshShortcutButtonTexts != nil {
+				refreshShortcutButtonTexts()
+			}
+			log.Printf("点阵参数已更新: %dx%d/%d", gridColsValue, gridRowsValue, gridSpacingValue)
+			if saveCurrentConfig != nil {
+				saveCurrentConfig()
+			}
+			configDialog.Hide()
+		})
+		saveBtn.Importance = widget.HighImportance
+		closeBtn := widget.NewButton("取消", func() {
+			configDialog.Hide()
+		})
+		content := container.NewBorder(nil, container.NewHBox(layout.NewSpacer(), closeBtn, saveBtn), nil, nil, body)
+		configDialog = dialog.NewCustomWithoutButtons("系统配置", content, w)
+		configDialog.Resize(fyne.NewSize(820, 560))
+		configDialog.Show()
+	}
+	gridSettingsBtn := widget.NewButtonWithIcon("", theme.SettingsIcon(), openSystemConfigDialog)
 
 	// 使用Border布局，然后用固定高度容器包装（高度设为35）
 	gridRowBorder := container.NewBorder(nil, nil, nil, gridSettingsBtn, gridModeBtn)
@@ -6481,15 +6845,8 @@ func main() {
 	showMagnifierCheck.SetChecked(userConfig.ShowMagnifier)
 	magnifierThemeRow := container.NewBorder(nil, nil, nil, themeBtn, showMagnifierCheck)
 
-	screenshotBtn.button.SetText("截图 (CTRL+Z)")
-	importBtn.SetText("加载 (CTRL+L)")
-	addShortcut := func(shortcut fyne.Shortcut, action func()) {
-		w.Canvas().AddShortcut(shortcut, func(fyne.Shortcut) {
-			action()
-		})
-	}
-	addShortcut(&fyne.ShortcutUndo{}, captureScreenshot)
-	addShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyL, Modifier: fyne.KeyModifierControl}, importImage)
+	screenshotBtn.button.SetText(buttonTextWithShortcut("截图", shortcutActionScreenshot))
+	importBtn.SetText(buttonTextWithShortcut("加载", shortcutActionImport))
 
 	rotateLeftBtn := widget.NewButtonWithIcon("", theme.ContentUndoIcon(), func() {
 		if imageViewer == nil || imageViewer.originalImage == nil {
@@ -6517,13 +6874,12 @@ func main() {
 			rangeBtn.SetText("选择范围中...")
 			rangeBtn.Importance = widget.HighImportance
 		} else {
-			rangeBtn.SetText("范围 (CTRL+R)")
+			rangeBtn.SetText(buttonTextWithShortcut("范围", shortcutActionRange))
 			rangeBtn.Importance = widget.MediumImportance
 		}
 		rangeBtn.Refresh()
 	}
 	updateRangeButton()
-	addShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyR, Modifier: fyne.KeyModifierControl}, toggleRangeSelect)
 
 	rectCoordEntry.SetText(defaultRangeText)
 	coordDisplayEntry := rectCoordEntry
@@ -6643,9 +6999,8 @@ func main() {
 			autoPickDialog.Show()
 		})
 	}
-	autoPickBtn := widget.NewButton("自动取色 (CTRL+A)", startAutoPick)
+	autoPickBtn := widget.NewButton(buttonTextWithShortcut("自动取色", shortcutActionAutoPick), startAutoPick)
 	autoPickBtn.Importance = widget.MediumImportance
-	addShortcut(&fyne.ShortcutSelectAll{}, startAutoPick)
 	applyRangeCheck := widget.NewCheck("选取后应用范围", func(bool) {
 		if saveCurrentConfig != nil {
 			saveCurrentConfig()
@@ -6664,6 +7019,7 @@ func main() {
 	deviceDisplayRow := container.NewBorder(nil, nil, nil, displaySelectBox, deviceSelect)
 
 	leftControls := container.NewVBox(
+		gridRow,
 		deviceDisplayRow,
 		magnifierThemeRow,
 		screenshotBtn,
@@ -6681,7 +7037,6 @@ func main() {
 		container.NewBorder(nil, nil, widget.NewLabel("取色个数"), nil, pickCountEntry),
 		applyRangeCheck,
 		autoCopyRangeCheck,
-		gridRow,
 		fontLibBtn,
 	)
 	const (
@@ -6862,8 +7217,22 @@ func main() {
 		colorPoints = colorPoints[:0]
 		updateTableSelection()
 	}
-	clearAllBtn := widget.NewButton("清除所有 (CTRL+E)", clearAllPoints)
-	addShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyE, Modifier: fyne.KeyModifierControl}, clearAllPoints)
+	clearAllBtn := widget.NewButton(buttonTextWithShortcut("清除所有", shortcutActionClearAll), clearAllPoints)
+	shortcutBindings = []shortcutBinding{
+		{id: shortcutActionScreenshot, label: "截图", action: captureScreenshot},
+		{id: shortcutActionImport, label: "加载图片", action: importImage},
+		{id: shortcutActionRange, label: "范围框选", action: toggleRangeSelect},
+		{id: shortcutActionAutoPick, label: "自动取色", action: startAutoPick},
+		{id: shortcutActionClearAll, label: "清除所有", action: clearAllPoints},
+	}
+	refreshShortcutButtonTexts = func() {
+		screenshotBtn.button.SetText(buttonTextWithShortcut("截图", shortcutActionScreenshot))
+		importBtn.SetText(buttonTextWithShortcut("加载", shortcutActionImport))
+		updateRangeButton()
+		autoPickBtn.SetText(buttonTextWithShortcut("自动取色", shortcutActionAutoPick))
+		clearAllBtn.SetText(buttonTextWithShortcut("清除所有", shortcutActionClearAll))
+	}
+	registerConfiguredShortcuts()
 	uniformOffsetEntry := makeEntry(userConfig.UniformOffset)
 	uniformOffsetEntry.OnChanged = func(value string) {
 		defaultColorPointOffset = strings.TrimSpace(value)
@@ -6992,6 +7361,8 @@ func main() {
 			PickMode:      pickModeSelect.Selected,
 			FunctionMode:  functionSelect.Selected,
 			DirectionMode: directionSelect.Selected,
+			LogEnabled:    appLoggingEnabled,
+			ThemeMode:     themeModeValue,
 			ShowMagnifier: showMagnifierCheck.Checked,
 			AutoCopyRange: autoCopyRangeCheck.Checked,
 			ApplyRange:    applyRangeCheck.Checked,
@@ -7002,6 +7373,7 @@ func main() {
 
 			RightPanelSplitOffset: rightPanelSplitOffset,
 			FormatTemplates:       copyAPIFormatTemplates(apiFormatTemplates),
+			Shortcuts:             copyShortcutConfig(shortcutConfig),
 		})
 	}
 
