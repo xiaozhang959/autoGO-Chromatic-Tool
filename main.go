@@ -435,6 +435,11 @@ func normalizeShortcutKey(text string) (fyne.KeyName, string, bool) {
 			return fyne.KeyName(string(r)), string(r), true
 		}
 	}
+	if strings.HasPrefix(upper, "F") {
+		if value, err := strconv.Atoi(strings.TrimPrefix(upper, "F")); err == nil && value >= 1 && value <= 12 {
+			return fyne.KeyName(upper), upper, true
+		}
+	}
 
 	switch strings.ToLower(key) {
 	case "space", "空格":
@@ -487,6 +492,58 @@ func formatShortcutText(modifier fyne.KeyModifier, keyLabel string) string {
 	}
 	parts = append(parts, keyLabel)
 	return strings.Join(parts, "+")
+}
+
+func shortcutKeyLabel(key fyne.KeyName) (string, bool) {
+	if key == fyne.KeyUnknown || key == "" {
+		return "", false
+	}
+
+	text := string(key)
+	upper := strings.ToUpper(text)
+	if len([]rune(upper)) == 1 {
+		r := []rune(upper)[0]
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return string(r), true
+		}
+	}
+
+	switch key {
+	case fyne.KeySpace:
+		return "Space", true
+	case fyne.KeyReturn, fyne.KeyEnter:
+		return "Enter", true
+	case fyne.KeyEscape:
+		return "Escape", true
+	case fyne.KeyUp:
+		return "Up", true
+	case fyne.KeyDown:
+		return "Down", true
+	case fyne.KeyLeft:
+		return "Left", true
+	case fyne.KeyRight:
+		return "Right", true
+	case fyne.KeyTab:
+		return "Tab", true
+	}
+	if strings.HasPrefix(text, "F") {
+		if value, err := strconv.Atoi(strings.TrimPrefix(text, "F")); err == nil && value >= 1 && value <= 12 {
+			return text, true
+		}
+	}
+	return "", false
+}
+
+func shortcutTextFromKeyboardShortcut(shortcut fyne.KeyboardShortcut) (string, bool) {
+	modifier := shortcut.Mod()
+	if modifier == fyne.KeyModifierShortcutDefault {
+		modifier = fyne.KeyModifierControl
+	}
+	keyLabel, ok := shortcutKeyLabel(shortcut.Key())
+	if !ok || modifier == 0 {
+		return "", false
+	}
+	return formatShortcutText(modifier, keyLabel), true
 }
 
 func parseShortcutText(text string) (fyne.Shortcut, string, error) {
@@ -878,6 +935,51 @@ type commitEntry struct {
 	disabled    bool
 	onCommit    func(string)
 	OnSubmitted func(string)
+}
+
+type shortcutCaptureEntry struct {
+	widget.Entry
+}
+
+func newShortcutCaptureEntry() *shortcutCaptureEntry {
+	entry := &shortcutCaptureEntry{}
+	entry.ExtendBaseWidget(entry)
+	entry.SetPlaceHolder("点击后按组合键；Backspace/Delete 清空")
+	return entry
+}
+
+func (e *shortcutCaptureEntry) FocusGained() {
+	e.Entry.FocusGained()
+	e.SetPlaceHolder("请按下组合快捷键；Backspace/Delete 清空")
+}
+
+func (e *shortcutCaptureEntry) FocusLost() {
+	e.Entry.FocusLost()
+	e.SetPlaceHolder("点击后按组合键；Backspace/Delete 清空")
+}
+
+func (e *shortcutCaptureEntry) TypedKey(key *fyne.KeyEvent) {
+	switch key.Name {
+	case fyne.KeyBackspace, fyne.KeyDelete, fyne.KeyEscape:
+		e.SetText("")
+		return
+	default:
+		return
+	}
+}
+
+func (e *shortcutCaptureEntry) TypedRune(r rune) {
+	// 快捷键字段只接受真实按键事件，避免手动输入半截文本造成保存时格式错误。
+}
+
+func (e *shortcutCaptureEntry) TypedShortcut(shortcut fyne.Shortcut) {
+	keyboardShortcut, ok := shortcut.(fyne.KeyboardShortcut)
+	if !ok {
+		return
+	}
+	if text, ok := shortcutTextFromKeyboardShortcut(keyboardShortcut); ok {
+		e.SetText(text)
+	}
 }
 
 func newCommitEntry() *commitEntry {
@@ -6748,11 +6850,14 @@ func main() {
 	}
 	var registeredShortcuts []fyne.Shortcut
 	var refreshShortcutButtonTexts func()
-	registerConfiguredShortcuts := func() {
+	unregisterConfiguredShortcuts := func() {
 		for _, shortcut := range registeredShortcuts {
 			w.Canvas().RemoveShortcut(shortcut)
 		}
 		registeredShortcuts = registeredShortcuts[:0]
+	}
+	registerConfiguredShortcuts := func() {
+		unregisterConfiguredShortcuts()
 
 		for _, command := range commandsForSettings() {
 			shortcut, _, err := parseShortcutText(shortcutTextFor(command.id))
@@ -6809,6 +6914,16 @@ func main() {
 	updateGridBtn() // 初始化按钮状态
 
 	openSystemConfigDialog := func() {
+		shortcutsRestored := false
+		unregisterConfiguredShortcuts()
+		restoreDialogShortcuts := func() {
+			if shortcutsRestored {
+				return
+			}
+			shortcutsRestored = true
+			registerConfiguredShortcuts()
+		}
+
 		logEnabledCheck := widget.NewCheck("开启日志文件", nil)
 		logEnabledCheck.SetChecked(appLoggingEnabled)
 		logPathText := "日志关闭时仅输出到控制台。"
@@ -6872,17 +6987,17 @@ func main() {
 		)
 
 		commands := commandsForSettings()
-		shortcutEntries := make(map[string]*widget.Entry, len(commands))
+		shortcutEntries := make(map[string]*shortcutCaptureEntry, len(commands))
 		shortcutRows := container.NewVBox(
 			widget.NewLabelWithStyle("快捷键管理", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabel("可为已注册功能设置组合快捷键。格式示例：Ctrl+Shift+S；留空表示禁用该快捷键。"),
+			widget.NewLabel("点击快捷键框后直接按组合键自动录入；Backspace、Delete 或 Escape 清空该快捷键。"),
 			widget.NewSeparator(),
 		)
 		for _, command := range commands {
-			entry := widget.NewEntry()
+			entry := newShortcutCaptureEntry()
 			entry.SetText(shortcutTextFor(command.id))
 			shortcutEntries[command.id] = entry
-			defaultBtn := widget.NewButton("默认", func(id string, target *widget.Entry) func() {
+			defaultBtn := widget.NewButton("默认", func(id string, target *shortcutCaptureEntry) func() {
 				return func() {
 					target.SetText(defaultShortcutTexts[id])
 				}
@@ -6974,6 +7089,7 @@ func main() {
 			setAppLoggingEnabled(logEnabledCheck.Checked)
 			applyThemeMode(themeModeFromDisplay(themeModeSelect.Selected))
 			registerConfiguredShortcuts()
+			shortcutsRestored = true
 			if refreshShortcutButtonTexts != nil {
 				refreshShortcutButtonTexts()
 			}
@@ -6989,6 +7105,7 @@ func main() {
 		})
 		content := container.NewBorder(nil, container.NewHBox(layout.NewSpacer(), closeBtn, saveBtn), nil, nil, body)
 		configDialog = dialog.NewCustomWithoutButtons("系统配置", content, w)
+		configDialog.SetOnClosed(restoreDialogShortcuts)
 		configDialog.Resize(fyne.NewSize(820, 560))
 		configDialog.Show()
 	}

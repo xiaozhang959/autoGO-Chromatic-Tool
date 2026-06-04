@@ -160,6 +160,12 @@ func TestParseShortcutText(t *testing.T) {
 			wantShortcutName: "Undo",
 		},
 		{
+			name:             "function key combo",
+			text:             "Ctrl+F1",
+			wantFormatted:    "Ctrl+F1",
+			wantShortcutName: "CustomDesktop:Control+F1",
+		},
+		{
 			name:    "missing modifier",
 			text:    "A",
 			wantErr: true,
@@ -196,6 +202,48 @@ func TestParseShortcutText(t *testing.T) {
 			}
 			if got := shortcut.ShortcutName(); got != tt.wantShortcutName {
 				t.Fatalf("shortcut name mismatch: want %q got %q", tt.wantShortcutName, got)
+			}
+		})
+	}
+}
+
+func TestShortcutTextFromKeyboardShortcut(t *testing.T) {
+	tests := []struct {
+		name     string
+		shortcut fyne.KeyboardShortcut
+		want     string
+		wantOK   bool
+	}{
+		{
+			name:     "custom shortcut",
+			shortcut: &desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: fyne.KeyModifierControl | fyne.KeyModifierShift},
+			want:     "Ctrl+Shift+S",
+			wantOK:   true,
+		},
+		{
+			name:     "builtin undo",
+			shortcut: &fyne.ShortcutUndo{},
+			want:     "Ctrl+Z",
+			wantOK:   true,
+		},
+		{
+			name:     "missing modifier",
+			shortcut: &desktop.CustomShortcut{KeyName: fyne.KeyS},
+		},
+		{
+			name:     "unsupported key",
+			shortcut: &desktop.CustomShortcut{KeyName: fyne.KeyMinus, Modifier: fyne.KeyModifierControl},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := shortcutTextFromKeyboardShortcut(tt.shortcut)
+			if ok != tt.wantOK {
+				t.Fatalf("ok mismatch: want %v got %v", tt.wantOK, ok)
+			}
+			if got != tt.want {
+				t.Fatalf("shortcut text mismatch: want %q got %q", tt.want, got)
 			}
 		})
 	}
