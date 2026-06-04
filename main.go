@@ -178,9 +178,11 @@ const (
 )
 
 const (
-	aboutContactEmail = "tp9527@qq.com"
-	aboutProjectURL   = "https://github.com/xiaozhang959/autoGO-Chromatic-Tool.git"
-	aboutReleaseNotes = `暂无版本更新日志。
+	aboutCurrentVersion = "1.0.0"
+	aboutLatestVersion  = "1.0.0"
+	aboutContactEmail   = "tp9527@qq.com"
+	aboutProjectURL     = "https://github.com/xiaozhang959/autoGO-Chromatic-Tool.git"
+	aboutReleaseNotes   = `暂无版本更新日志。
 
 后续发布版本时，可以在这里维护每个版本的更新内容。`
 )
@@ -7938,10 +7940,17 @@ func main() {
 			shortcutRows.Add(row)
 		}
 
-		emailLabel := widget.NewLabel("邮箱：" + aboutContactEmail)
-		emailLabel.Wrapping = fyne.TextWrapWord
-		projectURLLabel := widget.NewLabel("项目地址：" + aboutProjectURL)
-		projectURLLabel.Wrapping = fyne.TextWrapWord
+		copyValueButton := func(label, value string) *widget.Button {
+			btn := widget.NewButton(label+"："+value, func() {
+				w.Clipboard().SetContent(value)
+				dialog.ShowInformation("已复制", label+"已复制到剪贴板。", w)
+			})
+			btn.Alignment = widget.ButtonAlignLeading
+			btn.Importance = widget.LowImportance
+			return btn
+		}
+		emailRow := copyValueButton("邮箱", aboutContactEmail)
+		projectURLRow := copyValueButton("项目地址", aboutProjectURL)
 		releaseNotesLabel := widget.NewLabel(aboutReleaseNotes)
 		releaseNotesLabel.Wrapping = fyne.TextWrapWord
 		releaseNotesScroll := container.NewVScroll(container.NewPadded(releaseNotesLabel))
@@ -7949,16 +7958,19 @@ func main() {
 		checkUpdateBtn := widget.NewButtonWithIcon("检查更新", theme.ViewRefreshIcon(), func() {
 			dialog.ShowInformation("检查更新", "检查更新功能预留中，后续可在这里对接软件更新。", w)
 		})
+		aboutTitle := widget.NewLabelWithStyle("关于软件", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 		aboutPanel := container.NewVBox(
-			widget.NewLabelWithStyle("关于软件", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			container.NewBorder(nil, nil, aboutTitle, checkUpdateBtn),
 			widget.NewLabel("软件联系方式与项目地址。"),
 			widget.NewSeparator(),
-			emailLabel,
-			projectURLLabel,
+			widget.NewLabel("当前版本："+aboutCurrentVersion),
+			widget.NewLabel("最新版本："+aboutLatestVersion),
+			widget.NewSeparator(),
+			emailRow,
+			projectURLRow,
 			widget.NewSeparator(),
 			widget.NewLabelWithStyle("版本更新日志", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			container.New(&fixedContentWidthLayout{width: 560}, releaseNotesBox),
-			container.NewHBox(checkUpdateBtn),
 		)
 
 		rightPanel := container.NewMax()
