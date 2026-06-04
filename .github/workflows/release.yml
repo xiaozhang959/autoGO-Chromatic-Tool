@@ -122,6 +122,11 @@ jobs:
             throw "Windows executable was not generated."
           }
 
+          Copy-Item `
+            -Path "dist\windows\$env:APP_NAME.exe" `
+            -Destination "dist\AutoGo-Chromatic-Tool-windows-amd64.exe" `
+            -Force
+
           Compress-Archive `
             -Path "dist\windows\$env:APP_NAME.exe" `
             -DestinationPath "dist\AutoGo-Chromatic-Tool-windows-amd64.zip" `
@@ -131,7 +136,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-amd64
-          path: dist/AutoGo-Chromatic-Tool-windows-amd64.zip
+          path: |
+            dist/AutoGo-Chromatic-Tool-windows-amd64.exe
+            dist/AutoGo-Chromatic-Tool-windows-amd64.zip
           if-no-files-found: error
 
   build-macos:
@@ -185,19 +192,16 @@ jobs:
             app_dir="dist/macos/$APP_NAME-macos-$arch.app"
             rm -rf "$app_dir"
             mv "$APP_NAME.app" "$app_dir"
-            hdiutil create \
-              -volname "$APP_NAME" \
-              -srcfolder "$app_dir" \
-              -ov \
-              -format UDZO \
-              "dist/AutoGo-Chromatic-Tool-macos-$arch.dmg"
+            ditto -c -k --sequesterRsrc --keepParent \
+              "$app_dir" \
+              "dist/AutoGo-Chromatic-Tool-macos-$arch.zip"
           done
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: dist/AutoGo-Chromatic-Tool-macos-*.dmg
+          path: dist/AutoGo-Chromatic-Tool-macos-*.zip
           if-no-files-found: error
 
   release:
@@ -229,9 +233,10 @@ jobs:
           自动构建发布 $RELEASE_VERSION。
 
           包含文件：
+          - AutoGo-Chromatic-Tool-windows-amd64.exe
           - AutoGo-Chromatic-Tool-windows-amd64.zip
-          - AutoGo-Chromatic-Tool-macos-arm64.dmg
-          - AutoGo-Chromatic-Tool-macos-amd64.dmg
+          - AutoGo-Chromatic-Tool-macos-arm64.zip
+          - AutoGo-Chromatic-Tool-macos-amd64.zip
           EOF
 
           prerelease_flag=()
