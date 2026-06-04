@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/desktop"
 	fynetest "fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -66,6 +67,46 @@ func assertStringSliceEqual(t *testing.T, got, want []string) {
 			t.Fatalf("slice item %d mismatch: want %q got %q (%v)", i, want[i], got[i], got)
 		}
 	}
+}
+
+func assertColorNRGBA(t *testing.T, got color.Color, want color.NRGBA) {
+	t.Helper()
+	r, g, b, a := got.RGBA()
+	gotNRGBA := color.NRGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), uint8(a >> 8)}
+	if gotNRGBA != want {
+		t.Fatalf("color mismatch: want %#v got %#v", want, gotNRGBA)
+	}
+}
+
+func TestNormalizeUserConfigDefaultsThemeScheme(t *testing.T) {
+	config := normalizeUserConfig(UserConfig{})
+	if config.ThemeScheme != appThemeSchemeClassicBlue {
+		t.Fatalf("theme scheme mismatch: want %q got %q", appThemeSchemeClassicBlue, config.ThemeScheme)
+	}
+}
+
+func TestThemeSchemeDisplayAndNext(t *testing.T) {
+	if got := themeSchemeFromDisplay("紫罗兰"); got != appThemeSchemeViolet {
+		t.Fatalf("theme scheme from display mismatch: want %q got %q", appThemeSchemeViolet, got)
+	}
+	if got := themeSchemeDisplay(appThemeSchemeCyber); got != "赛博青" {
+		t.Fatalf("theme scheme display mismatch: want %q got %q", "赛博青", got)
+	}
+	if got := nextThemeScheme(appThemeSchemeClassicBlue); got != appThemeSchemeEmerald {
+		t.Fatalf("next theme scheme mismatch: want %q got %q", appThemeSchemeEmerald, got)
+	}
+	if got := nextThemeScheme(appThemeSchemeCyber); got != appThemeSchemeClassicBlue {
+		t.Fatalf("theme scheme should loop to first: want %q got %q", appThemeSchemeClassicBlue, got)
+	}
+}
+
+func TestMyThemeUsesSchemePalette(t *testing.T) {
+	palette := themePaletteFor(appThemeSchemeEmerald, true)
+	th := newMyTheme(appThemeSchemeEmerald, true)
+
+	assertColorNRGBA(t, th.Color(theme.ColorNamePrimary, theme.VariantLight), palette.Primary)
+	assertColorNRGBA(t, th.Color(theme.ColorNameBackground, theme.VariantLight), palette.Background)
+	assertColorNRGBA(t, th.Color(theme.ColorNameHeaderBackground, theme.VariantLight), palette.HeaderBackground)
 }
 
 func TestAndroidCapDexMainArgsUsesClasspathAppProcess(t *testing.T) {
