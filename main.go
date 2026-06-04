@@ -60,6 +60,7 @@ type UserConfig struct {
 	DirectionMode string `json:"direction_mode"`
 	LogEnabled    bool   `json:"log_enabled"`
 	ThemeMode     string `json:"theme_mode"`
+	ThemeScheme   string `json:"theme_scheme"`
 	ShowMagnifier bool   `json:"show_magnifier"`
 	AutoCopyRange bool   `json:"auto_copy_range"`
 	ApplyRange    bool   `json:"apply_range"`
@@ -83,16 +84,15 @@ type ToolButtonConfig struct {
 
 // 全局变量定义
 var (
-	headerBgColor      = color.NRGBA{30, 30, 30, 255}    // 表头深色背景
-	lightHeaderBgColor = color.NRGBA{220, 220, 220, 255} // 表头浅色背景
-	transparent        = color.NRGBA{0, 0, 0, 0}         // 透明色
-	findTestMarkColor  = color.NRGBA{255, 0, 255, 255}   // 找色测试结果高亮色
-	nodeFindTestColor  = color.NRGBA{0, 255, 120, 255}   // 节点查找测试结果高亮色
-	linkedPointColor   = color.NRGBA{255, 215, 0, 255}   // 图像点和列表联动高亮色
-	linkedRowBgColor   = color.NRGBA{255, 215, 0, 110}   // 图像点和列表联动行背景色
+	transparent       = color.NRGBA{0, 0, 0, 0}       // 透明色
+	findTestMarkColor = color.NRGBA{255, 0, 255, 255} // 找色测试结果高亮色
+	nodeFindTestColor = color.NRGBA{0, 255, 120, 255} // 节点查找测试结果高亮色
+	linkedPointColor  = color.NRGBA{255, 215, 0, 255} // 图像点和列表联动高亮色
+	linkedRowBgColor  = color.NRGBA{255, 215, 0, 110} // 图像点和列表联动行背景色
 
 	// 主题状态变量 - 初始值会在程序启动时根据系统主题设置
-	isDarkTheme = false
+	isDarkTheme          = false
+	currentThemeSchemeID = appThemeSchemeClassicBlue
 
 	// 设备选择相关变量
 	deviceSelect         *widget.Select
@@ -151,6 +151,14 @@ const (
 	appThemeModeSystem = "system"
 	appThemeModeLight  = "light"
 	appThemeModeDark   = "dark"
+)
+
+const (
+	appThemeSchemeClassicBlue = "classic_blue"
+	appThemeSchemeEmerald     = "emerald"
+	appThemeSchemeViolet      = "violet"
+	appThemeSchemeAmber       = "amber"
+	appThemeSchemeCyber       = "cyber"
 )
 
 const (
@@ -304,6 +312,215 @@ var appThemeModeOptions = []string{
 	"深色",
 }
 
+type appThemePalette struct {
+	Primary          color.NRGBA
+	Foreground       color.NRGBA
+	ForegroundOnKey  color.NRGBA
+	Background       color.NRGBA
+	Button           color.NRGBA
+	InputBackground  color.NRGBA
+	InputBorder      color.NRGBA
+	HeaderBackground color.NRGBA
+	Selection        color.NRGBA
+	Hover            color.NRGBA
+	Focus            color.NRGBA
+	Separator        color.NRGBA
+	Placeholder      color.NRGBA
+	Shadow           color.NRGBA
+}
+
+type appThemeScheme struct {
+	ID    string
+	Name  string
+	Light appThemePalette
+	Dark  appThemePalette
+}
+
+var appThemeSchemes = []appThemeScheme{
+	{
+		ID:   appThemeSchemeClassicBlue,
+		Name: "经典蓝",
+		Light: appThemePalette{
+			Primary:          color.NRGBA{29, 78, 216, 255},
+			Foreground:       color.NRGBA{17, 24, 39, 255},
+			ForegroundOnKey:  color.NRGBA{255, 255, 255, 255},
+			Background:       color.NRGBA{241, 245, 249, 255},
+			Button:           color.NRGBA{226, 232, 240, 255},
+			InputBackground:  color.NRGBA{229, 231, 235, 255},
+			InputBorder:      color.NRGBA{148, 163, 184, 255},
+			HeaderBackground: color.NRGBA{215, 226, 242, 255},
+			Selection:        color.NRGBA{191, 219, 254, 255},
+			Hover:            color.NRGBA{219, 234, 254, 255},
+			Focus:            color.NRGBA{37, 99, 235, 88},
+			Separator:        color.NRGBA{203, 213, 225, 255},
+			Placeholder:      color.NRGBA{100, 116, 139, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 45},
+		},
+		Dark: appThemePalette{
+			Primary:          color.NRGBA{96, 165, 250, 255},
+			Foreground:       color.NRGBA{248, 250, 252, 255},
+			ForegroundOnKey:  color.NRGBA{15, 23, 42, 255},
+			Background:       color.NRGBA{15, 23, 42, 255},
+			Button:           color.NRGBA{30, 41, 59, 255},
+			InputBackground:  color.NRGBA{38, 50, 68, 255},
+			InputBorder:      color.NRGBA{71, 85, 105, 255},
+			HeaderBackground: color.NRGBA{17, 24, 39, 255},
+			Selection:        color.NRGBA{30, 64, 175, 255},
+			Hover:            color.NRGBA{30, 58, 138, 255},
+			Focus:            color.NRGBA{96, 165, 250, 92},
+			Separator:        color.NRGBA{51, 65, 85, 255},
+			Placeholder:      color.NRGBA{148, 163, 184, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 120},
+		},
+	},
+	{
+		ID:   appThemeSchemeEmerald,
+		Name: "翡翠绿",
+		Light: appThemePalette{
+			Primary:          color.NRGBA{4, 120, 87, 255},
+			Foreground:       color.NRGBA{17, 24, 39, 255},
+			ForegroundOnKey:  color.NRGBA{255, 255, 255, 255},
+			Background:       color.NRGBA{240, 253, 244, 255},
+			Button:           color.NRGBA{220, 252, 231, 255},
+			InputBackground:  color.NRGBA{226, 246, 234, 255},
+			InputBorder:      color.NRGBA{110, 180, 150, 255},
+			HeaderBackground: color.NRGBA{187, 247, 208, 255},
+			Selection:        color.NRGBA{167, 243, 208, 255},
+			Hover:            color.NRGBA{209, 250, 229, 255},
+			Focus:            color.NRGBA{5, 150, 105, 88},
+			Separator:        color.NRGBA{187, 247, 208, 255},
+			Placeholder:      color.NRGBA{71, 125, 99, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 45},
+		},
+		Dark: appThemePalette{
+			Primary:          color.NRGBA{52, 211, 153, 255},
+			Foreground:       color.NRGBA{240, 253, 244, 255},
+			ForegroundOnKey:  color.NRGBA{5, 46, 22, 255},
+			Background:       color.NRGBA{6, 33, 25, 255},
+			Button:           color.NRGBA{15, 61, 46, 255},
+			InputBackground:  color.NRGBA{20, 73, 55, 255},
+			InputBorder:      color.NRGBA{34, 110, 82, 255},
+			HeaderBackground: color.NRGBA{7, 46, 34, 255},
+			Selection:        color.NRGBA{6, 95, 70, 255},
+			Hover:            color.NRGBA{4, 120, 87, 255},
+			Focus:            color.NRGBA{52, 211, 153, 92},
+			Separator:        color.NRGBA{32, 93, 68, 255},
+			Placeholder:      color.NRGBA{134, 239, 172, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 120},
+		},
+	},
+	{
+		ID:   appThemeSchemeViolet,
+		Name: "紫罗兰",
+		Light: appThemePalette{
+			Primary:          color.NRGBA{109, 40, 217, 255},
+			Foreground:       color.NRGBA{24, 24, 27, 255},
+			ForegroundOnKey:  color.NRGBA{255, 255, 255, 255},
+			Background:       color.NRGBA{250, 245, 255, 255},
+			Button:           color.NRGBA{237, 233, 254, 255},
+			InputBackground:  color.NRGBA{245, 243, 255, 255},
+			InputBorder:      color.NRGBA{167, 139, 250, 255},
+			HeaderBackground: color.NRGBA{221, 214, 254, 255},
+			Selection:        color.NRGBA{196, 181, 253, 255},
+			Hover:            color.NRGBA{237, 233, 254, 255},
+			Focus:            color.NRGBA{124, 58, 237, 88},
+			Separator:        color.NRGBA{221, 214, 254, 255},
+			Placeholder:      color.NRGBA{109, 92, 150, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 45},
+		},
+		Dark: appThemePalette{
+			Primary:          color.NRGBA{167, 139, 250, 255},
+			Foreground:       color.NRGBA{250, 245, 255, 255},
+			ForegroundOnKey:  color.NRGBA{30, 27, 75, 255},
+			Background:       color.NRGBA{30, 27, 75, 255},
+			Button:           color.NRGBA{46, 36, 92, 255},
+			InputBackground:  color.NRGBA{54, 45, 110, 255},
+			InputBorder:      color.NRGBA{91, 72, 153, 255},
+			HeaderBackground: color.NRGBA{37, 31, 83, 255},
+			Selection:        color.NRGBA{91, 33, 182, 255},
+			Hover:            color.NRGBA{76, 29, 149, 255},
+			Focus:            color.NRGBA{167, 139, 250, 92},
+			Separator:        color.NRGBA{76, 58, 126, 255},
+			Placeholder:      color.NRGBA{196, 181, 253, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 120},
+		},
+	},
+	{
+		ID:   appThemeSchemeAmber,
+		Name: "暖橙",
+		Light: appThemePalette{
+			Primary:          color.NRGBA{194, 65, 12, 255},
+			Foreground:       color.NRGBA{28, 25, 23, 255},
+			ForegroundOnKey:  color.NRGBA{255, 255, 255, 255},
+			Background:       color.NRGBA{255, 247, 237, 255},
+			Button:           color.NRGBA{254, 215, 170, 255},
+			InputBackground:  color.NRGBA{255, 237, 213, 255},
+			InputBorder:      color.NRGBA{251, 146, 60, 255},
+			HeaderBackground: color.NRGBA{253, 186, 116, 255},
+			Selection:        color.NRGBA{254, 215, 170, 255},
+			Hover:            color.NRGBA{255, 237, 213, 255},
+			Focus:            color.NRGBA{234, 88, 12, 88},
+			Separator:        color.NRGBA{253, 186, 116, 255},
+			Placeholder:      color.NRGBA{124, 75, 34, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 45},
+		},
+		Dark: appThemePalette{
+			Primary:          color.NRGBA{251, 146, 60, 255},
+			Foreground:       color.NRGBA{255, 247, 237, 255},
+			ForegroundOnKey:  color.NRGBA{67, 20, 7, 255},
+			Background:       color.NRGBA{45, 26, 14, 255},
+			Button:           color.NRGBA{67, 38, 20, 255},
+			InputBackground:  color.NRGBA{82, 49, 26, 255},
+			InputBorder:      color.NRGBA{124, 69, 32, 255},
+			HeaderBackground: color.NRGBA{57, 32, 17, 255},
+			Selection:        color.NRGBA{154, 52, 18, 255},
+			Hover:            color.NRGBA{124, 45, 18, 255},
+			Focus:            color.NRGBA{251, 146, 60, 92},
+			Separator:        color.NRGBA{103, 62, 34, 255},
+			Placeholder:      color.NRGBA{253, 186, 116, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 120},
+		},
+	},
+	{
+		ID:   appThemeSchemeCyber,
+		Name: "赛博青",
+		Light: appThemePalette{
+			Primary:          color.NRGBA{14, 116, 144, 255},
+			Foreground:       color.NRGBA{8, 47, 73, 255},
+			ForegroundOnKey:  color.NRGBA{255, 255, 255, 255},
+			Background:       color.NRGBA{236, 254, 255, 255},
+			Button:           color.NRGBA{207, 250, 254, 255},
+			InputBackground:  color.NRGBA{224, 247, 250, 255},
+			InputBorder:      color.NRGBA{34, 184, 207, 255},
+			HeaderBackground: color.NRGBA{165, 243, 252, 255},
+			Selection:        color.NRGBA{103, 232, 249, 255},
+			Hover:            color.NRGBA{207, 250, 254, 255},
+			Focus:            color.NRGBA{8, 145, 178, 88},
+			Separator:        color.NRGBA{165, 243, 252, 255},
+			Placeholder:      color.NRGBA{21, 94, 117, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 45},
+		},
+		Dark: appThemePalette{
+			Primary:          color.NRGBA{34, 211, 238, 255},
+			Foreground:       color.NRGBA{236, 254, 255, 255},
+			ForegroundOnKey:  color.NRGBA{8, 51, 68, 255},
+			Background:       color.NRGBA{8, 35, 45, 255},
+			Button:           color.NRGBA{12, 55, 68, 255},
+			InputBackground:  color.NRGBA{16, 70, 84, 255},
+			InputBorder:      color.NRGBA{22, 112, 130, 255},
+			HeaderBackground: color.NRGBA{10, 48, 61, 255},
+			Selection:        color.NRGBA{14, 116, 144, 255},
+			Hover:            color.NRGBA{21, 94, 117, 255},
+			Focus:            color.NRGBA{34, 211, 238, 92},
+			Separator:        color.NRGBA{21, 94, 117, 255},
+			Placeholder:      color.NRGBA{103, 232, 249, 255},
+			Shadow:           color.NRGBA{0, 0, 0, 120},
+		},
+	},
+}
+
+var appThemeSchemeOptions = themeSchemeDisplayOptions()
+
 func normalizeThemeMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case appThemeModeLight, "浅色":
@@ -339,6 +556,71 @@ func themeModeIsDark(mode string, systemVariant fyne.ThemeVariant) bool {
 	default:
 		return systemVariant == theme.VariantDark
 	}
+}
+
+func themeSchemeDisplayOptions() []string {
+	options := make([]string, 0, len(appThemeSchemes))
+	for _, scheme := range appThemeSchemes {
+		options = append(options, scheme.Name)
+	}
+	return options
+}
+
+func normalizeThemeScheme(scheme string) string {
+	trimmed := strings.TrimSpace(scheme)
+	lower := strings.ToLower(trimmed)
+	for _, item := range appThemeSchemes {
+		if lower == item.ID || trimmed == item.Name {
+			return item.ID
+		}
+	}
+	return appThemeSchemeClassicBlue
+}
+
+func themeSchemeDisplay(scheme string) string {
+	id := normalizeThemeScheme(scheme)
+	for _, item := range appThemeSchemes {
+		if item.ID == id {
+			return item.Name
+		}
+	}
+	return appThemeSchemes[0].Name
+}
+
+func themeSchemeFromDisplay(display string) string {
+	return normalizeThemeScheme(display)
+}
+
+func nextThemeScheme(scheme string) string {
+	id := normalizeThemeScheme(scheme)
+	for i, item := range appThemeSchemes {
+		if item.ID == id {
+			return appThemeSchemes[(i+1)%len(appThemeSchemes)].ID
+		}
+	}
+	return appThemeSchemes[0].ID
+}
+
+func themeSchemeByID(scheme string) appThemeScheme {
+	id := normalizeThemeScheme(scheme)
+	for _, item := range appThemeSchemes {
+		if item.ID == id {
+			return item
+		}
+	}
+	return appThemeSchemes[0]
+}
+
+func themePaletteFor(scheme string, isDark bool) appThemePalette {
+	item := themeSchemeByID(scheme)
+	if isDark {
+		return item.Dark
+	}
+	return item.Light
+}
+
+func currentThemePalette(isDark bool) appThemePalette {
+	return themePaletteFor(currentThemeSchemeID, isDark)
 }
 
 func copyShortcutConfig(shortcuts map[string]string) map[string]string {
@@ -731,20 +1013,12 @@ func (r *fixedHeightRenderer) Destroy() {}
 
 // 获取当前主题下适合的文字颜色
 func getTextColor(isDark bool) color.Color {
-	if isDark {
-		return color.White
-	} else {
-		return color.Black
-	}
+	return currentThemePalette(isDark).Foreground
 }
 
 // 获取当前主题下适合的表头背景色
 func getHeaderBgColor(isDark bool) color.Color {
-	if isDark {
-		return headerBgColor
-	} else {
-		return lightHeaderBgColor
-	}
+	return currentThemePalette(isDark).HeaderBackground
 }
 
 // 判断颜色亮度，决定是使用白色还是黑色文字
@@ -765,44 +1039,52 @@ func getContrastColor(bgColor color.Color) color.Color {
 	return color.White
 }
 
-// 自定义主题，使用微软雅黑字体的深色主题
+// 自定义主题，按当前明暗模式叠加应用配色方案。
 type myTheme struct {
 	fyne.Theme
+	palette appThemePalette
+	isDark  bool
 }
 
-// 设置深色主题
 func (m myTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
-	// 如果是深色主题，使用深色变体
-	if variant == theme.VariantDark || isDarkTheme {
-		// 为下拉框背景设置更明显的颜色
-		if name == theme.ColorNameInputBackground {
-			return color.NRGBA{60, 60, 60, 255} // 深色主题下使用深灰色作为输入框背景
-		} else if name == theme.ColorNameFocus {
-			// 消除焦点背景，使其与输入框背景相同
-			return color.NRGBA{60, 60, 60, 255}
-		}
-		return theme.DefaultTheme().Color(name, theme.VariantDark)
+	switch name {
+	case theme.ColorNamePrimary, theme.ColorNameHyperlink:
+		return m.palette.Primary
+	case theme.ColorNameForeground:
+		return m.palette.Foreground
+	case theme.ColorNameForegroundOnPrimary:
+		return m.palette.ForegroundOnKey
+	case theme.ColorNameBackground:
+		return m.palette.Background
+	case theme.ColorNameButton, theme.ColorNameMenuBackground:
+		return m.palette.Button
+	case theme.ColorNameOverlayBackground:
+		return m.palette.Background
+	case theme.ColorNameInputBackground:
+		return m.palette.InputBackground
+	case theme.ColorNameInputBorder:
+		return m.palette.InputBorder
+	case theme.ColorNameHeaderBackground:
+		return m.palette.HeaderBackground
+	case theme.ColorNameSelection:
+		return m.palette.Selection
+	case theme.ColorNameHover:
+		return m.palette.Hover
+	case theme.ColorNameFocus, theme.ColorNamePressed:
+		return m.palette.Focus
+	case theme.ColorNameSeparator:
+		return m.palette.Separator
+	case theme.ColorNamePlaceHolder:
+		return m.palette.Placeholder
+	case theme.ColorNameShadow:
+		return m.palette.Shadow
 	}
 
-	// 如果是浅色主题，对特定元素进行自定义
-	if name == theme.ColorNameBackground {
-		return color.NRGBA{240, 240, 240, 255} // 使用浅灰色背景而非纯白色
-	} else if name == theme.ColorNameButton {
-		// 浅色主题下按钮背景使用浅灰色，以便与背景区分
-		return color.NRGBA{220, 220, 220, 255}
-	} else if name == theme.ColorNameInputBackground {
-		// 浅色主题下为下拉框设置背景色
-		return color.NRGBA{220, 220, 220, 255}
-	} else if name == theme.ColorNameFocus {
-		// 消除焦点背景，使其与输入框背景相同
-		return color.NRGBA{220, 220, 220, 255}
-	} else if name == theme.ColorNameShadow {
-		// 增强浅色主题下的阴影可见度
-		return color.NRGBA{0, 0, 0, 40}
+	activeVariant := theme.VariantLight
+	if m.isDark {
+		activeVariant = theme.VariantDark
 	}
-
-	// 其他颜色使用默认主题的浅色变体
-	return theme.DefaultTheme().Color(name, theme.VariantLight)
+	return theme.DefaultTheme().Color(name, activeVariant)
 }
 
 // 设置尺寸
@@ -820,8 +1102,12 @@ func (m myTheme) Size(name fyne.ThemeSizeName) float32 {
 }
 
 // 自定义主题，只修改需要的主题属性
-func newMyTheme() fyne.Theme {
-	return &myTheme{Theme: theme.DarkTheme()}
+func newMyTheme(scheme string, isDark bool) fyne.Theme {
+	return &myTheme{
+		Theme:   theme.DefaultTheme(),
+		palette: themePaletteFor(scheme, isDark),
+		isDark:  isDark,
+	}
 }
 
 // 自定义可点击表格行
@@ -858,6 +1144,7 @@ func defaultUserConfig() UserConfig {
 		DirectionMode: "0: 从左到右，从上到下",
 		LogEnabled:    false,
 		ThemeMode:     appThemeModeSystem,
+		ThemeScheme:   appThemeSchemeClassicBlue,
 		ShowMagnifier: true,
 		AutoCopyRange: true,
 		ApplyRange:    false,
@@ -910,6 +1197,7 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 		config.DirectionMode = defaults.DirectionMode
 	}
 	config.ThemeMode = normalizeThemeMode(config.ThemeMode)
+	config.ThemeScheme = normalizeThemeScheme(config.ThemeScheme)
 	if config.GridCols <= 0 {
 		config.GridCols = defaults.GridCols
 	}
@@ -6128,10 +6416,12 @@ func main() {
 	// 检测系统当前主题并更新isDarkTheme变量
 	currentTheme := a.Settings().ThemeVariant()
 	themeModeValue := normalizeThemeMode(userConfig.ThemeMode)
+	themeSchemeValue := normalizeThemeScheme(userConfig.ThemeScheme)
 	isDarkTheme = themeModeIsDark(themeModeValue, currentTheme)
+	currentThemeSchemeID = themeSchemeValue
 
 	// 设置自定义主题
-	a.Settings().SetTheme(newMyTheme())
+	a.Settings().SetTheme(newMyTheme(themeSchemeValue, isDarkTheme))
 
 	// 创建设备选择下拉框
 	deviceSelect = widget.NewSelect([]string{deviceSelectPrompt}, func(value string) {
@@ -6312,19 +6602,11 @@ func main() {
 
 	// 主题切换功能
 	toggleTheme := func() {
-		if isDarkTheme {
-			// 切换到亮色主题
-			isDarkTheme = false
-			themeModeValue = appThemeModeLight
-			a.Settings().SetTheme(newMyTheme())
-		} else {
-			// 切换到深色主题
-			isDarkTheme = true
-			themeModeValue = appThemeModeDark
-			a.Settings().SetTheme(newMyTheme())
-		}
+		themeSchemeValue = nextThemeScheme(themeSchemeValue)
+		currentThemeSchemeID = themeSchemeValue
+		a.Settings().SetTheme(newMyTheme(themeSchemeValue, isDarkTheme))
 
-		// 切换主题后更新表头和列表
+		// 切换配色方案后更新表头和列表
 		updateTableHeader()
 		updateTableSelection()
 		if saveCurrentConfig != nil {
@@ -6972,10 +7254,12 @@ func main() {
 	registerCommand(shortcutActionScreenshot, captureScreenshot)
 	registerCommand(shortcutActionImport, importImage)
 	registerCommand(commandCopyCode, generateCodeFunc)
-	applyThemeMode := func(mode string) {
+	applyThemeSettings := func(mode, scheme string) {
 		themeModeValue = normalizeThemeMode(mode)
+		themeSchemeValue = normalizeThemeScheme(scheme)
+		currentThemeSchemeID = themeSchemeValue
 		isDarkTheme = themeModeIsDark(themeModeValue, a.Settings().ThemeVariant())
-		a.Settings().SetTheme(newMyTheme())
+		a.Settings().SetTheme(newMyTheme(themeSchemeValue, isDarkTheme))
 		updateTableHeader()
 		updateTableSelection()
 	}
@@ -7026,6 +7310,35 @@ func main() {
 		logPathLabel.Wrapping = fyne.TextWrapWord
 		themeModeSelect := widget.NewSelect(appThemeModeOptions, nil)
 		themeModeSelect.SetSelected(themeModeDisplay(themeModeValue))
+		themeSchemeSelect := widget.NewSelect(appThemeSchemeOptions, nil)
+		themeSchemeSelect.SetSelected(themeSchemeDisplay(themeSchemeValue))
+		themePreviewRow := container.NewHBox()
+		newThemeSwatch := func(label string, c color.Color) fyne.CanvasObject {
+			swatch := canvas.NewRectangle(c)
+			swatch.SetMinSize(fyne.NewSize(34, 18))
+			swatch.StrokeColor = color.NRGBA{0, 0, 0, 70}
+			swatch.StrokeWidth = 1
+			return container.NewHBox(swatch, widget.NewLabel(label))
+		}
+		refreshThemePreview := func() {
+			mode := themeModeFromDisplay(themeModeSelect.Selected)
+			scheme := themeSchemeFromDisplay(themeSchemeSelect.Selected)
+			palette := themePaletteFor(scheme, themeModeIsDark(mode, a.Settings().ThemeVariant()))
+			themePreviewRow.Objects = []fyne.CanvasObject{
+				newThemeSwatch("主色", palette.Primary),
+				newThemeSwatch("背景", palette.Background),
+				newThemeSwatch("按钮", palette.Button),
+				newThemeSwatch("表头", palette.HeaderBackground),
+			}
+			themePreviewRow.Refresh()
+		}
+		themeModeSelect.OnChanged = func(string) {
+			refreshThemePreview()
+		}
+		themeSchemeSelect.OnChanged = func(string) {
+			refreshThemePreview()
+		}
+		refreshThemePreview()
 
 		colsEntry := widget.NewEntry()
 		colsEntry.SetText(fmt.Sprintf("%d", gridColsValue))
@@ -7066,7 +7379,10 @@ func main() {
 			logPathLabel,
 			widget.NewSeparator(),
 			widget.NewLabelWithStyle("配色管理", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			container.NewBorder(nil, nil, widget.NewLabel("配色模式"), nil, themeModeSelect),
+			widget.NewLabel("主题按钮会在内置配色方案间循环切换；亮暗模式仍可单独设置。"),
+			container.NewBorder(nil, nil, widget.NewLabel("亮暗模式"), nil, themeModeSelect),
+			container.NewBorder(nil, nil, widget.NewLabel("配色方案"), nil, themeSchemeSelect),
+			container.NewBorder(nil, nil, widget.NewLabel("方案预览"), nil, themePreviewRow),
 		)
 
 		gridConfigPanel := container.NewVBox(
@@ -7188,7 +7504,7 @@ func main() {
 			gridSpacingValue = spacing
 			shortcutConfig = normalizeShortcutConfig(newShortcuts)
 			setAppLoggingEnabled(logEnabledCheck.Checked)
-			applyThemeMode(themeModeFromDisplay(themeModeSelect.Selected))
+			applyThemeSettings(themeModeFromDisplay(themeModeSelect.Selected), themeSchemeFromDisplay(themeSchemeSelect.Selected))
 			registerConfiguredShortcuts()
 			shortcutsRestored = true
 			if refreshShortcutButtonTexts != nil {
@@ -7852,6 +8168,7 @@ func main() {
 			DirectionMode: directionSelect.Selected,
 			LogEnabled:    appLoggingEnabled,
 			ThemeMode:     themeModeValue,
+			ThemeScheme:   themeSchemeValue,
 			ShowMagnifier: showMagnifierCheck.Checked,
 			AutoCopyRange: autoCopyRangeCheck.Checked,
 			ApplyRange:    applyRangeCheck.Checked,
