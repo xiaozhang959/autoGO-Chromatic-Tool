@@ -72,6 +72,18 @@ jobs:
             go.sum
             fyne-master/go.sum
 
+      - name: Download Go modules
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          go mod download
+          Push-Location fyne-master
+          try {
+            go mod download
+          } finally {
+            Pop-Location
+          }
+
       - name: Setup MSYS2 MinGW toolchain
         uses: msys2/setup-msys2@v2
         with:
@@ -113,6 +125,7 @@ jobs:
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           $env:CC = "gcc"
+          $env:GOFLAGS = "-v"
           $opencvWorkDir = Join-Path $env:RUNNER_TEMP "autogo-opencv-build"
 
           New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
@@ -208,6 +221,13 @@ jobs:
         shell: bash
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
+      - name: Download Go modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          (cd fyne-master && go mod download)
+
       - name: Ensure CMake is available
         shell: bash
         run: |
@@ -241,6 +261,7 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          export GOFLAGS="-v"
           mkdir -p dist/macos
 
           tmp_dir="dist/macos/$ARCH"

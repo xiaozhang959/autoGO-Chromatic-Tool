@@ -12,6 +12,10 @@ on:
       - "scripts/build_with_static_opencv_windows.ps1"
       - "scripts/build_minimal_opencv_macos.sh"
       - "scripts/build_with_static_opencv_macos.sh"
+      - "go.mod"
+      - "go.sum"
+      - "fyne-master/go.mod"
+      - "fyne-master/go.sum"
 
 permissions:
   contents: read
@@ -20,6 +24,60 @@ env:
   OPENCV_VERSION: 4.13.0
 
 jobs:
+  warm-go:
+    name: Warm Go cache ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            fyne-master/go.sum
+
+      - name: Download Go modules on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          go mod download
+          Push-Location fyne-master
+          try {
+            go mod download
+          } finally {
+            Pop-Location
+          }
+
+      - name: Download Go modules on macOS
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          (cd fyne-master && go mod download)
+
+      - name: Warm Windows resource tool
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: go install github.com/akavel/rsrc@latest
+
+      - name: Warm Fyne CLI
+        if: runner.os != 'Windows'
+        working-directory: fyne-master
+        shell: bash
+        run: go install ./cmd/fyne
+
   warm-windows:
     name: Warm Windows amd64 OpenCV
     runs-on: windows-latest
