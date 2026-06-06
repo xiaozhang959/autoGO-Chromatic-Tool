@@ -10,8 +10,8 @@ Expected layout:
   include/opencv2/imgproc.hpp
   lib/libopencv_core.dll.a
   lib/libopencv_imgproc.dll.a
-  bin/opencv_core*.dll
-  bin/opencv_imgproc*.dll
+  bin/libopencv_core*.dll or bin/opencv_core*.dll
+  bin/libopencv_imgproc*.dll or bin/opencv_imgproc*.dll
 
 Populate this folder with:
   powershell -ExecutionPolicy Bypass -File scripts/setup_opencv_windows.ps1 -Source <OpenCV-MinGW-root>

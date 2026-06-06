@@ -6,14 +6,14 @@ package main
 /*
 #cgo CXXFLAGS: -std=c++17
 #cgo windows,amd64 CXXFLAGS: -I${SRCDIR}/third_party/opencv/windows-amd64/include
-#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/third_party/opencv/windows-amd64/lib -lopencv_core -lopencv_imgproc
+#cgo windows,amd64 LDFLAGS: -lopencv_core -lopencv_imgproc
 #include <stdlib.h>
 #include "opencv_match_bridge.h"
 */
 import "C"
 
 import (
-	"fmt"
+	"errors"
 	"image"
 	"unsafe"
 )
@@ -28,7 +28,7 @@ func openCVImageMatchBackendAvailable() bool {
 
 func runOpenCVImageMatchBackend(source, template *image.NRGBA, x1, y1, x2, y2 int, opts openCVMatchOptions) (openCVMatchResult, error) {
 	if source == nil || template == nil || len(source.Pix) == 0 || len(template.Pix) == 0 {
-		return openCVMatchResult{Backend: openCVImageMatchBackendName()}, fmt.Errorf("OpenCV 输入图片为空")
+		return openCVMatchResult{Backend: openCVImageMatchBackendName()}, errors.New("OpenCV 输入图片为空")
 	}
 
 	maxResults := opts.MaxResults
@@ -65,7 +65,7 @@ func runOpenCVImageMatchBackend(source, template *image.NRGBA, x1, y1, x2, y2 in
 		Backend:   openCVImageMatchBackendName(),
 	}
 	if cResult.error_code != 0 {
-		return result, fmt.Errorf(C.GoString((*C.char)(unsafe.Pointer(&cResult.error[0]))))
+		return result, errors.New(C.GoString((*C.char)(unsafe.Pointer(&cResult.error[0]))))
 	}
 
 	count := int(cResult.count)
