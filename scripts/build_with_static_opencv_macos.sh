@@ -3,6 +3,7 @@ set -euo pipefail
 
 output="build/autoGo-image-helper-opencv-static"
 opencv_root="${OPENCV_STATIC_DIR:-}"
+work_dir="${OPENCV_BUILD_DIR:-${TMPDIR:-/tmp}/autogo-opencv-build}"
 version="4.13.0"
 arch="${GOARCH:-$(go env GOARCH 2>/dev/null || uname -m)}"
 parallel="$(sysctl -n hw.ncpu 2>/dev/null || echo 2)"
@@ -17,6 +18,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --opencv-root)
       opencv_root="$2"
+      shift 2
+      ;;
+    --work-dir)
+      work_dir="$2"
       shift 2
       ;;
     --version)
@@ -61,7 +66,7 @@ esac
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 if [[ -z "$opencv_root" ]]; then
-  opencv_root="${TMPDIR:-/tmp}/autogo-opencv-build/darwin-$go_arch/install-static-$version"
+  opencv_root="$work_dir/darwin-$go_arch/install-static-$version"
 fi
 
 if [[ ! -d "$opencv_root" ]]; then
@@ -73,6 +78,7 @@ if [[ ! -d "$opencv_root" ]]; then
   bash "$repo_root/scripts/build_minimal_opencv_macos.sh" \
     --linkage static \
     --version "$version" \
+    --work-dir "$work_dir" \
     --arch "$go_arch" \
     --parallel "$parallel"
 fi

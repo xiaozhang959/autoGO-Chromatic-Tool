@@ -2,6 +2,7 @@ param(
     [string]$Output = "build\autoGo-image-helper-opencv-static.exe",
     [string]$OpenCVRoot = $env:OPENCV_STATIC_DIR,
     [string]$Version = "4.13.0",
+    [string]$WorkDir = (Join-Path $env:TEMP "autogo-opencv-build"),
     [string]$GoLdFlags = "-s -w -H windowsgui",
     [int]$Parallel = [Math]::Max(1, [Environment]::ProcessorCount - 1),
     [switch]$BuildOpenCVIfMissing
@@ -65,14 +66,14 @@ function Copy-FirstStaticLib {
 
 $repoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 if (-not $OpenCVRoot) {
-    $OpenCVRoot = Join-Path $env:TEMP "autogo-opencv-build\windows-amd64\install-static-$Version"
+    $OpenCVRoot = Join-Path $WorkDir "windows-amd64\install-static-$Version"
 }
 
 if (-not (Test-Path -LiteralPath $OpenCVRoot -PathType Container)) {
     if (-not $BuildOpenCVIfMissing) {
         throw "Static OpenCV not found: $OpenCVRoot. Run scripts/build_minimal_opencv_windows.ps1 -Linkage static first, or pass -BuildOpenCVIfMissing."
     }
-    & (Join-Path $PSScriptRoot "build_minimal_opencv_windows.ps1") -Linkage static -Version $Version -Parallel $Parallel
+    & (Join-Path $PSScriptRoot "build_minimal_opencv_windows.ps1") -Linkage static -Version $Version -WorkDir $WorkDir -Parallel $Parallel
 }
 $OpenCVRoot = (Resolve-Path -LiteralPath $OpenCVRoot).Path
 

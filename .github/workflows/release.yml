@@ -81,6 +81,14 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-make
 
+      - name: Cache Windows static OpenCV
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/autogo-opencv-build/windows-amd64/install-static-4.13.0
+          key: opencv-static-windows-amd64-4.13.0-${{ runner.os }}-${{ hashFiles('scripts/build_minimal_opencv_windows.ps1', 'scripts/build_with_static_opencv_windows.ps1') }}
+          restore-keys: |
+            opencv-static-windows-amd64-4.13.0-${{ runner.os }}-
+
       - name: Add Go tools to PATH
         shell: pwsh
         run: |
@@ -100,6 +108,7 @@ jobs:
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           $env:CC = "gcc"
+          $opencvWorkDir = Join-Path $env:RUNNER_TEMP "autogo-opencv-build"
 
           New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
           $resourceFile = "rsrc_windows_amd64.syso"
@@ -119,6 +128,7 @@ jobs:
             powershell -ExecutionPolicy Bypass `
               -File ".\scripts\build_with_static_opencv_windows.ps1" `
               -Output $windowsExe `
+              -WorkDir $opencvWorkDir `
               -BuildOpenCVIfMissing `
               -GoLdFlags "$env:LDFLAGS -H windowsgui"
           } finally {
@@ -201,6 +211,14 @@ jobs:
             brew install cmake
           fi
 
+      - name: Cache macOS static OpenCV
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/autogo-opencv-build/darwin-${{ matrix.arch }}/install-static-4.13.0
+          key: opencv-static-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}-${{ hashFiles('scripts/build_minimal_opencv_macos.sh', 'scripts/build_with_static_opencv_macos.sh') }}
+          restore-keys: |
+            opencv-static-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}-
+
       - name: Install Fyne CLI from repository
         working-directory: fyne-master
         shell: bash
@@ -217,9 +235,11 @@ jobs:
           mkdir -p dist/macos
 
           tmp_dir="dist/macos/$ARCH"
+          opencv_work_dir="$RUNNER_TEMP/autogo-opencv-build"
           mkdir -p "$tmp_dir"
           bash scripts/build_with_static_opencv_macos.sh \
             --output "$tmp_dir/autogo" \
+            --work-dir "$opencv_work_dir" \
             --arch "$ARCH" \
             --build-opencv-if-missing \
             --ldflags "$LDFLAGS"
