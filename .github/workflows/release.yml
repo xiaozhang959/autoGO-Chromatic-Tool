@@ -101,11 +101,20 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
           $resourceFile = "rsrc_windows_amd64.syso"
+          $iconFile = "build\logo.ico"
           $windowsExe = "dist\windows\$env:APP_NAME.exe"
 
+          if (!(Test-Path $iconFile)) {
+            throw "Windows icon file was not found: $iconFile"
+          }
+
           try {
-            rsrc -ico "build\logo.ico" -manifest "windows_icon.manifest" -arch amd64 -o $resourceFile
-            go build -ldflags "$env:LDFLAGS -H=windowsgui" -o $windowsExe .
+            rsrc -ico $iconFile -manifest "windows_icon.manifest" -arch amd64 -o $resourceFile
+            if (!(Test-Path $resourceFile)) {
+              throw "Windows resource file was not generated: $resourceFile"
+            }
+
+            go build -ldflags "$env:LDFLAGS -H windowsgui" -o $windowsExe .
           } finally {
             Remove-Item $resourceFile -ErrorAction SilentlyContinue
           }
@@ -113,6 +122,21 @@ jobs:
           if (!(Test-Path $windowsExe)) {
             throw "Windows executable was not generated."
           }
+
+          $iconCheckCode = @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class ReleaseIconCheck {
+            [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint="ExtractIconExW")]
+            public static extern uint ExtractIconEx(string file, int index, IntPtr[] large, IntPtr[] small, uint icons);
+          }
+          "@
+          Add-Type -TypeDefinition $iconCheckCode
+          $embeddedIconCount = [ReleaseIconCheck]::ExtractIconEx((Resolve-Path $windowsExe).Path, -1, $null, $null, 0)
+          if ($embeddedIconCount -lt 1) {
+            throw "Windows executable does not contain an embedded icon."
+          }
+          Write-Host "Embedded icon count: $embeddedIconCount"
 
           Copy-Item `
             -Path $windowsExe `
