@@ -110,8 +110,6 @@ cmake_args=(
   -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_INSTALL_PREFIX="$install_root"
   -DCMAKE_OSX_ARCHITECTURES="$cmake_arch"
-  -DCMAKE_SYSTEM_PROCESSOR="$cmake_arch"
-  -DOPENCV_WORKAROUND_CMAKE_20989=ON
   -DBUILD_LIST=core,imgproc
   -DBUILD_SHARED_LIBS="$shared"
   -DBUILD_TESTS=OFF
@@ -137,8 +135,6 @@ cmake_args=(
   -DWITH_EIGEN=OFF
   -DWITH_IPP=OFF
   -DWITH_ITT=OFF
-  -DWITH_CAROTENE=OFF
-  -DWITH_KLEIDICV=OFF
   -DWITH_PROTOBUF=OFF
   -DWITH_QUIRC=OFF
   -DWITH_PNG=OFF
@@ -155,6 +151,15 @@ cmake_args=(
   -DWITH_ZLIB=ON
   -DBUILD_ZLIB=ON
 )
+
+if [[ "$go_arch" == "amd64" ]]; then
+  cmake_args+=(
+    -DCMAKE_SYSTEM_PROCESSOR="$cmake_arch"
+    -DOPENCV_WORKAROUND_CMAKE_20989=ON
+    -DWITH_CAROTENE=OFF
+    -DWITH_KLEIDICV=OFF
+  )
+fi
 
 echo "Configuring OpenCV $version ($linkage, darwin-$go_arch)"
 cmake "${cmake_args[@]}"
