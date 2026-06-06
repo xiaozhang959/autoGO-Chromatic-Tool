@@ -100,6 +100,10 @@ find_static_lib() {
 core_lib="$(find_static_lib 'libopencv_core*.a')"
 imgproc_lib="$(find_static_lib 'libopencv_imgproc*.a')"
 zlib_lib="$(find_static_lib 'libzlib*.a')"
+tegra_hal_lib="$(find_static_lib 'libtegra_hal*.a')"
+kleidicv_hal_lib="$(find_static_lib 'libkleidicv_hal*.a')"
+kleidicv_lib="$(find_static_lib 'libkleidicv.a')"
+kleidicv_thread_lib="$(find_static_lib 'libkleidicv_thread*.a')"
 
 if [[ -z "$core_lib" || -z "$imgproc_lib" ]]; then
   echo "Missing static OpenCV core/imgproc libraries in: $opencv_root" >&2
@@ -111,11 +115,25 @@ rm -rf "$link_root"
 mkdir -p "$link_root/lib"
 cp "$core_lib" "$link_root/lib/libopencv_core.a"
 cp "$imgproc_lib" "$link_root/lib/libopencv_imgproc.a"
-link_flags=(-L"$link_root/lib" -lopencv_imgproc -lopencv_core -lc++ -lpthread)
+link_flags=(-L"$link_root/lib" -lopencv_imgproc -lopencv_core)
+copy_optional_static_lib() {
+  local source="$1"
+  local link_name="$2"
+  if [[ -z "$source" ]]; then
+    return
+  fi
+  cp "$source" "$link_root/lib/lib$link_name.a"
+  link_flags+=("-l$link_name")
+}
+copy_optional_static_lib "$tegra_hal_lib" "tegra_hal"
+copy_optional_static_lib "$kleidicv_hal_lib" "kleidicv_hal"
+copy_optional_static_lib "$kleidicv_lib" "kleidicv"
+copy_optional_static_lib "$kleidicv_thread_lib" "kleidicv_thread"
 if [[ -n "$zlib_lib" ]]; then
   cp "$zlib_lib" "$link_root/lib/libzlib.a"
   link_flags+=(-lzlib)
 fi
+link_flags+=(-lc++ -lpthread)
 
 mkdir -p "$(dirname "$repo_root/$output")"
 
