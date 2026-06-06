@@ -44,7 +44,21 @@ go run .
 
 ## 编译
 
-`go run build`
+Windows 完整编译命令（带图标，启动不弹命令行窗口）：
+
+```powershell
+# 首次编译前安装资源生成工具
+go install github.com/akavel/rsrc@latest
+
+# 生成 Windows 图标/manifest 资源
+rsrc -ico build/logo.ico -manifest windows_icon.manifest -arch amd64 -o rsrc_windows_amd64.syso
+
+# 编译 GUI 子系统版本：-H windowsgui 用于隐藏命令行窗口
+go build -ldflags="-s -w -H windowsgui" -o "build/AutoGo图色助手.exe" .
+
+# 清理临时资源文件，图标已嵌入 exe
+Remove-Item rsrc_windows_amd64.syso
+```
 
 ## 测试
 
