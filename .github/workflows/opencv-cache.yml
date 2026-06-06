@@ -1,0 +1,118 @@
+name: Warm OpenCV Cache
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/opencv-cache.yml"
+      - ".github/workflows/release.yml"
+      - "scripts/build_minimal_opencv_windows.ps1"
+      - "scripts/build_with_static_opencv_windows.ps1"
+      - "scripts/build_minimal_opencv_macos.sh"
+      - "scripts/build_with_static_opencv_macos.sh"
+
+permissions:
+  contents: read
+
+env:
+  OPENCV_VERSION: 4.13.0
+
+jobs:
+  warm-windows:
+    name: Warm Windows amd64 OpenCV
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2 MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-make
+
+      - name: Restore Windows static OpenCV cache
+        id: opencv-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/autogo-opencv-build/windows-amd64/install-static-4.13.0
+          key: opencv-static-windows-amd64-4.13.0-${{ runner.os }}-${{ hashFiles('scripts/build_minimal_opencv_windows.ps1', 'scripts/build_with_static_opencv_windows.ps1') }}
+          restore-keys: |
+            opencv-static-windows-amd64-4.13.0-${{ runner.os }}-
+
+      - name: Build Windows static OpenCV cache
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
+          $workDir = Join-Path $env:RUNNER_TEMP "autogo-opencv-build"
+          powershell -ExecutionPolicy Bypass `
+            -File ".\scripts\build_minimal_opencv_windows.ps1" `
+            -Linkage static `
+            -Version $env:OPENCV_VERSION `
+            -WorkDir $workDir
+
+      - name: Verify Windows static OpenCV cache
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP "autogo-opencv-build\windows-amd64\install-static-$env:OPENCV_VERSION"
+          if (!(Test-Path -LiteralPath $installRoot -PathType Container)) {
+            throw "Windows static OpenCV cache directory was not found: $installRoot"
+          }
+
+  warm-macos:
+    name: Warm macOS ${{ matrix.arch }} OpenCV
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: amd64
+            runner: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure CMake is available
+        shell: bash
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew update
+            brew install cmake
+          fi
+
+      - name: Restore macOS static OpenCV cache
+        id: opencv-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/autogo-opencv-build/darwin-${{ matrix.arch }}/install-static-4.13.0
+          key: opencv-static-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}-${{ hashFiles('scripts/build_minimal_opencv_macos.sh', 'scripts/build_with_static_opencv_macos.sh') }}
+          restore-keys: |
+            opencv-static-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}-
+
+      - name: Build macOS static OpenCV cache
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/build_minimal_opencv_macos.sh \
+            --linkage static \
+            --version "$OPENCV_VERSION" \
+            --work-dir "$RUNNER_TEMP/autogo-opencv-build" \
+            --arch "${{ matrix.arch }}" \
+            --parallel 3
+
+      - name: Verify macOS static OpenCV cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="$RUNNER_TEMP/autogo-opencv-build/darwin-${{ matrix.arch }}/install-static-$OPENCV_VERSION"
+          test -d "$install_root"
