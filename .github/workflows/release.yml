@@ -166,14 +166,16 @@ jobs:
 
   build-macos:
     name: Build macOS ${{ matrix.arch }}
-    runs-on: macos-latest
+    runs-on: ${{ matrix.runner }}
     needs: metadata
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - arm64
-          - amd64
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: amd64
+            runner: macos-13
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -190,6 +192,14 @@ jobs:
       - name: Add Go tools to PATH
         shell: bash
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure CMake is available
+        shell: bash
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew update
+            brew install cmake
+          fi
 
       - name: Install Fyne CLI from repository
         working-directory: fyne-master
@@ -208,7 +218,16 @@ jobs:
 
           tmp_dir="dist/macos/$ARCH"
           mkdir -p "$tmp_dir"
-          GOOS=darwin GOARCH="$ARCH" CGO_ENABLED=1 go build -ldflags "$LDFLAGS" -o "$tmp_dir/autogo" .
+          bash scripts/build_with_static_opencv_macos.sh \
+            --output "$tmp_dir/autogo" \
+            --arch "$ARCH" \
+            --build-opencv-if-missing \
+            --ldflags "$LDFLAGS"
+
+          if otool -L "$tmp_dir/autogo" | grep -E "opencv|libstdc\+\+|libgcc"; then
+            echo "Unexpected non-system OpenCV/GNU runtime dylib dependency in macOS executable" >&2
+            exit 1
+          fi
 
           rm -rf "$APP_NAME.app"
           fyne package \
