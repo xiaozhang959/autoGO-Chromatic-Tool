@@ -33,10 +33,7 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 	templateName := "template.png"
 
 	x1, y1, x2, y2 := regionValuesFromEntry()
-	x1Entry := newOpenCVTestEntry(strconv.Itoa(x1))
-	y1Entry := newOpenCVTestEntry(strconv.Itoa(y1))
-	x2Entry := newOpenCVTestEntry(strconv.Itoa(x2))
-	y2Entry := newOpenCVTestEntry(strconv.Itoa(y2))
+	rangeEntry := newOpenCVTestEntry(fmt.Sprintf("%d,%d,%d,%d", x1, y1, x2, y2))
 
 	if strings.TrimSpace(defaultSimText) == "" {
 		defaultSimText = "0.9"
@@ -145,13 +142,45 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 		}
 	})
 
+	rangeButton := widget.NewButton("范围 (Ctrl+R)", func() {
+		if imageViewer == nil || imageViewer.image == nil {
+			dialog.ShowInformation("提示", "主窗口没有图片，请先截图或载入。", w)
+			return
+		}
+		if parent != nil {
+			parent.RequestFocus()
+		}
+		viewer := imageViewer
+		viewer.SetRangeSelectModeWithCallback(func(rect image.Rectangle) {
+			if imageViewer != viewer || viewer.image == nil {
+				fyne.Do(func() {
+					dialog.ShowInformation("提示", "当前图像已切换，请重新框选查找范围。", w)
+				})
+				return
+			}
+			rect = normalizePickRect(viewer.image, rect)
+			if rect.Empty() {
+				fyne.Do(func() {
+					dialog.ShowInformation("提示", "选择的查找范围无效。", w)
+				})
+				return
+			}
+			fyne.Do(func() {
+				rangeEntry.SetText(fmt.Sprintf("%d,%d,%d,%d", rect.Min.X, rect.Min.Y, rect.Max.X-1, rect.Max.Y-1))
+				infoLabel.SetText("已回填查找范围，可开始找图测试。")
+				w.RequestFocus()
+			})
+		})
+		infoLabel.SetText("请在主窗口图像上拖拽选择查找范围。")
+	})
+
 	runButton := widget.NewButtonWithIcon("开始找图测试", theme.MediaPlayIcon(), func() {
 		if imageViewer == nil || imageViewer.image == nil {
 			dialog.ShowInformation("提示", "主窗口没有图片，请先截图或载入。", w)
 			return
 		}
 		functionName := normalizeOpenCVImageFunctionName(methodSelect.Selected)
-		opts, err := openCVOptionsFromEntries(functionName, x1Entry, y1Entry, x2Entry, y2Entry, simEntry, grayCheck, transparentCheck)
+		opts, err := openCVOptionsFromEntries(functionName, rangeEntry, simEntry, grayCheck, transparentCheck)
 		if err != nil {
 			dialog.ShowError(err, w)
 			return
@@ -175,19 +204,14 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 	backendLabel := widget.NewLabel(openCVImageBackendStatusText())
 	backendLabel.Wrapping = fyne.TextWrapWord
 
-	rangeGrid := container.NewGridWithColumns(4,
-		container.NewBorder(widget.NewLabel("x1"), nil, nil, nil, x1Entry),
-		container.NewBorder(widget.NewLabel("y1"), nil, nil, nil, y1Entry),
-		container.NewBorder(widget.NewLabel("x2"), nil, nil, nil, x2Entry),
-		container.NewBorder(widget.NewLabel("y2"), nil, nil, nil, y2Entry),
-	)
 	leftPanel := container.New(&fixedWidthLayout{width: 230, padding: 8, verticalSpacing: 6},
 		backendLabel,
 		widget.NewSeparator(),
 		widget.NewLabel("函数"),
 		methodSelect,
 		widget.NewLabel("查找范围"),
-		rangeGrid,
+		rangeButton,
+		rangeEntry,
 		widget.NewLabel("相似度 sim"),
 		simEntry,
 		widget.NewLabel("displayId"),
@@ -250,20 +274,8 @@ func currentOpenCVSelectedRect() (image.Rectangle, bool) {
 	return rect, true
 }
 
-func openCVOptionsFromEntries(functionName string, x1Entry, y1Entry, x2Entry, y2Entry, simEntry *widget.Entry, grayCheck, transparentCheck *widget.Check) (openCVMatchOptions, error) {
-	x1, err := parseRequiredOpenCVIntEntry(x1Entry, "x1")
-	if err != nil {
-		return openCVMatchOptions{}, err
-	}
-	y1, err := parseRequiredOpenCVIntEntry(y1Entry, "y1")
-	if err != nil {
-		return openCVMatchOptions{}, err
-	}
-	x2, err := parseRequiredOpenCVIntEntry(x2Entry, "x2")
-	if err != nil {
-		return openCVMatchOptions{}, err
-	}
-	y2, err := parseRequiredOpenCVIntEntry(y2Entry, "y2")
+func openCVOptionsFromEntries(functionName string, rangeEntry, simEntry *widget.Entry, grayCheck, transparentCheck *widget.Check) (openCVMatchOptions, error) {
+	x1, y1, x2, y2, err := parseOpenCVRangeEntry(rangeEntry)
 	if err != nil {
 		return openCVMatchOptions{}, err
 	}
@@ -287,12 +299,20 @@ func openCVOptionsFromEntries(functionName string, x1Entry, y1Entry, x2Entry, y2
 	}, nil
 }
 
-func parseRequiredOpenCVIntEntry(entry *widget.Entry, name string) (int, error) {
-	value, err := strconv.Atoi(strings.TrimSpace(entry.Text))
-	if err != nil {
-		return 0, fmt.Errorf("%s 必须是整数", name)
+func parseOpenCVRangeEntry(entry *widget.Entry) (int, int, int, int, error) {
+	parts := strings.Split(strings.TrimSpace(entry.Text), ",")
+	if len(parts) != 4 {
+		return 0, 0, 0, 0, fmt.Errorf("查找范围格式应为 x1,y1,x2,y2")
 	}
-	return value, nil
+	values := [4]int{}
+	for i, part := range parts {
+		value, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil {
+			return 0, 0, 0, 0, fmt.Errorf("查找范围格式应为 x1,y1,x2,y2，且坐标必须是整数")
+		}
+		values[i] = value
+	}
+	return values[0], values[1], values[2], values[3], nil
 }
 
 func parseOpenCVIntEntry(entry *widget.Entry, fallback int) int {

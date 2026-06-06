@@ -4,6 +4,8 @@ import (
 	"image"
 	"strings"
 	"testing"
+
+	"fyne.io/fyne/v2/widget"
 )
 
 func TestNormalizeOpenCVImageFunctionName(t *testing.T) {
@@ -46,6 +48,32 @@ func TestBuildOpenCVImageTestCodeUsesNewDocSignature(t *testing.T) {
 	code = buildOpenCVImageTestCode(openCVImageFuncFindImageFromImage, opts, 0, "button.png")
 	if !strings.Contains(code, `opencv.FindImageFromImage(img, &templateBytes, true, true, 0.85)`) {
 		t.Fatalf("FindImageFromImage code uses wrong signature:\n%s", code)
+	}
+}
+
+func TestOpenCVOptionsFromEntriesParsesCommaRange(t *testing.T) {
+	rangeEntry := widget.NewEntry()
+	rangeEntry.SetText("10, 20, 30, 40")
+	simEntry := widget.NewEntry()
+	simEntry.SetText("0.88")
+	grayCheck := widget.NewCheck("", nil)
+	grayCheck.SetChecked(true)
+	transparentCheck := widget.NewCheck("", nil)
+
+	opts, err := openCVOptionsFromEntries(openCVImageFuncFindImageAll, rangeEntry, simEntry, grayCheck, transparentCheck)
+	if err != nil {
+		t.Fatalf("openCVOptionsFromEntries returned error: %v", err)
+	}
+	if opts.X1 != 10 || opts.Y1 != 20 || opts.X2 != 30 || opts.Y2 != 40 {
+		t.Fatalf("range mismatch: %+v", opts)
+	}
+	if !opts.IsGray || opts.IsTransparent || opts.Sim != 0.88 || !opts.FindAll {
+		t.Fatalf("options mismatch: %+v", opts)
+	}
+
+	rangeEntry.SetText("10,20,30")
+	if _, err := openCVOptionsFromEntries(openCVImageFuncFindImage, rangeEntry, simEntry, grayCheck, transparentCheck); err == nil {
+		t.Fatal("expected error for invalid range format")
 	}
 }
 
