@@ -2,6 +2,7 @@ param(
     [string]$Output = "build\autoGo-image-helper-opencv-static.exe",
     [string]$OpenCVRoot = $env:OPENCV_STATIC_DIR,
     [string]$Version = "4.13.0",
+    [string]$GoLdFlags = "-s -w -H windowsgui",
     [int]$Parallel = [Math]::Max(1, [Environment]::ProcessorCount - 1),
     [switch]$BuildOpenCVIfMissing
 )
@@ -12,11 +13,19 @@ function Invoke-NativeCommand {
     param(
         [string]$FilePath,
         [string[]]$ArgumentList,
-        [string]$Label = $FilePath
+        [string]$Label = $FilePath,
+        [int]$Attempts = 1
     )
-    & $FilePath @ArgumentList
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Label failed with exit code $LASTEXITCODE"
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        & $FilePath @ArgumentList
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+        if ($attempt -ge $Attempts) {
+            throw "$Label failed with exit code $LASTEXITCODE"
+        }
+        Write-Host "$Label failed with exit code $LASTEXITCODE; retrying ($attempt/$Attempts)..."
+        Start-Sleep -Seconds 2
     }
 }
 
@@ -132,14 +141,19 @@ try {
     if ($compilerDir) {
         $env:PATH = "$compilerDir;$env:PATH"
     }
+    $staticLdFlags = '-linkmode external -extldflags "-static"'
+    $ldFlags = $staticLdFlags
+    if ($GoLdFlags) {
+        $ldFlags = "$GoLdFlags $staticLdFlags"
+    }
     $goArgs = @(
         "build",
         "-tags", "opencv_cgo",
-        "-ldflags", '-linkmode external -extldflags "-static"',
+        "-ldflags", $ldFlags,
         "-o", $outPath,
         "."
     )
-    Invoke-NativeCommand -FilePath "go" -ArgumentList $goArgs -Label "go build"
+    Invoke-NativeCommand -FilePath "go" -ArgumentList $goArgs -Label "go build" -Attempts 3
 } finally {
     $env:LIBRARY_PATH = $previousLibraryPath
     $env:CGO_LDFLAGS = $previousCGOFlags

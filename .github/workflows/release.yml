@@ -77,7 +77,9 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          install: mingw-w64-ucrt-x86_64-gcc
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-make
 
       - name: Add Go tools to PATH
         shell: pwsh
@@ -89,7 +91,7 @@ jobs:
         shell: pwsh
         run: go install github.com/akavel/rsrc@latest
 
-      - name: Package Windows app
+      - name: Package Windows OpenCV app
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -114,7 +116,11 @@ jobs:
               throw "Windows resource file was not generated: $resourceFile"
             }
 
-            go build -ldflags "$env:LDFLAGS -H windowsgui" -o $windowsExe .
+            powershell -ExecutionPolicy Bypass `
+              -File ".\scripts\build_with_static_opencv_windows.ps1" `
+              -Output $windowsExe `
+              -BuildOpenCVIfMissing `
+              -GoLdFlags "$env:LDFLAGS -H windowsgui"
           } finally {
             Remove-Item $resourceFile -ErrorAction SilentlyContinue
           }
