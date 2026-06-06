@@ -5,6 +5,8 @@ package main
 
 /*
 #cgo CXXFLAGS: -std=c++17
+#cgo windows,amd64 CXXFLAGS: -I${SRCDIR}/third_party/opencv/windows-amd64/include
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/third_party/opencv/windows-amd64/lib -lopencv_core -lopencv_imgproc
 #include <stdlib.h>
 #include "opencv_match_bridge.h"
 */

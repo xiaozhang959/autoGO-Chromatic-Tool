@@ -356,5 +356,5 @@ func openCVImageBackendStatusText() string {
 	if openCVImageMatchBackendAvailable() {
 		return "后端: OpenCV CGO 已启用"
 	}
-	return "后端: OpenCV CGO 未启用。使用真实找图前，请安装 OpenCV C++ 开发库并用 -tags opencv_cgo 构建。"
+	return "后端: OpenCV CGO 未启用。使用真实找图前，请将 OpenCV 放入 third_party/opencv/windows-amd64 并用 -tags opencv_cgo 构建。"
 }
