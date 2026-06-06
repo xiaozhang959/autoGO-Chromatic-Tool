@@ -8098,11 +8098,6 @@ func main() {
 	}
 
 	// 左侧工具栏布局：模拟 AutoGo 工具面板的窄栏按钮布局
-	makeButton := func(text string) *widget.Button {
-		btn := widget.NewButton(text, func() {})
-		btn.Importance = widget.MediumImportance
-		return btn
-	}
 	makeEntry := func(text string) *widget.Entry {
 		entry := widget.NewEntry()
 		entry.SetText(text)
@@ -8701,6 +8696,10 @@ func main() {
 	}
 	registerCommand(commandCodeTest, openCodeTest)
 	codeTestBtn := widget.NewButton("代码测试", openCodeTest)
+	openImageTest := func() {
+		openOpenCVImageTestWindow(w, precisionEntry.Text)
+	}
+	imageTestBtn := widget.NewButton("找图测试", openImageTest)
 	copyColor := func() {
 		w.Clipboard().SetContent(colorEntry.Text)
 	}
@@ -8752,7 +8751,7 @@ func main() {
 		compactBottomButton(copyCodeBtn),
 		compactBottomButton(findTestBtn),
 		compactBottomButton(codeTestBtn),
-		compactBottomButton(makeButton("找图测试")),
+		compactBottomButton(imageTestBtn),
 	)
 
 	toolForm := container.NewVBox(
