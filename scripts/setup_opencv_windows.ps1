@@ -14,6 +14,24 @@ function Resolve-FirstExistingDir {
     return $null
 }
 
+function Resolve-CommandDir {
+    param([string]$Name)
+    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    if (-not $command) {
+        return $null
+    }
+    return Split-Path -Parent $command.Source
+}
+
+function Clear-Directory {
+    param([string]$Path)
+    if (Test-Path -LiteralPath $Path) {
+        Get-ChildItem -LiteralPath $Path -Force | Remove-Item -Recurse -Force
+        return
+    }
+    New-Item -ItemType Directory -Force -Path $Path | Out-Null
+}
+
 function Copy-DirectoryClean {
     param(
         [string]$From,
@@ -38,7 +56,7 @@ function Copy-FirstFile {
             return $match.FullName
         }
     }
-    throw "未找到文件: $($Patterns -join ', ')"
+    throw "Missing file: $($Patterns -join ', ')"
 }
 
 function Copy-MatchingFiles {
@@ -56,14 +74,14 @@ function Copy-MatchingFiles {
         }
     }
     if ($Required -and $copied.Count -eq 0) {
-        throw "未找到文件: $($Patterns -join ', ')"
+        throw "Missing file: $($Patterns -join ', ')"
     }
     return $copied
 }
 
 $repoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 if (-not $Source) {
-    throw "请传入 -Source <OpenCV-MinGW-root>，或先设置 OPENCV_DIR。"
+    throw "Pass -Source <OpenCV-MinGW-root>, or set OPENCV_DIR first."
 }
 $sourceRoot = Resolve-Path -LiteralPath $Source
 
@@ -83,7 +101,7 @@ foreach ($candidate in @(
     }
 }
 if (-not $includeRoot -or -not $opencv2Root) {
-    throw "OpenCV include 目录无效，未找到 opencv2/core.hpp。"
+    throw "Invalid OpenCV include directory: opencv2/core.hpp was not found."
 }
 
 $libRoot = Resolve-FirstExistingDir @(
@@ -92,7 +110,7 @@ $libRoot = Resolve-FirstExistingDir @(
     (Join-Path $sourceRoot "x64\mingw\lib")
 )
 if (-not $libRoot) {
-    throw "OpenCV lib 目录无效。"
+    throw "Invalid OpenCV lib directory."
 }
 
 $binRoot = Resolve-FirstExistingDir @(
@@ -101,7 +119,7 @@ $binRoot = Resolve-FirstExistingDir @(
     (Join-Path $sourceRoot "x64\mingw\bin")
 )
 if (-not $binRoot) {
-    throw "OpenCV bin 目录无效。"
+    throw "Invalid OpenCV bin directory."
 }
 
 $targetRoot = Join-Path $repoRoot "third_party\opencv\windows-amd64"
@@ -109,7 +127,9 @@ $targetInclude = Join-Path $targetRoot "include"
 $targetLib = Join-Path $targetRoot "lib"
 $targetBin = Join-Path $targetRoot "bin"
 
-New-Item -ItemType Directory -Force -Path $targetRoot, $targetLib, $targetBin | Out-Null
+New-Item -ItemType Directory -Force -Path $targetRoot, $targetInclude | Out-Null
+Clear-Directory -Path $targetLib
+Clear-Directory -Path $targetBin
 Copy-DirectoryClean -From $opencv2Root -To (Join-Path $targetInclude "opencv2")
 
 Copy-FirstFile -Patterns @(
@@ -145,8 +165,15 @@ foreach ($dependencyDll in @(
     }
 }
 
+$runtimeSearchDirs = @(
+    $binRoot,
+    (Resolve-CommandDir "gcc"),
+    (Resolve-CommandDir "g++")
+) + $env:PATH.Split([IO.Path]::PathSeparator)
+
 foreach ($runtimeDll in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")) {
-    $runtimePath = $env:PATH.Split([IO.Path]::PathSeparator) |
+    $runtimePath = $runtimeSearchDirs |
+        Where-Object { $_ } |
         ForEach-Object { Join-Path $_ $runtimeDll } |
         Where-Object { Test-Path -LiteralPath $_ } |
         Select-Object -First 1
@@ -155,5 +182,5 @@ foreach ($runtimeDll in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthrea
     }
 }
 
-Write-Host "OpenCV 已复制到 $targetRoot"
-Write-Host "下一步运行: powershell -ExecutionPolicy Bypass -File scripts/build_with_opencv_windows.ps1"
+Write-Host "OpenCV copied to: $targetRoot"
+Write-Host "Next: powershell -ExecutionPolicy Bypass -File scripts/build_with_opencv_windows.ps1"

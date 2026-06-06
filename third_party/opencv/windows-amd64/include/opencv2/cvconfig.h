@@ -41,14 +41,14 @@
 /* #undef HAVE_CUFFT */
 
 /* DirectX */
-#define HAVE_DIRECTX
-#define HAVE_DIRECTX_NV12
-#define HAVE_D3D11
-#define HAVE_D3D10
-#define HAVE_D3D9
+/* #undef HAVE_DIRECTX */
+/* #undef HAVE_DIRECTX_NV12 */
+/* #undef HAVE_D3D11 */
+/* #undef HAVE_D3D10 */
+/* #undef HAVE_D3D9 */
 
 /* Eigen Matrix & Linear Algebra Library */
-#define HAVE_EIGEN
+/* #undef HAVE_EIGEN */
 
 /* Geospatial Data Abstraction Library */
 /* #undef HAVE_GDAL */
@@ -69,14 +69,14 @@
 /* #undef HAVE_IPP_IW_LL */
 
 /* JPEG-2000 codec */
-#define HAVE_OPENJPEG
+/* #undef HAVE_OPENJPEG */
 /* #undef HAVE_JASPER */
 
 /* AVIF codec */
 /* #undef HAVE_AVIF */
 
 /* IJG JPEG codec */
-#define HAVE_JPEG
+/* #undef HAVE_JPEG */
 
 /* JPEG XL codec */
 /* #undef HAVE_JPEGXL */
@@ -93,21 +93,21 @@
 /* #undef HAVE_NVCUVENC */
 
 /* OpenCL Support */
-#define HAVE_OPENCL
+/* #undef HAVE_OPENCL */
 /* #undef HAVE_OPENCL_STATIC */
 /* #undef HAVE_OPENCL_SVM */
 
 /* NVIDIA OpenCL D3D Extensions support */
-#define HAVE_OPENCL_D3D11_NV
+/* #undef HAVE_OPENCL_D3D11_NV */
 
 /* OpenEXR codec */
 #define HAVE_OPENEXR
 
 /* OpenGL support*/
-#define HAVE_OPENGL
+/* #undef HAVE_OPENGL */
 
 /* PNG codec */
-#define HAVE_PNG
+/* #undef HAVE_PNG */
 
 /* PNG codec */
 /* #undef HAVE_SPNG */
@@ -119,13 +119,13 @@
 #define HAVE_PTHREADS_PF
 
 /* Intel Threading Building Blocks */
-#define HAVE_TBB
+/* #undef HAVE_TBB */
 
 /* Ste||ar Group High Performance ParallelX */
 /* #undef HAVE_HPX */
 
 /* TIFF codec */
-#define HAVE_TIFF
+/* #undef HAVE_TIFF */
 
 /* Define if your processor stores words with the most significant byte
    first (like Motorola and SPARC, unlike Intel and VAX). */
@@ -138,7 +138,7 @@
 /* #undef HAVE_VA_INTEL */
 
 /* Lapack */
-#define HAVE_LAPACK
+/* #undef HAVE_LAPACK */
 
 /* Library was compiled with functions instrumentation */
 /* #undef ENABLE_INSTRUMENTATION */

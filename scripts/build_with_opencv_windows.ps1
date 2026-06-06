@@ -4,6 +4,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-NativeCommand {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [string]$Label = $FilePath
+    )
+    & $FilePath @ArgumentList
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label failed with exit code $LASTEXITCODE"
+    }
+}
+
 $repoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 $opencvRoot = Join-Path $repoRoot "third_party\opencv\windows-amd64"
 $opencvLib = Join-Path $opencvRoot "lib"
@@ -58,11 +70,30 @@ try {
     $env:CGO_ENABLED = "1"
     $env:LIBRARY_PATH = (Join-Path $asciiLinkRoot "lib")
     $env:PATH = "$opencvBin;$env:PATH"
-    go build -tags opencv_cgo -o $outPath .
+    $goArgs = @("build", "-tags", "opencv_cgo", "-o", $outPath, ".")
+    Invoke-NativeCommand -FilePath "go" -ArgumentList $goArgs -Label "go build"
 } finally {
     $env:LIBRARY_PATH = $previousLibraryPath
     $env:PATH = $previousPath
     Pop-Location
+}
+
+$staleRuntimePatterns = @(
+    "libopencv*.dll",
+    "opencv_*.dll",
+    "libopenblas.dll",
+    "libtbb*.dll",
+    "zlib1.dll",
+    "libgcc_s*.dll",
+    "libstdc++-6.dll",
+    "libgfortran*.dll",
+    "libquadmath*.dll",
+    "libgomp*.dll",
+    "libwinpthread-1.dll"
+)
+foreach ($pattern in $staleRuntimePatterns) {
+    Get-ChildItem -LiteralPath $outDir -Filter $pattern -File -ErrorAction SilentlyContinue |
+        Remove-Item -Force
 }
 
 Copy-Item -Path (Join-Path $opencvBin "*.dll") -Destination $outDir -Force
