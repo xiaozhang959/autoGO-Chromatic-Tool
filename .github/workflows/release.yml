@@ -238,6 +238,12 @@ jobs:
       - build-windows
       - build-macos
     steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.metadata.outputs.tag }}
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -255,8 +261,37 @@ jobs:
           set -euo pipefail
           find release-assets -maxdepth 1 -type f -print
 
+          release_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+          short_sha="$(git rev-parse --short "$release_commit")"
+          tag_message_file="tag-message.md"
+          tag_type="$(git cat-file -t "refs/tags/$RELEASE_TAG" 2>/dev/null || true)"
+          if [ "$tag_type" = "tag" ]; then
+            git for-each-ref "refs/tags/$RELEASE_TAG" --format='%(contents)' > "$tag_message_file"
+          else
+            : > "$tag_message_file"
+          fi
+
           cat > release-notes.md <<EOF
           自动构建发布 $RELEASE_VERSION。
+
+          EOF
+
+          if [ -s "$tag_message_file" ]; then
+            cat "$tag_message_file" >> release-notes.md
+            printf "\n\n" >> release-notes.md
+          else
+            cat >> release-notes.md <<EOF
+          更新说明未在 tag message 中提供。
+          使用示例：git tag -a $RELEASE_TAG -m "发布说明"
+
+          EOF
+          fi
+
+          cat >> release-notes.md <<EOF
+          版本信息：
+          - Tag: $RELEASE_TAG
+          - Commit: $short_sha
+          - Build: $GITHUB_RUN_NUMBER
 
           包含文件：
           - AutoGo-Chromatic-Tool-windows-amd64.exe
@@ -271,13 +306,17 @@ jobs:
           fi
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md
             gh release upload "$RELEASE_TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$RELEASE_TAG" release-assets/* \
               --repo "$GITHUB_REPOSITORY" \
               --title "$RELEASE_TAG" \
               --notes-file release-notes.md \
-              --target "$GITHUB_SHA" \
+              --target "$release_commit" \
               "${prerelease_flag[@]}"
           fi
 
