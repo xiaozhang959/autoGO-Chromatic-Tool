@@ -77,17 +77,22 @@ jobs:
         with:
           msystem: UCRT64
           update: true
+          cache: true
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-make
+
+      - name: Cache Windows OpenCV downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/autogo-opencv-build/windows-amd64/downloads
+          key: opencv-downloads-windows-amd64-4.13.0-${{ runner.os }}
 
       - name: Cache Windows static OpenCV
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/autogo-opencv-build/windows-amd64/install-static-4.13.0
           key: opencv-static-windows-amd64-4.13.0-${{ runner.os }}-${{ hashFiles('scripts/build_minimal_opencv_windows.ps1', 'scripts/build_with_static_opencv_windows.ps1') }}
-          restore-keys: |
-            opencv-static-windows-amd64-4.13.0-${{ runner.os }}-
 
       - name: Add Go tools to PATH
         shell: pwsh
@@ -216,8 +221,12 @@ jobs:
         with:
           path: ${{ runner.temp }}/autogo-opencv-build/darwin-${{ matrix.arch }}/install-static-4.13.0
           key: opencv-static-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}-${{ hashFiles('scripts/build_minimal_opencv_macos.sh', 'scripts/build_with_static_opencv_macos.sh') }}
-          restore-keys: |
-            opencv-static-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}-
+
+      - name: Cache macOS OpenCV downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/autogo-opencv-build/darwin-${{ matrix.arch }}/downloads
+          key: opencv-downloads-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}
 
       - name: Install Fyne CLI from repository
         working-directory: fyne-master

@@ -32,9 +32,16 @@ jobs:
         with:
           msystem: UCRT64
           update: true
+          cache: true
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-make
+
+      - name: Restore Windows OpenCV downloads cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/autogo-opencv-build/windows-amd64/downloads
+          key: opencv-downloads-windows-amd64-4.13.0-${{ runner.os }}
 
       - name: Restore Windows static OpenCV cache
         id: opencv-cache
@@ -42,8 +49,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/autogo-opencv-build/windows-amd64/install-static-4.13.0
           key: opencv-static-windows-amd64-4.13.0-${{ runner.os }}-${{ hashFiles('scripts/build_minimal_opencv_windows.ps1', 'scripts/build_with_static_opencv_windows.ps1') }}
-          restore-keys: |
-            opencv-static-windows-amd64-4.13.0-${{ runner.os }}-
 
       - name: Build Windows static OpenCV cache
         if: steps.opencv-cache.outputs.cache-hit != 'true'
@@ -95,8 +100,12 @@ jobs:
         with:
           path: ${{ runner.temp }}/autogo-opencv-build/darwin-${{ matrix.arch }}/install-static-4.13.0
           key: opencv-static-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}-${{ hashFiles('scripts/build_minimal_opencv_macos.sh', 'scripts/build_with_static_opencv_macos.sh') }}
-          restore-keys: |
-            opencv-static-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}-
+
+      - name: Restore macOS OpenCV downloads cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/autogo-opencv-build/darwin-${{ matrix.arch }}/downloads
+          key: opencv-downloads-macos-${{ matrix.arch }}-4.13.0-${{ runner.os }}
 
       - name: Build macOS static OpenCV cache
         if: steps.opencv-cache.outputs.cache-hit != 'true'
