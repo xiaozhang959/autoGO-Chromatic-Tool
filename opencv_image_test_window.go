@@ -50,7 +50,7 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 	templateName := "template.png"
 
 	x1, y1, x2, y2 := regionValuesFromEntry()
-	rangeEntry := newOpenCVTestEntry(fmt.Sprintf("%d,%d,%d,%d", x1, y1, x2, y2))
+	rangeEntry := newOpenCVTestEntry(formatOpenCVRange(x1, y1, x2, y2))
 
 	if strings.TrimSpace(defaultSimText) == "" {
 		defaultSimText = "0.9"
@@ -112,6 +112,15 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 		}
 		templatePreview.Refresh()
 	}
+	cropTemplateFromRect := func(img image.Image, rect image.Rectangle) {
+		cropped := cropImage(img, rect)
+		data, err := encodeOpenCVTemplatePNG(cropped)
+		if err != nil {
+			dialog.ShowError(err, w)
+			return
+		}
+		updateTemplate(cropped, data, fmt.Sprintf("选区_%dx%d.png", rect.Dx(), rect.Dy()))
+	}
 
 	cropTemplateButton := widget.NewButtonWithIcon("从当前选区裁剪模板", theme.ContentCutIcon(), func() {
 		if imageViewer == nil || imageViewer.image == nil {
@@ -123,15 +132,40 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 			dialog.ShowInformation("提示", "请先在主窗口图像上拖拽框选模板区域。", w)
 			return
 		}
-		cropped := cropImage(imageViewer.image, rect)
-		data, err := encodeOpenCVTemplatePNG(cropped)
-		if err != nil {
-			dialog.ShowError(err, w)
-			return
-		}
-		updateTemplate(cropped, data, fmt.Sprintf("选区_%dx%d.png", rect.Dx(), rect.Dy()))
+		cropTemplateFromRect(imageViewer.image, rect)
 	})
 	cropTemplateButton.Importance = widget.HighImportance
+
+	goCropTemplateButton := widget.NewButtonWithIcon("去裁剪模板", theme.ContentCutIcon(), func() {
+		if imageViewer == nil || imageViewer.image == nil {
+			dialog.ShowInformation("提示", "主窗口没有图片，请先截图或载入。", w)
+			return
+		}
+		if parent != nil {
+			parent.RequestFocus()
+		}
+		viewer := imageViewer
+		viewer.SetRangeSelectModeWithCallback(func(rect image.Rectangle) {
+			if imageViewer != viewer || viewer.image == nil {
+				fyne.Do(func() {
+					dialog.ShowInformation("提示", "当前图像已切换，请重新框选模板区域。", w)
+				})
+				return
+			}
+			rect = normalizePickRect(viewer.image, rect)
+			if rect.Empty() {
+				fyne.Do(func() {
+					dialog.ShowInformation("提示", "选择的模板区域无效。", w)
+				})
+				return
+			}
+			fyne.Do(func() {
+				cropTemplateFromRect(viewer.image, rect)
+				w.RequestFocus()
+			})
+		})
+		infoLabel.SetText("请在主窗口图像上拖拽选择模板区域。")
+	})
 
 	loadTemplateButton := widget.NewButtonWithIcon("加载模板图片", theme.FolderOpenIcon(), func() {
 		go func() {
@@ -172,6 +206,11 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 		}
 	})
 
+	resetRangeButton := widget.NewButton("重置范围", func() {
+		x1, y1, x2, y2 := regionValuesFromEntry()
+		rangeEntry.SetText(formatOpenCVRange(x1, y1, x2, y2))
+		infoLabel.SetText("已重置查找范围。")
+	})
 	rangeButton := widget.NewButton("范围 (Ctrl+R)", func() {
 		if imageViewer == nil || imageViewer.image == nil {
 			dialog.ShowInformation("提示", "主窗口没有图片，请先截图或载入。", w)
@@ -196,7 +235,7 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 				return
 			}
 			fyne.Do(func() {
-				rangeEntry.SetText(fmt.Sprintf("%d,%d,%d,%d", rect.Min.X, rect.Min.Y, rect.Max.X-1, rect.Max.Y-1))
+				rangeEntry.SetText(formatOpenCVRange(rect.Min.X, rect.Min.Y, rect.Max.X-1, rect.Max.Y-1))
 				infoLabel.SetText("已回填查找范围，可开始找图测试。")
 				w.RequestFocus()
 			})
@@ -234,28 +273,27 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 	backendLabel := widget.NewLabel(openCVImageBackendStatusText())
 	backendLabel.Wrapping = fyne.TextWrapWord
 
-	leftPanel := container.New(&fixedWidthLayout{width: 230, padding: 8, verticalSpacing: 6},
+	leftPanel := container.NewPadded(container.NewVBox(
 		backendLabel,
 		widget.NewSeparator(),
 		widget.NewLabel("函数"),
 		methodSelect,
 		widget.NewLabel("查找范围"),
-		rangeButton,
+		container.NewGridWithColumns(2, rangeButton, resetRangeButton),
 		rangeEntry,
-		container.NewHBox(widget.NewLabel("相似度 sim"), simWarning),
-		simEntry,
-		widget.NewLabel("displayId"),
-		displayIDEntry,
+		container.NewBorder(nil, nil, container.NewHBox(widget.NewLabel("相似度 sim"), simWarning), nil, simEntry),
+		container.NewBorder(nil, nil, widget.NewLabel("displayId"), nil, displayIDEntry),
 		grayCheck,
 		transparentCheck,
 		widget.NewSeparator(),
 		cropTemplateButton,
+		goCropTemplateButton,
 		loadTemplateButton,
 		widget.NewSeparator(),
 		runButton,
 		clearMarksButton,
 		layout.NewSpacer(),
-	)
+	))
 
 	templateArea := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("模板预览", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), infoLabel),
@@ -284,6 +322,10 @@ func newOpenCVTestEntry(value string) *widget.Entry {
 	entry := widget.NewEntry()
 	entry.SetText(value)
 	return entry
+}
+
+func formatOpenCVRange(x1, y1, x2, y2 int) string {
+	return fmt.Sprintf("%d,%d,%d,%d", x1, y1, x2, y2)
 }
 
 func shouldShowOpenCVLowSimWarning(text string) bool {
