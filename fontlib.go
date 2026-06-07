@@ -910,6 +910,44 @@ func (v *fontImageViewer) ResetZoom() {
 	}
 }
 
+func (v *fontImageViewer) zoomAt(pos fyne.Position, zoomIn bool) {
+	if v.image == nil {
+		return
+	}
+
+	oldScale := v.zoom
+	if oldScale <= 0 {
+		oldScale = 1
+	}
+	newScale := oldScale / zoomStepMultiplier
+	if zoomIn {
+		newScale = oldScale * zoomStepMultiplier
+	}
+	if newScale < minImageZoom {
+		newScale = minImageZoom
+	}
+	if newScale > maxImageZoom {
+		newScale = maxImageZoom
+	}
+	if newScale == oldScale {
+		return
+	}
+
+	contentPos := pos
+	if v.scroll != nil {
+		contentPos = pos.Add(v.scroll.Offset)
+	}
+	imageX := contentPos.X / oldScale
+	imageY := contentPos.Y / oldScale
+
+	v.zoom = newScale
+	v.Refresh()
+	if v.scroll != nil {
+		v.scroll.Refresh()
+		v.scroll.ScrollToOffset(fyne.NewPos(imageX*newScale-pos.X, imageY*newScale-pos.Y))
+	}
+}
+
 func (v *fontImageViewer) imagePosition(pos fyne.Position) (image.Point, bool) {
 	if v.image == nil {
 		return image.Point{}, false
@@ -1069,10 +1107,27 @@ func (v *fontImageViewer) Scrolled(e *fyne.ScrollEvent) {
 	if delta == 0 {
 		return
 	}
-	if delta > 0 {
-		v.SetZoom(v.zoom * zoomStepMultiplier)
-	} else {
-		v.SetZoom(v.zoom / zoomStepMultiplier)
+	v.zoomAt(e.Position, delta > 0)
+}
+
+type fontScrollOverlay struct {
+	widget.BaseWidget
+	onScroll func(*fyne.ScrollEvent)
+}
+
+func newFontScrollOverlay(onScroll func(*fyne.ScrollEvent)) *fontScrollOverlay {
+	o := &fontScrollOverlay{onScroll: onScroll}
+	o.ExtendBaseWidget(o)
+	return o
+}
+
+func (o *fontScrollOverlay) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(canvas.NewRectangle(color.Transparent))
+}
+
+func (o *fontScrollOverlay) Scrolled(e *fyne.ScrollEvent) {
+	if o.onScroll != nil {
+		o.onScroll(e)
 	}
 }
 
@@ -1222,6 +1277,9 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	}
 	sourceScroll := container.NewScroll(sourceViewer)
 	sourceViewer.SetScroll(sourceScroll)
+	sourceScrollOverlay := newFontScrollOverlay(func(e *fyne.ScrollEvent) {
+		sourceViewer.Scrolled(e)
+	})
 
 	updateSourceInfo = func() {
 		if regionImg == nil {
@@ -1474,7 +1532,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		}()
 	})
 
-	autoPreprocessBtn := widget.NewButtonWithIcon("自动取色并裁剪", theme.SearchIcon(), func() {
+	autoPreprocessBtn := widget.NewButtonWithIcon("自动取色", theme.SearchIcon(), func() {
 		if regionImg == nil {
 			dialog.ShowInformation("提示", "请先去裁剪选取或加载图片", w)
 			return
@@ -1485,27 +1543,21 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			analysisRect = selected
 		}
 		analysisImg := cropImage(regionImg, analysisRect)
-		result, ok := autoPreprocessFontImage(analysisImg)
+		background, foreground, ok := estimateFontForegroundColor(analysisImg)
 		if !ok {
-			dialog.ShowInformation("自动取色并裁剪", "未识别到稳定的文字前景点，当前图片未修改", w)
+			dialog.ShowInformation("自动取色", "未识别到稳定的文字前景色，当前参数未修改", w)
 			return
 		}
-
-		cropRect := result.CropRect.Add(analysisRect.Min)
-		cropRect = cropRect.Intersect(bounds)
-		if cropRect.Empty() {
-			dialog.ShowInformation("自动取色并裁剪", "自动裁剪区域无效，当前图片未修改", w)
-			return
-		}
+		tolerance := estimateFontTolerance(analysisImg, foreground, background)
 
 		suppressParamRefresh = true
-		fgColorEntry.SetText(fontColorHex(result.Foreground))
-		fgToleranceEntry.SetText(fontColorHex(result.Tolerance))
+		fgColorEntry.SetText(fontColorHex(foreground))
+		fgToleranceEntry.SetText(fontColorHex(tolerance))
 		suppressParamRefresh = false
 
-		setRegionImage(cropImage(regionImg, cropRect))
-		previewInfoLabel.SetText(fmt.Sprintf("自动预处理完成: 文字色 %s 容差 %s | 前景点 %d | 检测到 %d 个字符",
-			fontColorHex(result.Foreground), fontColorHex(result.Tolerance), result.ForegroundPixels, len(charCells)))
+		refreshPreview()
+		previewInfoLabel.SetText(fmt.Sprintf("自动取色完成: 文字色 %s 容差 %s | 当前图未裁剪 | 检测到 %d 个字符",
+			fontColorHex(foreground), fontColorHex(tolerance), len(charCells)))
 	})
 	autoPreprocessBtn.Importance = widget.HighImportance
 
@@ -1644,7 +1696,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	sourcePanel := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("原图 / 当前裁剪图", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceInfoLabel),
 		nil, nil, nil,
-		container.NewStack(newGridBgWidget(), sourceScroll),
+		container.NewStack(newGridBgWidget(), sourceScroll, sourceScrollOverlay),
 	)
 
 	previewScroll := container.NewScroll(container.New(&topLeftLayout{}, previewCanvasImg))
