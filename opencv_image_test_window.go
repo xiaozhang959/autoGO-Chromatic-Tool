@@ -18,9 +18,23 @@ import (
 	nativedialog "github.com/sqweek/dialog"
 )
 
+var openCVImageTestWindow fyne.Window
+
 func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
+	if openCVImageTestWindow != nil {
+		openCVImageTestWindow.Show()
+		openCVImageTestWindow.RequestFocus()
+		return
+	}
+
 	a := fyne.CurrentApp()
 	w := a.NewWindow("AutoGo 找图测试")
+	openCVImageTestWindow = w
+	w.SetOnClosed(func() {
+		if openCVImageTestWindow == w {
+			openCVImageTestWindow = nil
+		}
+	})
 
 	functions := []string{
 		openCVImageFuncFindImage,
