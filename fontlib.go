@@ -1433,20 +1433,28 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			dialog.ShowInformation("提示", "主窗口没有图片，请先截图或载入", w)
 			return
 		}
-		if len(imageViewer.markRects) == 0 {
-			dialog.ShowInformation("提示", "请先在主窗口图像上拖拽框选文字区域，然后再点此按钮", w)
-			return
-		}
-		rect := imageViewer.markRects[0]
-		selRect := image.Rect(
-			min(rect.X1, rect.X2), min(rect.Y1, rect.Y2),
-			max(rect.X1, rect.X2), max(rect.Y1, rect.Y2),
-		).Intersect(imageViewer.image.Bounds())
-		if selRect.Empty() {
-			dialog.ShowInformation("提示", "主窗口选区无效，请重新框选", w)
-			return
-		}
-		setRegionImage(cropImage(imageViewer.image, selRect))
+		viewer := imageViewer
+		sourceInfoLabel.SetText("请在主窗口图像上拖拽框选文字区域，松开后会自动回填到字库制作")
+		viewer.SetRangeSelectModeWithCallback(func(rect image.Rectangle) {
+			if imageViewer != viewer || viewer.image == nil {
+				w.Show()
+				w.RequestFocus()
+				dialog.ShowInformation("提示", "当前图像已切换，请重新裁剪选取", w)
+				return
+			}
+			selRect := normalizePickRect(viewer.image, rect)
+			if selRect.Empty() {
+				w.Show()
+				w.RequestFocus()
+				dialog.ShowInformation("提示", "主窗口选区无效，请重新裁剪选取", w)
+				return
+			}
+			setRegionImage(cropImage(viewer.image, selRect))
+			w.Show()
+			w.RequestFocus()
+		})
+		parentWindow.Show()
+		parentWindow.RequestFocus()
 	})
 	getSelBtn.Importance = widget.HighImportance
 
