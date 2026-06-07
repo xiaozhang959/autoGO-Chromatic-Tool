@@ -10,3 +10,5 @@
 # Ignore generated/local docs markdown
 docs/*.md
 docs/**/*.md
+
+.serena/
