@@ -1122,7 +1122,7 @@ func newFontScrollOverlay(onScroll func(*fyne.ScrollEvent)) *fontScrollOverlay {
 }
 
 func (o *fontScrollOverlay) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(canvas.NewRectangle(color.Transparent))
+	return fontScrollOverlayRenderer{}
 }
 
 func (o *fontScrollOverlay) Scrolled(e *fyne.ScrollEvent) {
@@ -1130,6 +1130,14 @@ func (o *fontScrollOverlay) Scrolled(e *fyne.ScrollEvent) {
 		o.onScroll(e)
 	}
 }
+
+type fontScrollOverlayRenderer struct{}
+
+func (fontScrollOverlayRenderer) Layout(fyne.Size)             {}
+func (fontScrollOverlayRenderer) MinSize() fyne.Size           { return fyne.NewSize(1, 1) }
+func (fontScrollOverlayRenderer) Refresh()                     {}
+func (fontScrollOverlayRenderer) Objects() []fyne.CanvasObject { return nil }
+func (fontScrollOverlayRenderer) Destroy()                     {}
 
 type fontImageViewerRenderer struct {
 	viewer    *fontImageViewer
