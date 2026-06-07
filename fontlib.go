@@ -991,6 +991,103 @@ func (h *hoverContainer) MouseOut() {
 	}
 }
 
+type fontReferenceDot struct {
+	widget.BaseWidget
+	index   int
+	active  bool
+	fill    color.NRGBA
+	onTap   func(int)
+	onHover func(int)
+	onLeave func()
+}
+
+func newFontReferenceDot(index int, onTap, onHover func(int), onLeave func()) *fontReferenceDot {
+	d := &fontReferenceDot{
+		index:   index,
+		fill:    color.NRGBA{150, 150, 150, 255},
+		onTap:   onTap,
+		onHover: onHover,
+		onLeave: onLeave,
+	}
+	d.ExtendBaseWidget(d)
+	return d
+}
+
+func (d *fontReferenceDot) SetReference(c color.NRGBA, active bool) {
+	d.active = active
+	if active {
+		d.fill = c
+	} else {
+		d.fill = color.NRGBA{150, 150, 150, 255}
+	}
+	d.Refresh()
+}
+
+func (d *fontReferenceDot) Tapped(*fyne.PointEvent) {
+	if d.active && d.onTap != nil {
+		d.onTap(d.index)
+	}
+}
+
+func (d *fontReferenceDot) MouseIn(*desktop.MouseEvent) {
+	if d.onHover != nil {
+		d.onHover(d.index)
+	}
+}
+
+func (d *fontReferenceDot) MouseMoved(*desktop.MouseEvent) {
+	if d.onHover != nil {
+		d.onHover(d.index)
+	}
+}
+
+func (d *fontReferenceDot) MouseOut() {
+	if d.onLeave != nil {
+		d.onLeave()
+	}
+}
+
+func (d *fontReferenceDot) CreateRenderer() fyne.WidgetRenderer {
+	circle := canvas.NewCircle(d.fill)
+	circle.StrokeColor = color.NRGBA{90, 90, 90, 255}
+	circle.StrokeWidth = 1
+	return &fontReferenceDotRenderer{dot: d, circle: circle}
+}
+
+type fontReferenceDotRenderer struct {
+	dot    *fontReferenceDot
+	circle *canvas.Circle
+}
+
+func (r *fontReferenceDotRenderer) Layout(size fyne.Size) {
+	diameter := size.Width
+	if size.Height < diameter {
+		diameter = size.Height
+	}
+	if diameter > 18 {
+		diameter = 18
+	}
+	r.circle.Resize(fyne.NewSize(diameter, diameter))
+	r.circle.Move(fyne.NewPos((size.Width-diameter)/2, (size.Height-diameter)/2))
+}
+
+func (r *fontReferenceDotRenderer) MinSize() fyne.Size { return fyne.NewSize(24, 24) }
+
+func (r *fontReferenceDotRenderer) Refresh() {
+	r.circle.FillColor = r.dot.fill
+	if r.dot.active {
+		r.circle.StrokeColor = color.NRGBA{40, 40, 40, 255}
+	} else {
+		r.circle.StrokeColor = color.NRGBA{120, 120, 120, 255}
+	}
+	canvas.Refresh(r.circle)
+}
+
+func (r *fontReferenceDotRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.circle}
+}
+func (r *fontReferenceDotRenderer) Destroy() {}
+
 type fontImageDragMode int
 
 const (
@@ -1582,9 +1679,8 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	previewInfoLabel.Wrapping = fyne.TextWrapWord
 
 	referenceHeaderLabel := widget.NewLabel("自动参考点 0/5")
-	referenceListLabel := widget.NewLabel("右键原图添加文字色参考点")
-	referenceListLabel.Wrapping = fyne.TextWrapWord
-	clearReferenceBtn := widget.NewButton("清空参考点", nil)
+	referenceHintLabel := widget.NewLabel("右键原图添加文字色参考点")
+	referenceHintLabel.Wrapping = fyne.TextWrapWord
 
 	splitListBox := container.NewVBox()
 	fontLibListBox := container.NewVBox()
@@ -1625,6 +1721,33 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	var updateReferenceList func()
 	var clearReferencePoints func()
 	var setCropConfirmVisible func(bool)
+
+	referenceDots := make([]*fontReferenceDot, 5)
+	for i := range referenceDots {
+		idx := i
+		referenceDots[i] = newFontReferenceDot(idx, func(index int) {
+			if index < 0 || index >= len(referencePoints) {
+				return
+			}
+			referencePoints = append(referencePoints[:index], referencePoints[index+1:]...)
+			if updateReferenceList != nil {
+				updateReferenceList()
+			}
+		}, func(index int) {
+			if index < 0 || index >= len(referencePoints) {
+				referenceHintLabel.SetText("空位：右键原图添加参考点")
+				return
+			}
+			point := referencePoints[index]
+			referenceHintLabel.SetText(fmt.Sprintf("#%s @ %d,%d，点击删除", fontColorHex(point.Color), point.Point.X, point.Point.Y))
+		}, func() {
+			if len(referencePoints) == 0 {
+				referenceHintLabel.SetText("右键原图添加文字色参考点")
+			} else {
+				referenceHintLabel.SetText("悬停圆点查看坐标，点击删除")
+			}
+		})
+	}
 
 	sourceViewer := newFontImageViewer()
 	sourceViewer.onSelectionChanged = func(rect image.Rectangle) {
@@ -1684,15 +1807,18 @@ func openFontLibWindow(parentWindow fyne.Window) {
 
 	updateReferenceList = func() {
 		referenceHeaderLabel.SetText(fmt.Sprintf("自动参考点 %d/5", len(referencePoints)))
+		for i, dot := range referenceDots {
+			if i < len(referencePoints) {
+				dot.SetReference(referencePoints[i].Color, true)
+			} else {
+				dot.SetReference(color.NRGBA{}, false)
+			}
+		}
 		if len(referencePoints) == 0 {
-			referenceListLabel.SetText("右键原图添加文字色参考点")
-			return
+			referenceHintLabel.SetText("右键原图添加文字色参考点")
+		} else {
+			referenceHintLabel.SetText("悬停圆点查看坐标，点击删除")
 		}
-		var lines []string
-		for i, point := range referencePoints {
-			lines = append(lines, fmt.Sprintf("%d. #%s @ %d,%d", i+1, fontColorHex(point.Color), point.Point.X, point.Point.Y))
-		}
-		referenceListLabel.SetText(strings.Join(lines, "\n"))
 	}
 	clearReferencePoints = func() {
 		if len(referencePoints) == 0 {
@@ -1703,7 +1829,6 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			updateReferenceList()
 		}
 	}
-	clearReferenceBtn.OnTapped = clearReferencePoints
 	updateReferenceList()
 
 	rebuildLibList = func() {
@@ -2146,11 +2271,14 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	fgToleranceRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("偏色容差:"), nil, fgToleranceEntry), 42)
 	colGapRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("列间距(像素):"), nil, colGapEntry), 42)
 	rowGapRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("行间距(像素):"), nil, rowGapEntry), 42)
+	referenceDotRow := container.NewHBox(
+		referenceDots[0], referenceDots[1], referenceDots[2], referenceDots[3], referenceDots[4],
+	)
 	referencePanel := newFixedHeightContainer(container.NewVBox(
 		referenceHeaderLabel,
-		referenceListLabel,
-		clearReferenceBtn,
-	), 118)
+		referenceDotRow,
+		referenceHintLabel,
+	), 76)
 
 	leftPanel := container.New(&fixedWidthLayout{width: 190, padding: 10, verticalSpacing: 5},
 		getSelBtn,
