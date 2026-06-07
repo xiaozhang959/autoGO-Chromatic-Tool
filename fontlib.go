@@ -830,6 +830,7 @@ type fontImageViewer struct {
 	dragMode           fontImageDragMode
 	lastDragAbs        fyne.Position
 	selectionMode      bool
+	magnifier          *MagnifierWidget
 	onSelectionChanged func(image.Rectangle)
 	onColorPicked      func(color.NRGBA)
 }
@@ -844,7 +845,17 @@ func (v *fontImageViewer) SetScroll(scroll *container.Scroll) {
 	v.scroll = scroll
 }
 
+func (v *fontImageViewer) SetMagnifier(magnifier *MagnifierWidget) {
+	v.magnifier = magnifier
+}
+
 func (v *fontImageViewer) SetImage(img image.Image) {
+	if v.magnifier != nil {
+		v.magnifier.Hide()
+	}
+	if img != nil {
+		img = openCVImageToNRGBA(img)
+	}
 	v.image = img
 	v.zoom = 1
 	v.selection = image.Rectangle{}
@@ -859,6 +870,32 @@ func (v *fontImageViewer) SetImage(img image.Image) {
 	if v.onSelectionChanged != nil {
 		v.onSelectionChanged(image.Rectangle{})
 	}
+}
+
+func (v *fontImageViewer) hideMagnifier() {
+	if v.magnifier != nil {
+		v.magnifier.Hide()
+	}
+}
+
+func (v *fontImageViewer) updateMagnifier(pos fyne.Position) {
+	if !magnifierEnabled || v.magnifier == nil || v.image == nil || v.scroll == nil || v.dragMode != fontImageDragNone {
+		v.hideMagnifier()
+		return
+	}
+	p, ok := v.imagePosition(pos)
+	if !ok {
+		v.hideMagnifier()
+		return
+	}
+	zoom := v.zoom
+	if zoom <= 0 {
+		zoom = 1
+	}
+	bounds := v.image.Bounds()
+	viewX := float32(p.X-bounds.Min.X)*zoom - v.scroll.Offset.X
+	viewY := float32(p.Y-bounds.Min.Y)*zoom - v.scroll.Offset.Y
+	v.magnifier.Update(v.image, p.X, p.Y, viewX, viewY)
 }
 
 func (v *fontImageViewer) ClearSelection() {
@@ -1044,6 +1081,7 @@ func (v *fontImageViewer) MouseDown(e *desktop.MouseEvent) {
 	if v.image == nil {
 		return
 	}
+	v.hideMagnifier()
 	v.lastDragAbs = e.AbsolutePosition
 	if e.Button == desktop.MouseButtonPrimary && e.Modifier&fyne.KeyModifierControl != 0 {
 		p, ok := v.imagePosition(e.Position)
@@ -1072,6 +1110,7 @@ func (v *fontImageViewer) MouseDown(e *desktop.MouseEvent) {
 }
 
 func (v *fontImageViewer) MouseMoved(e *desktop.MouseEvent) {
+	defer v.updateMagnifier(e.Position)
 	switch v.dragMode {
 	case fontImageDragSelect:
 		p, ok := v.imagePosition(e.Position)
@@ -1095,6 +1134,7 @@ func (v *fontImageViewer) MouseMoved(e *desktop.MouseEvent) {
 func (v *fontImageViewer) MouseUp(e *desktop.MouseEvent) {
 	if v.dragMode != fontImageDragSelect {
 		v.dragMode = fontImageDragNone
+		v.updateMagnifier(e.Position)
 		return
 	}
 	p, ok := v.imagePosition(e.Position)
@@ -1114,11 +1154,19 @@ func (v *fontImageViewer) MouseUp(e *desktop.MouseEvent) {
 	if v.onSelectionChanged != nil {
 		v.onSelectionChanged(v.selection)
 	}
+	v.updateMagnifier(e.Position)
 }
 
-func (v *fontImageViewer) MouseIn(*desktop.MouseEvent) {}
-func (v *fontImageViewer) MouseOut()                   {}
+func (v *fontImageViewer) MouseIn(e *desktop.MouseEvent) {
+	v.updateMagnifier(e.Position)
+}
+
+func (v *fontImageViewer) MouseOut() {
+	v.hideMagnifier()
+}
+
 func (v *fontImageViewer) Scrolled(e *fyne.ScrollEvent) {
+	defer v.updateMagnifier(e.Position)
 	driver, ok := fyne.CurrentApp().Driver().(desktop.Driver)
 	if !ok || driver.CurrentKeyModifiers()&fyne.KeyModifierControl == 0 {
 		if v.scroll != nil {
@@ -1315,6 +1363,8 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	sourceScrollOverlay := newFontScrollOverlay(func(e *fyne.ScrollEvent) {
 		sourceViewer.Scrolled(e)
 	})
+	sourceMagnifier := NewMagnifierWidget()
+	sourceViewer.SetMagnifier(sourceMagnifier)
 
 	previewViewer := newFontImageViewer()
 	previewScroll := container.NewScroll(previewViewer)
@@ -1421,13 +1471,14 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			statusLabel := widget.NewLabel(statusText)
 			nameEntry := widget.NewEntry()
 			nameEntry.SetPlaceHolder("字符")
+			nameEntryContainer := container.New(&fixedWidthLayout{width: 74}, nameEntry)
 			if matchedName != "" {
 				nameEntry.SetText(matchedName)
 			}
 			charNameEntries[i] = nameEntry
 
 			infoBox := container.NewVBox(idLabel, statusLabel)
-			row := container.NewBorder(nil, nil, previewImg, nameEntry, infoBox)
+			row := container.NewBorder(nil, nil, previewImg, nameEntryContainer, infoBox)
 			splitListBox.Add(row)
 			splitListBox.Add(widget.NewSeparator())
 		}
@@ -1774,7 +1825,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	sourcePanel := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("原图 / 当前裁剪图", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceInfoLabel, cropConfirmRow),
 		nil, nil, nil,
-		container.NewStack(newGridBgWidget(), sourceScroll, sourceScrollOverlay),
+		container.NewStack(newGridBgWidget(), sourceScroll, sourceMagnifier, sourceScrollOverlay),
 	)
 
 	previewPanel := container.NewBorder(
