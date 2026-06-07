@@ -6817,11 +6817,15 @@ func main() {
 
 		index := tabs.SelectedIndex()
 		if index < 0 || index >= count {
-			index = 0
-		} else {
-			index = (index + step + count) % count
+			tabs.SelectIndex(0)
+			return
 		}
-		tabs.SelectIndex(index)
+
+		nextIndex := index + step
+		if nextIndex < 0 || nextIndex >= count {
+			return
+		}
+		tabs.SelectIndex(nextIndex)
 	}
 
 	tabs.OnTabScrolled = func(_ *container.TabItem, event *fyne.ScrollEvent) {
