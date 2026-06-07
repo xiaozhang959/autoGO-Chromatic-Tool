@@ -12,11 +12,14 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	nativedialog "github.com/sqweek/dialog"
 )
+
+const openCVLowSimWarningText = "相似度过低可能导致识别结果不准确"
 
 var openCVImageTestWindow fyne.Window
 
@@ -53,6 +56,19 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 		defaultSimText = "0.9"
 	}
 	simEntry := newOpenCVTestEntry(defaultSimText)
+	simWarning := newOpenCVLowSimWarningIcon(w.Canvas())
+	updateSimWarning := func() {
+		if shouldShowOpenCVLowSimWarning(simEntry.Text) {
+			simWarning.Show()
+			return
+		}
+		simWarning.Hide()
+		simWarning.hidePopup()
+	}
+	simEntry.OnChanged = func(string) {
+		updateSimWarning()
+	}
+	updateSimWarning()
 	displayIDEntry := newOpenCVTestEntry("0")
 	if isNumeric(selectedDisplayID) {
 		displayIDEntry.SetText(selectedDisplayID)
@@ -226,7 +242,7 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 		widget.NewLabel("查找范围"),
 		rangeButton,
 		rangeEntry,
-		widget.NewLabel("相似度 sim"),
+		container.NewHBox(widget.NewLabel("相似度 sim"), simWarning),
 		simEntry,
 		widget.NewLabel("displayId"),
 		displayIDEntry,
@@ -268,6 +284,63 @@ func newOpenCVTestEntry(value string) *widget.Entry {
 	entry := widget.NewEntry()
 	entry.SetText(value)
 	return entry
+}
+
+func shouldShowOpenCVLowSimWarning(text string) bool {
+	sim, err := strconv.ParseFloat(strings.TrimSpace(text), 32)
+	return err == nil && sim < 0.5
+}
+
+type openCVLowSimWarningIcon struct {
+	widget.BaseWidget
+
+	canvas fyne.Canvas
+	icon   *widget.Icon
+	popup  *widget.PopUp
+}
+
+func newOpenCVLowSimWarningIcon(canvas fyne.Canvas) *openCVLowSimWarningIcon {
+	warning := &openCVLowSimWarningIcon{
+		canvas: canvas,
+		icon:   widget.NewIcon(theme.WarningIcon()),
+	}
+	warning.ExtendBaseWidget(warning)
+	warning.Hide()
+	return warning
+}
+
+func (w *openCVLowSimWarningIcon) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(w.icon)
+}
+
+func (w *openCVLowSimWarningIcon) MouseIn(event *desktop.MouseEvent) {
+	if w.canvas == nil {
+		return
+	}
+	w.hidePopup()
+
+	content := container.NewPadded(widget.NewLabel(openCVLowSimWarningText))
+	w.popup = widget.NewPopUp(content, w.canvas)
+
+	pos := w.Position().Add(fyne.NewPos(w.Size().Width+theme.Padding(), 0))
+	if event != nil {
+		pos = event.AbsolutePosition.Add(fyne.NewPos(theme.Padding(), theme.Padding()))
+	}
+	w.popup.ShowAtPosition(pos)
+}
+
+func (w *openCVLowSimWarningIcon) MouseMoved(*desktop.MouseEvent) {}
+
+func (w *openCVLowSimWarningIcon) MouseOut() {
+	w.hidePopup()
+}
+
+func (w *openCVLowSimWarningIcon) hidePopup() {
+	if w.popup == nil {
+		return
+	}
+	w.popup.Hide()
+	w.popup = nil
 }
 
 func currentOpenCVSelectedRect() (image.Rectangle, bool) {

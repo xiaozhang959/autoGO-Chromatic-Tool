@@ -129,7 +129,7 @@ extern "C" OpenCVMatchResult autogo_match_template(
 		OpenCVMatchResult result = make_result();
 		result.best_score = static_cast<float>(max_val);
 
-		const float threshold = 0.5f + sim * 0.5f;
+		const float threshold = sim;
 		if (find_all) {
 			for (int y = 0; y < match_result.rows; y++) {
 				const float* row = match_result.ptr<float>(y);

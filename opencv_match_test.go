@@ -51,6 +51,21 @@ func TestBuildOpenCVImageTestCodeUsesNewDocSignature(t *testing.T) {
 	}
 }
 
+func TestShouldShowOpenCVLowSimWarning(t *testing.T) {
+	tests := map[string]bool{
+		"0.49": true,
+		"0.5":  false,
+		"0.8":  false,
+		"abc":  false,
+	}
+
+	for input, want := range tests {
+		if got := shouldShowOpenCVLowSimWarning(input); got != want {
+			t.Fatalf("shouldShowOpenCVLowSimWarning(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
 func TestOpenCVOptionsFromEntriesParsesCommaRange(t *testing.T) {
 	rangeEntry := widget.NewEntry()
 	rangeEntry.SetText("10, 20, 30, 40")
