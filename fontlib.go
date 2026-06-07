@@ -37,6 +37,239 @@ type CharCell struct {
 	Char   string
 }
 
+type fontAutoPreprocessResult struct {
+	Foreground       color.NRGBA
+	Tolerance        color.NRGBA
+	Background       color.NRGBA
+	CropRect         image.Rectangle
+	ForegroundPixels int
+	Binary           *image.NRGBA
+}
+
+type fontColorBucket struct {
+	count int
+	sumR  int
+	sumG  int
+	sumB  int
+}
+
+func fontColorHex(c color.NRGBA) string {
+	return fmt.Sprintf("%02X%02X%02X", c.R, c.G, c.B)
+}
+
+func fontColorParam(foreground, tolerance color.NRGBA) string {
+	return fontColorHex(foreground) + "-" + fontColorHex(tolerance)
+}
+
+func fontColorBucketKey(c color.NRGBA) int {
+	return int(c.R/16)<<8 | int(c.G/16)<<4 | int(c.B/16)
+}
+
+func fontBucketAverage(b *fontColorBucket) color.NRGBA {
+	if b == nil || b.count == 0 {
+		return color.NRGBA{0, 0, 0, 255}
+	}
+	return color.NRGBA{
+		R: uint8(b.sumR / b.count),
+		G: uint8(b.sumG / b.count),
+		B: uint8(b.sumB / b.count),
+		A: 255,
+	}
+}
+
+func fontColorDistanceSq(a, b color.NRGBA) int {
+	dr := int(a.R) - int(b.R)
+	dg := int(a.G) - int(b.G)
+	db := int(a.B) - int(b.B)
+	return dr*dr + dg*dg + db*db
+}
+
+func fontAbsDiffInt(a, b uint8) int {
+	if a > b {
+		return int(a - b)
+	}
+	return int(b - a)
+}
+
+func fontClampByte(v, minV, maxV int) uint8 {
+	if v < minV {
+		v = minV
+	}
+	if v > maxV {
+		v = maxV
+	}
+	return uint8(v)
+}
+
+func imageColorNRGBA(img image.Image, x, y int) color.NRGBA {
+	r, g, b, a := img.At(x, y).RGBA()
+	return color.NRGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), uint8(a >> 8)}
+}
+
+func estimateFontForegroundColor(src image.Image) (background, foreground color.NRGBA, ok bool) {
+	if src == nil || src.Bounds().Empty() {
+		return color.NRGBA{}, color.NRGBA{}, false
+	}
+
+	bounds := src.Bounds()
+	totalPixels := bounds.Dx() * bounds.Dy()
+	buckets := make(map[int]*fontColorBucket)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := imageColorNRGBA(src, x, y)
+			key := fontColorBucketKey(c)
+			bucket := buckets[key]
+			if bucket == nil {
+				bucket = &fontColorBucket{}
+				buckets[key] = bucket
+			}
+			bucket.count++
+			bucket.sumR += int(c.R)
+			bucket.sumG += int(c.G)
+			bucket.sumB += int(c.B)
+		}
+	}
+
+	var bgBucket *fontColorBucket
+	for _, bucket := range buckets {
+		if bgBucket == nil || bucket.count > bgBucket.count {
+			bgBucket = bucket
+		}
+	}
+	background = fontBucketAverage(bgBucket)
+
+	minForegroundCount := max(1, totalPixels/10000)
+	if totalPixels >= 200 {
+		minForegroundCount = max(2, minForegroundCount)
+	}
+
+	bestScore := -1
+	bestDistance := 0
+	var fgBucket *fontColorBucket
+	const minContrastSq = 28 * 28
+	for _, bucket := range buckets {
+		if bucket == bgBucket || bucket.count < minForegroundCount {
+			continue
+		}
+		avg := fontBucketAverage(bucket)
+		distance := fontColorDistanceSq(avg, background)
+		if distance < minContrastSq {
+			continue
+		}
+		scoreCount := min(bucket.count, 1000)
+		score := distance * scoreCount
+		if score > bestScore || (score == bestScore && distance > bestDistance) {
+			bestScore = score
+			bestDistance = distance
+			fgBucket = bucket
+		}
+	}
+
+	if fgBucket == nil {
+		return background, color.NRGBA{}, false
+	}
+	return background, fontBucketAverage(fgBucket), true
+}
+
+func estimateFontTolerance(src image.Image, foreground, background color.NRGBA) color.NRGBA {
+	if src == nil || src.Bounds().Empty() {
+		return color.NRGBA{16, 16, 16, 255}
+	}
+
+	bounds := src.Bounds()
+	maxR, maxG, maxB := 0, 0, 0
+	matched := 0
+	const maxForegroundDistanceSq = 96 * 96 * 3
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := imageColorNRGBA(src, x, y)
+			fgDistance := fontColorDistanceSq(c, foreground)
+			if fgDistance > maxForegroundDistanceSq || fgDistance > fontColorDistanceSq(c, background) {
+				continue
+			}
+			maxR = max(maxR, fontAbsDiffInt(c.R, foreground.R))
+			maxG = max(maxG, fontAbsDiffInt(c.G, foreground.G))
+			maxB = max(maxB, fontAbsDiffInt(c.B, foreground.B))
+			matched++
+		}
+	}
+	if matched == 0 {
+		return color.NRGBA{16, 16, 16, 255}
+	}
+
+	return color.NRGBA{
+		R: fontClampByte(maxR+8, 16, 80),
+		G: fontClampByte(maxG+8, 16, 80),
+		B: fontClampByte(maxB+8, 16, 80),
+		A: 255,
+	}
+}
+
+func fontForegroundBounds(binaryImg *image.NRGBA) (image.Rectangle, int, bool) {
+	if binaryImg == nil || binaryImg.Bounds().Empty() {
+		return image.Rectangle{}, 0, false
+	}
+	bounds := binaryImg.Bounds()
+	minX, minY := bounds.Max.X, bounds.Max.Y
+	maxX, maxY := bounds.Min.X, bounds.Min.Y
+	count := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if binaryImg.NRGBAAt(x, y).G <= 128 {
+				continue
+			}
+			if x < minX {
+				minX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if y > maxY {
+				maxY = y
+			}
+			count++
+		}
+	}
+	if count == 0 {
+		return image.Rectangle{}, 0, false
+	}
+	return image.Rect(minX, minY, maxX+1, maxY+1), count, true
+}
+
+func expandRectWithin(rect, bounds image.Rectangle, pad int) image.Rectangle {
+	return image.Rect(
+		max(bounds.Min.X, rect.Min.X-pad),
+		max(bounds.Min.Y, rect.Min.Y-pad),
+		min(bounds.Max.X, rect.Max.X+pad),
+		min(bounds.Max.Y, rect.Max.Y+pad),
+	)
+}
+
+func autoPreprocessFontImage(src image.Image) (fontAutoPreprocessResult, bool) {
+	background, foreground, ok := estimateFontForegroundColor(src)
+	if !ok {
+		return fontAutoPreprocessResult{}, false
+	}
+	tolerance := estimateFontTolerance(src, foreground, background)
+	binary := createBinaryPreview(src, fontColorParam(foreground, tolerance))
+	cropRect, foregroundPixels, ok := fontForegroundBounds(binary)
+	if !ok {
+		return fontAutoPreprocessResult{}, false
+	}
+	cropRect = expandRectWithin(cropRect, binary.Bounds(), 2)
+	return fontAutoPreprocessResult{
+		Foreground:       foreground,
+		Tolerance:        tolerance,
+		Background:       background,
+		CropRect:         cropRect,
+		ForegroundPixels: foregroundPixels,
+		Binary:           binary,
+	}, true
+}
+
 // ==================== 二值化 ====================
 
 func parseColorWithOffset(colorStr string) (color.NRGBA, color.NRGBA) {
@@ -577,12 +810,335 @@ func (h *hoverContainer) MouseOut() {
 	}
 }
 
+type fontImageDragMode int
+
+const (
+	fontImageDragNone fontImageDragMode = iota
+	fontImageDragSelect
+	fontImageDragPan
+)
+
+type fontImageViewer struct {
+	widget.BaseWidget
+	image              image.Image
+	zoom               float32
+	scroll             *container.Scroll
+	selection          image.Rectangle
+	tempSelection      image.Rectangle
+	dragStart          image.Point
+	dragCurrent        image.Point
+	dragMode           fontImageDragMode
+	lastDragAbs        fyne.Position
+	onSelectionChanged func(image.Rectangle)
+}
+
+func newFontImageViewer() *fontImageViewer {
+	v := &fontImageViewer{zoom: 1}
+	v.ExtendBaseWidget(v)
+	return v
+}
+
+func (v *fontImageViewer) SetScroll(scroll *container.Scroll) {
+	v.scroll = scroll
+}
+
+func (v *fontImageViewer) SetImage(img image.Image) {
+	v.image = img
+	v.zoom = 1
+	v.selection = image.Rectangle{}
+	v.tempSelection = image.Rectangle{}
+	v.dragMode = fontImageDragNone
+	v.Refresh()
+	if v.scroll != nil {
+		v.scroll.Refresh()
+		v.scroll.ScrollToOffset(fyne.NewPos(0, 0))
+	}
+	if v.onSelectionChanged != nil {
+		v.onSelectionChanged(image.Rectangle{})
+	}
+}
+
+func (v *fontImageViewer) ClearSelection() {
+	if v.selection.Empty() && v.tempSelection.Empty() {
+		return
+	}
+	v.selection = image.Rectangle{}
+	v.tempSelection = image.Rectangle{}
+	v.dragMode = fontImageDragNone
+	v.Refresh()
+	if v.onSelectionChanged != nil {
+		v.onSelectionChanged(image.Rectangle{})
+	}
+}
+
+func (v *fontImageViewer) SelectedRect() (image.Rectangle, bool) {
+	if v.image == nil || v.selection.Empty() {
+		return image.Rectangle{}, false
+	}
+	rect := v.selection.Intersect(v.image.Bounds())
+	if rect.Empty() {
+		return image.Rectangle{}, false
+	}
+	return rect, true
+}
+
+func (v *fontImageViewer) SetZoom(scale float32) {
+	if v.image == nil {
+		return
+	}
+	if scale < minImageZoom {
+		scale = minImageZoom
+	}
+	if scale > maxImageZoom {
+		scale = maxImageZoom
+	}
+	if scale == v.zoom {
+		return
+	}
+	v.zoom = scale
+	v.Refresh()
+	if v.scroll != nil {
+		v.scroll.Refresh()
+	}
+}
+
+func (v *fontImageViewer) ResetZoom() {
+	v.SetZoom(1)
+	if v.scroll != nil {
+		v.scroll.ScrollToOffset(fyne.NewPos(0, 0))
+	}
+}
+
+func (v *fontImageViewer) imagePosition(pos fyne.Position) (image.Point, bool) {
+	if v.image == nil {
+		return image.Point{}, false
+	}
+	zoom := v.zoom
+	if zoom <= 0 {
+		zoom = 1
+	}
+	bounds := v.image.Bounds()
+	x := bounds.Min.X + int(pos.X/zoom)
+	y := bounds.Min.Y + int(pos.Y/zoom)
+	if x < bounds.Min.X {
+		x = bounds.Min.X
+	}
+	if x >= bounds.Max.X {
+		x = bounds.Max.X - 1
+	}
+	if y < bounds.Min.Y {
+		y = bounds.Min.Y
+	}
+	if y >= bounds.Max.Y {
+		y = bounds.Max.Y - 1
+	}
+	return image.Pt(x, y), true
+}
+
+func (v *fontImageViewer) normalizedDragRect() image.Rectangle {
+	if v.image == nil {
+		return image.Rectangle{}
+	}
+	x0 := min(v.dragStart.X, v.dragCurrent.X)
+	y0 := min(v.dragStart.Y, v.dragCurrent.Y)
+	x1 := max(v.dragStart.X, v.dragCurrent.X) + 1
+	y1 := max(v.dragStart.Y, v.dragCurrent.Y) + 1
+	return image.Rect(x0, y0, x1, y1).Intersect(v.image.Bounds())
+}
+
+func (v *fontImageViewer) currentDisplaySelection() (image.Rectangle, bool) {
+	if !v.tempSelection.Empty() {
+		return v.tempSelection, true
+	}
+	if !v.selection.Empty() {
+		return v.selection, true
+	}
+	return image.Rectangle{}, false
+}
+
+func (v *fontImageViewer) minSize() fyne.Size {
+	if v.image == nil || v.image.Bounds().Empty() {
+		return fyne.NewSize(1, 1)
+	}
+	bounds := v.image.Bounds()
+	zoom := v.zoom
+	if zoom <= 0 {
+		zoom = 1
+	}
+	return fyne.NewSize(float32(bounds.Dx())*zoom, float32(bounds.Dy())*zoom)
+}
+
+func (v *fontImageViewer) CreateRenderer() fyne.WidgetRenderer {
+	img := canvas.NewImageFromImage(v.image)
+	img.FillMode = canvas.ImageFillStretch
+	img.ScaleMode = canvas.ImageScalePixels
+	selection := canvas.NewRectangle(color.Transparent)
+	selection.StrokeColor = color.NRGBA{255, 170, 0, 255}
+	selection.StrokeWidth = 2
+	selection.Hide()
+	return &fontImageViewerRenderer{
+		viewer:    v,
+		image:     img,
+		selection: selection,
+		objects:   []fyne.CanvasObject{img, selection},
+	}
+}
+
+func (v *fontImageViewer) MouseDown(e *desktop.MouseEvent) {
+	if v.image == nil {
+		return
+	}
+	v.lastDragAbs = e.AbsolutePosition
+	if e.Button == desktop.MouseButtonPrimary && e.Modifier&fyne.KeyModifierShift == 0 {
+		p, ok := v.imagePosition(e.Position)
+		if !ok {
+			return
+		}
+		v.dragMode = fontImageDragSelect
+		v.dragStart = p
+		v.dragCurrent = p
+		v.tempSelection = image.Rectangle{}
+		return
+	}
+	v.dragMode = fontImageDragPan
+}
+
+func (v *fontImageViewer) MouseMoved(e *desktop.MouseEvent) {
+	switch v.dragMode {
+	case fontImageDragSelect:
+		p, ok := v.imagePosition(e.Position)
+		if !ok {
+			return
+		}
+		v.dragCurrent = p
+		v.tempSelection = v.normalizedDragRect()
+		v.Refresh()
+	case fontImageDragPan:
+		if v.scroll == nil {
+			return
+		}
+		delta := e.AbsolutePosition.Subtract(v.lastDragAbs)
+		offset := v.scroll.Offset
+		v.scroll.ScrollToOffset(fyne.NewPos(offset.X-delta.X, offset.Y-delta.Y))
+		v.lastDragAbs = e.AbsolutePosition
+	}
+}
+
+func (v *fontImageViewer) MouseUp(e *desktop.MouseEvent) {
+	if v.dragMode != fontImageDragSelect {
+		v.dragMode = fontImageDragNone
+		return
+	}
+	p, ok := v.imagePosition(e.Position)
+	if ok {
+		v.dragCurrent = p
+		rect := v.normalizedDragRect()
+		if rect.Dx() <= 1 && rect.Dy() <= 1 {
+			v.selection = image.Rectangle{}
+		} else {
+			v.selection = rect
+		}
+	}
+	v.tempSelection = image.Rectangle{}
+	v.dragMode = fontImageDragNone
+	v.Refresh()
+	if v.onSelectionChanged != nil {
+		v.onSelectionChanged(v.selection)
+	}
+}
+
+func (v *fontImageViewer) MouseIn(*desktop.MouseEvent) {}
+func (v *fontImageViewer) MouseOut()                   {}
+func (v *fontImageViewer) Scrolled(e *fyne.ScrollEvent) {
+	driver, ok := fyne.CurrentApp().Driver().(desktop.Driver)
+	if !ok || driver.CurrentKeyModifiers()&fyne.KeyModifierControl == 0 {
+		if v.scroll != nil {
+			v.scroll.Scrolled(e)
+		}
+		return
+	}
+
+	delta := e.Scrolled.DY
+	if delta == 0 {
+		delta = e.Scrolled.DX
+	}
+	if delta == 0 {
+		return
+	}
+	if delta > 0 {
+		v.SetZoom(v.zoom * zoomStepMultiplier)
+	} else {
+		v.SetZoom(v.zoom / zoomStepMultiplier)
+	}
+}
+
+type fontImageViewerRenderer struct {
+	viewer    *fontImageViewer
+	image     *canvas.Image
+	selection *canvas.Rectangle
+	objects   []fyne.CanvasObject
+}
+
+func (r *fontImageViewerRenderer) Layout(size fyne.Size) {
+	r.image.Move(fyne.NewPos(0, 0))
+	r.image.Resize(size)
+	r.updateSelection()
+}
+
+func (r *fontImageViewerRenderer) MinSize() fyne.Size {
+	return r.viewer.minSize()
+}
+
+func (r *fontImageViewerRenderer) Refresh() {
+	r.image.Image = r.viewer.image
+	if r.viewer.image == nil {
+		r.image.Hide()
+	} else {
+		r.image.Show()
+	}
+	r.updateSelection()
+	canvas.Refresh(r.image)
+	canvas.Refresh(r.selection)
+}
+
+func (r *fontImageViewerRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *fontImageViewerRenderer) Destroy() {}
+
+func (r *fontImageViewerRenderer) updateSelection() {
+	rect, ok := r.viewer.currentDisplaySelection()
+	if !ok || r.viewer.image == nil {
+		r.selection.Hide()
+		return
+	}
+	bounds := r.viewer.image.Bounds()
+	zoom := r.viewer.zoom
+	if zoom <= 0 {
+		zoom = 1
+	}
+	x := float32(rect.Min.X-bounds.Min.X) * zoom
+	y := float32(rect.Min.Y-bounds.Min.Y) * zoom
+	w := float32(rect.Dx()) * zoom
+	h := float32(rect.Dy()) * zoom
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	r.selection.Move(fyne.NewPos(x, y))
+	r.selection.Resize(fyne.NewSize(w, h))
+	r.selection.Show()
+}
+
 // ==================== 字库制作窗口 ====================
 
 func openFontLibWindow(parentWindow fyne.Window) {
 	a := fyne.CurrentApp()
 	w := a.NewWindow("AutoGo 字库制作")
-	fontLibWindowSize := initialWindowSize(0.70, 0.70)
+	fontLibWindowSize := initialWindowSize(0.82, 0.78)
 
 	var charCells []CharCell
 	var charNameEntries []*widget.Entry
@@ -592,38 +1148,36 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	var binaryRegion *image.NRGBA
 	var regionImg image.Image
 	var fontLibChars []FontChar
-	showingOriginal := false
+	var suppressParamRefresh bool
 
 	fgColorEntry := widget.NewEntry()
-	fgColorEntry.SetText("000000-101010")
-	fgColorEntry.SetPlaceHolder("如: 000000-101010")
+	fgColorEntry.SetText("000000")
+	fgColorEntry.SetPlaceHolder("如: 000000")
+	fgToleranceEntry := widget.NewEntry()
+	fgToleranceEntry.SetText("101010")
+	fgToleranceEntry.SetPlaceHolder("如: 101010")
 	colGapEntry := widget.NewEntry()
 	colGapEntry.SetText("1")
 	rowGapEntry := widget.NewEntry()
 	rowGapEntry.SetText("1")
 
+	sourceInfoLabel := widget.NewLabel("请先去裁剪选取或加载图片")
+	sourceInfoLabel.Wrapping = fyne.TextWrapWord
+	previewInfoLabel := widget.NewLabel("绿色 = 文字前景，会入库；黑色 = 背景，会忽略")
+	previewInfoLabel.Wrapping = fyne.TextWrapWord
+
 	previewCanvasImg := canvas.NewImageFromImage(nil)
 	previewCanvasImg.ScaleMode = canvas.ImageScalePixels
 	previewCanvasImg.FillMode = canvas.ImageFillOriginal
 
-	infoLabel := widget.NewLabel("请先获取选区或加载图片")
-	infoLabel.Wrapping = fyne.TextWrapWord
-
-	charCardHolder := container.NewHBox()
-	scrollBarPad := canvas.NewRectangle(color.Transparent)
-	scrollBarPad.SetMinSize(fyne.NewSize(1, 12))
-	charCardInner := container.NewVBox(charCardHolder, scrollBarPad)
-	charCardScroll := container.NewHScroll(charCardInner)
+	splitListBox := container.NewVBox()
+	fontLibListBox := container.NewVBox()
+	libHeaderLabel := widget.NewLabelWithStyle("字库内容 (0)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	libSearchEntry := widget.NewEntry()
+	libSearchEntry.SetPlaceHolder("搜索字库字符")
 
 	quickFillEntry := widget.NewEntry()
 	quickFillEntry.SetPlaceHolder("快速填入: 主题壁纸")
-	quickFillBtn := widget.NewButtonWithIcon("快速填入", theme.ConfirmIcon(), func() {
-		chars := []rune(strings.TrimSpace(quickFillEntry.Text))
-		for i := 0; i < len(charNameEntries) && i < len(chars); i++ {
-			charNameEntries[i].SetText(string(chars[i]))
-		}
-	})
-	quickFillBtn.Importance = widget.HighImportance
 
 	readInt := func(e *widget.Entry, def int) int {
 		v, err := strconv.Atoi(strings.TrimSpace(e.Text))
@@ -633,113 +1187,104 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		return v
 	}
 
-	// ===== 右侧字库列表 =====
-	libListBox := container.NewVBox()
-	libListScroll := container.NewVScroll(libListBox)
-	libHeaderLabel := widget.NewLabel("字库内容 (0)")
-	libHeaderLabel.TextStyle = fyne.TextStyle{Bold: true}
+	currentColorParam := func() string {
+		fgHex := strings.TrimSpace(fgColorEntry.Text)
+		if fgHex == "" {
+			fgHex = "000000"
+		}
+		if strings.Contains(fgHex, "-") {
+			return fgHex
+		}
+		toleranceHex := strings.TrimSpace(fgToleranceEntry.Text)
+		if toleranceHex == "" {
+			toleranceHex = "101010"
+		}
+		return fgHex + "-" + toleranceHex
+	}
 
+	var updateSourceInfo func()
+	var refreshPreview func()
+	var rebuildSplitList func()
 	var rebuildLibList func()
+
+	sourceViewer := newFontImageViewer()
+	sourceViewer.onSelectionChanged = func(image.Rectangle) {
+		if updateSourceInfo != nil {
+			updateSourceInfo()
+		}
+	}
+	sourceScroll := container.NewScroll(sourceViewer)
+	sourceViewer.SetScroll(sourceScroll)
+
+	updateSourceInfo = func() {
+		if regionImg == nil {
+			sourceInfoLabel.SetText("请先去裁剪选取或加载图片")
+			return
+		}
+		bounds := regionImg.Bounds()
+		text := fmt.Sprintf("当前图: %d×%d px | 拖拽框选裁剪；Shift+拖动平移；Ctrl+滚轮缩放",
+			bounds.Dx(), bounds.Dy())
+		if rect, ok := sourceViewer.SelectedRect(); ok {
+			text += fmt.Sprintf(" | 选区: %d,%d - %d,%d (%d×%d)",
+				rect.Min.X, rect.Min.Y, rect.Max.X, rect.Max.Y, rect.Dx(), rect.Dy())
+		}
+		sourceInfoLabel.SetText(text)
+	}
+
 	rebuildLibList = func() {
-		libListBox.RemoveAll()
+		fontLibListBox.RemoveAll()
+		query := strings.ToLower(strings.TrimSpace(libSearchEntry.Text))
+		shown := 0
 		for i, ch := range fontLibChars {
+			if query != "" && !strings.Contains(strings.ToLower(ch.Char), query) {
+				continue
+			}
 			idx := i
 			previewImg := canvas.NewImageFromImage(createCharPreview(ch.Bitmap, 2))
 			previewImg.ScaleMode = canvas.ImageScalePixels
 			previewImg.FillMode = canvas.ImageFillContain
-			previewImg.SetMinSize(fyne.NewSize(26, 26))
+			previewImg.SetMinSize(fyne.NewSize(30, 30))
 
-			nameText := canvas.NewText(ch.Char, getTextColor(isDarkTheme))
-			nameText.TextSize = 14
-			nameText.TextStyle = fyne.TextStyle{Bold: true}
-
-			sizeText := canvas.NewText(fmt.Sprintf("%dx%d", ch.Width, ch.Height), color.NRGBA{140, 140, 140, 255})
-			sizeText.TextSize = 10
-
+			nameLabel := widget.NewLabelWithStyle(ch.Char, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			sizeLabel := widget.NewLabel(fmt.Sprintf("%dx%d | 白点:%d", ch.Width, ch.Height, ch.WhitePixels))
 			delBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
 				fontLibChars = append(fontLibChars[:idx], fontLibChars[idx+1:]...)
 				rebuildLibList()
+				if refreshPreview != nil {
+					refreshPreview()
+				}
 			})
 			delBtn.Importance = widget.LowImportance
 
-			leftInfo := container.NewHBox(previewImg, container.NewCenter(nameText), container.NewCenter(sizeText))
-			scrollPad := canvas.NewRectangle(color.Transparent)
-			scrollPad.SetMinSize(fyne.NewSize(12, 1))
-			row := container.NewBorder(nil, nil, leftInfo, container.NewHBox(delBtn, scrollPad))
-			libListBox.Add(row)
+			row := container.NewBorder(nil, nil, previewImg, delBtn, container.NewVBox(nameLabel, sizeLabel))
+			fontLibListBox.Add(row)
+			fontLibListBox.Add(widget.NewSeparator())
+			shown++
 		}
-		libListBox.Refresh()
-		libHeaderLabel.SetText(fmt.Sprintf("字库内容 (%d)", len(fontLibChars)))
+		if shown == 0 {
+			fontLibListBox.Add(widget.NewLabel("暂无字库内容"))
+		}
+		fontLibListBox.Refresh()
+		if query == "" {
+			libHeaderLabel.SetText(fmt.Sprintf("字库内容 (%d)", len(fontLibChars)))
+		} else {
+			libHeaderLabel.SetText(fmt.Sprintf("字库内容 (%d/%d)", shown, len(fontLibChars)))
+		}
 	}
 
-	// ===== 核心：开始切割 =====
-	doSlice := func() {
-		if regionImg == nil {
-			return
-		}
-		showingOriginal = false
-		fgHex := strings.TrimSpace(fgColorEntry.Text)
-		if fgHex == "" {
-			fgHex = "000000-101010"
-		}
-		cg := readInt(colGapEntry, 1)
-		rg := readInt(rowGapEntry, 1)
-
-		fullBinary := createBinaryPreview(regionImg, fgHex)
-		bboxes := findCharacterBBoxes(fullBinary, cg, rg)
-		if len(bboxes) > 0 {
-			unionRect := bboxes[0]
-			for _, bb := range bboxes[1:] {
-				if bb.Min.X < unionRect.Min.X {
-					unionRect.Min.X = bb.Min.X
-				}
-				if bb.Min.Y < unionRect.Min.Y {
-					unionRect.Min.Y = bb.Min.Y
-				}
-				if bb.Max.X > unionRect.Max.X {
-					unionRect.Max.X = bb.Max.X
-				}
-				if bb.Max.Y > unionRect.Max.Y {
-					unionRect.Max.Y = bb.Max.Y
-				}
-			}
-			pad := 2
-			imgW, imgH := fullBinary.Bounds().Dx(), fullBinary.Bounds().Dy()
-			x0 := max(0, unionRect.Min.X-pad)
-			y0 := max(0, unionRect.Min.Y-pad)
-			x1 := min(imgW, unionRect.Max.X+pad)
-			y1 := min(imgH, unionRect.Max.Y+pad)
-			expanded := image.Rect(x0, y0, x1, y1)
-			cropped := image.NewNRGBA(image.Rect(0, 0, expanded.Dx(), expanded.Dy()))
-			for y := 0; y < expanded.Dy(); y++ {
-				for x := 0; x < expanded.Dx(); x++ {
-					cropped.SetNRGBA(x, y, fullBinary.NRGBAAt(expanded.Min.X+x, expanded.Min.Y+y))
-				}
-			}
-			binaryRegion = cropped
-		} else {
-			binaryRegion = fullBinary
-		}
-
-		dotImg, cells := renderDotMatrix(binaryRegion, cg, rg)
-		charCells = cells
-
-		previewCanvasImg.Image = dotImg
-		previewCanvasImg.SetMinSize(fyne.NewSize(float32(dotImg.Bounds().Dx()), float32(dotImg.Bounds().Dy())))
-		previewCanvasImg.Refresh()
-
-		bw := binaryRegion.Bounds().Dx()
-		bh := binaryRegion.Bounds().Dy()
-		infoLabel.SetText(fmt.Sprintf("选区: %d×%d px | 检测到 %d 个字符 | 列间距:%d 行间距:%d",
-			bw, bh, len(charCells), cg, rg))
-
-		charCardHolder.RemoveAll()
+	rebuildSplitList = func() {
+		splitListBox.RemoveAll()
 		charNameEntries = make([]*widget.Entry, len(charCells))
 		charHexCache = make([]string, len(charCells))
 		charWpCache = make([]int, len(charCells))
 		charMatchedLib = make([]bool, len(charCells))
 
-		var cards []fyne.CanvasObject
+		if len(charCells) == 0 {
+			splitListBox.Add(widget.NewLabel("暂无分割结果"))
+			splitListBox.Refresh()
+			return
+		}
+
 		for i, cell := range charCells {
 			hexData, wp := encodeBitmapHex(cell.Bitmap)
 			charHexCache[i] = hexData
@@ -756,25 +1301,14 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			previewImg := canvas.NewImageFromImage(createCharPreview(cell.Bitmap, 2))
 			previewImg.ScaleMode = canvas.ImageScalePixels
 			previewImg.FillMode = canvas.ImageFillContain
-			pw := float32(cell.BBox.Dx() * 2)
-			ph := float32(cell.BBox.Dy() * 2)
-			if pw < 20 {
-				pw = 20
-			}
-			if pw > 70 {
-				pw = 70
-			}
-			if ph < 20 {
-				ph = 20
-			}
-			if ph > 50 {
-				ph = 50
-			}
-			previewImg.SetMinSize(fyne.NewSize(pw, ph))
+			previewImg.SetMinSize(fyne.NewSize(42, 42))
 
-			idText := canvas.NewText(fmt.Sprintf("#%d  %dx%d", i, cell.BBox.Dx(), cell.BBox.Dy()), color.NRGBA{130, 170, 230, 255})
-			idText.TextSize = 10
-
+			idLabel := widget.NewLabel(fmt.Sprintf("#%d  %dx%d", i, cell.BBox.Dx(), cell.BBox.Dy()))
+			statusText := "未匹配字库"
+			if matchedName != "" {
+				statusText = "已匹配: " + matchedName
+			}
+			statusLabel := widget.NewLabel(statusText)
 			nameEntry := widget.NewEntry()
 			nameEntry.SetPlaceHolder("字符")
 			if matchedName != "" {
@@ -782,29 +1316,72 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			}
 			charNameEntries[i] = nameEntry
 
-			cardContent := container.NewBorder(
-				idText, nameEntry, nil, nil,
-				container.NewCenter(previewImg),
-			)
-
-			cardBg := canvas.NewRectangle(color.NRGBA{30, 30, 38, 255})
-			if !isDarkTheme {
-				cardBg = canvas.NewRectangle(color.NRGBA{235, 237, 242, 255})
-			}
-			cardMinW := canvas.NewRectangle(color.Transparent)
-			cardMinW.SetMinSize(fyne.NewSize(100, 0))
-			card := container.NewStack(cardMinW, cardBg, container.NewPadded(cardContent))
-			cards = append(cards, card)
+			infoBox := container.NewVBox(idLabel, statusLabel)
+			row := container.NewBorder(nil, nil, previewImg, nameEntry, infoBox)
+			splitListBox.Add(row)
+			splitListBox.Add(widget.NewSeparator())
 		}
-
-		if len(cards) > 0 {
-			row := container.NewHBox(cards...)
-			charCardHolder.Add(row)
-		}
-		charCardHolder.Refresh()
+		splitListBox.Refresh()
 	}
 
-	// ===== 添加到字库 =====
+	refreshPreview = func() {
+		if regionImg == nil {
+			binaryRegion = nil
+			charCells = nil
+			previewCanvasImg.Image = nil
+			previewCanvasImg.SetMinSize(fyne.NewSize(1, 1))
+			previewCanvasImg.Refresh()
+			previewInfoLabel.SetText("请先去裁剪选取或加载图片")
+			rebuildSplitList()
+			return
+		}
+
+		cg := readInt(colGapEntry, 1)
+		rg := readInt(rowGapEntry, 1)
+		binaryRegion = createBinaryPreview(regionImg, currentColorParam())
+		dotImg, cells := renderDotMatrix(binaryRegion, cg, rg)
+		charCells = cells
+
+		previewCanvasImg.Image = dotImg
+		previewCanvasImg.SetMinSize(fyne.NewSize(float32(dotImg.Bounds().Dx()), float32(dotImg.Bounds().Dy())))
+		previewCanvasImg.Refresh()
+
+		bw := binaryRegion.Bounds().Dx()
+		bh := binaryRegion.Bounds().Dy()
+		previewInfoLabel.SetText(fmt.Sprintf("二值预览: %d×%d px | 检测到 %d 个字符 | 列间距:%d 行间距:%d",
+			bw, bh, len(charCells), cg, rg))
+		rebuildSplitList()
+	}
+
+	setRegionImage := func(img image.Image) {
+		if img == nil || img.Bounds().Empty() {
+			return
+		}
+		regionImg = img
+		sourceViewer.SetImage(regionImg)
+		updateSourceInfo()
+		refreshPreview()
+	}
+
+	paramChanged := func(string) {
+		if !suppressParamRefresh && refreshPreview != nil {
+			refreshPreview()
+		}
+	}
+	fgColorEntry.OnChanged = paramChanged
+	fgToleranceEntry.OnChanged = paramChanged
+	colGapEntry.OnChanged = paramChanged
+	rowGapEntry.OnChanged = paramChanged
+	libSearchEntry.OnChanged = func(string) { rebuildLibList() }
+
+	quickFillBtn := widget.NewButtonWithIcon("快速填入", theme.ConfirmIcon(), func() {
+		chars := []rune(strings.TrimSpace(quickFillEntry.Text))
+		for i := 0; i < len(charNameEntries) && i < len(chars); i++ {
+			charNameEntries[i].SetText(string(chars[i]))
+		}
+	})
+	quickFillBtn.Importance = widget.HighImportance
+
 	addToLibBtn := widget.NewButtonWithIcon("添加到字库", theme.ContentAddIcon(), func() {
 		added := 0
 		for i, cell := range charCells {
@@ -822,23 +1399,24 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			if len(bm) == 0 || len(bm[0]) == 0 {
 				continue
 			}
-			hexData := charHexCache[i]
-			wp := charWpCache[i]
-			newChar := FontChar{
-				Char: name, Width: len(bm[0]), Height: len(bm),
-				HexData: hexData, WhitePixels: wp, Bitmap: bm,
-			}
-			fontLibChars = append(fontLibChars, newChar)
+			fontLibChars = append(fontLibChars, FontChar{
+				Char:        name,
+				Width:       len(bm[0]),
+				Height:      len(bm),
+				HexData:     charHexCache[i],
+				WhitePixels: charWpCache[i],
+				Bitmap:      bm,
+			})
 			added++
 		}
 		if added > 0 {
 			rebuildLibList()
+			refreshPreview()
 		}
 	})
 	addToLibBtn.Importance = widget.HighImportance
 
-	// ===== 按钮 =====
-	getSelBtn := widget.NewButtonWithIcon("获取选区", theme.VisibilityIcon(), func() {
+	getSelBtn := widget.NewButtonWithIcon("去裁剪选取", theme.VisibilityIcon(), func() {
 		if imageViewer == nil || imageViewer.image == nil {
 			dialog.ShowInformation("提示", "主窗口没有图片，请先截图或载入", w)
 			return
@@ -851,28 +1429,107 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		selRect := image.Rect(
 			min(rect.X1, rect.X2), min(rect.Y1, rect.Y2),
 			max(rect.X1, rect.X2), max(rect.Y1, rect.Y2),
-		)
-		regionImg = cropImage(imageViewer.image, selRect)
-		showingOriginal = true
-		dotPreview := renderOriginalDotMatrix(regionImg)
-		previewCanvasImg.Image = dotPreview
-		previewCanvasImg.SetMinSize(fyne.NewSize(float32(dotPreview.Bounds().Dx()), float32(dotPreview.Bounds().Dy())))
-		previewCanvasImg.Refresh()
-		infoLabel.SetText(fmt.Sprintf("选区: %d×%d px | 请点击「开始切割」进行二值化分割",
-			regionImg.Bounds().Dx(), regionImg.Bounds().Dy()))
+		).Intersect(imageViewer.image.Bounds())
+		if selRect.Empty() {
+			dialog.ShowInformation("提示", "主窗口选区无效，请重新框选", w)
+			return
+		}
+		setRegionImage(cropImage(imageViewer.image, selRect))
 	})
 	getSelBtn.Importance = widget.HighImportance
 
-	sliceBtn := widget.NewButtonWithIcon("开始切割", theme.MediaPlayIcon(), func() {
+	loadImageBtn := widget.NewButtonWithIcon("加载图片", theme.FolderOpenIcon(), func() {
+		go func() {
+			fp, err := nativedialog.File().Filter("图片文件", "png", "jpg", "jpeg", "bmp").
+				Title("加载字库图片").Load()
+			if err != nil {
+				return
+			}
+			data, err := os.ReadFile(fp)
+			if err != nil {
+				fyne.Do(func() { dialog.ShowError(fmt.Errorf("读取图片失败: %v", err), w) })
+				return
+			}
+			img, err := decodeOpenCVTemplateBytes(data)
+			if err != nil {
+				fyne.Do(func() { dialog.ShowError(fmt.Errorf("图片解码失败: %v", err), w) })
+				return
+			}
+			fyne.Do(func() { setRegionImage(img) })
+		}()
+	})
+
+	autoPreprocessBtn := widget.NewButtonWithIcon("自动取色并裁剪", theme.SearchIcon(), func() {
 		if regionImg == nil {
-			dialog.ShowInformation("提示", "请先获取选区或加载图片", w)
+			dialog.ShowInformation("提示", "请先去裁剪选取或加载图片", w)
 			return
 		}
-		doSlice()
-	})
-	sliceBtn.Importance = widget.HighImportance
+		bounds := regionImg.Bounds()
+		analysisRect := bounds
+		if selected, ok := sourceViewer.SelectedRect(); ok {
+			analysisRect = selected
+		}
+		analysisImg := cropImage(regionImg, analysisRect)
+		result, ok := autoPreprocessFontImage(analysisImg)
+		if !ok {
+			dialog.ShowInformation("自动取色并裁剪", "未识别到稳定的文字前景点，当前图片未修改", w)
+			return
+		}
 
-	// ===== 字库操作按钮（右侧面板底部）=====
+		cropRect := result.CropRect.Add(analysisRect.Min)
+		cropRect = cropRect.Intersect(bounds)
+		if cropRect.Empty() {
+			dialog.ShowInformation("自动取色并裁剪", "自动裁剪区域无效，当前图片未修改", w)
+			return
+		}
+
+		suppressParamRefresh = true
+		fgColorEntry.SetText(fontColorHex(result.Foreground))
+		fgToleranceEntry.SetText(fontColorHex(result.Tolerance))
+		suppressParamRefresh = false
+
+		setRegionImage(cropImage(regionImg, cropRect))
+		previewInfoLabel.SetText(fmt.Sprintf("自动预处理完成: 文字色 %s 容差 %s | 前景点 %d | 检测到 %d 个字符",
+			fontColorHex(result.Foreground), fontColorHex(result.Tolerance), result.ForegroundPixels, len(charCells)))
+	})
+	autoPreprocessBtn.Importance = widget.HighImportance
+
+	cropBtn := widget.NewButtonWithIcon("裁剪", theme.ContentCutIcon(), func() {
+		if regionImg == nil {
+			dialog.ShowInformation("提示", "请先去裁剪选取或加载图片", w)
+			return
+		}
+		rect, ok := sourceViewer.SelectedRect()
+		if !ok {
+			dialog.ShowInformation("提示", "请先在上方图片拖拽框选裁剪区域", w)
+			return
+		}
+		setRegionImage(cropImage(regionImg, rect))
+	})
+
+	refreshBtn := widget.NewButtonWithIcon("刷新预览", theme.ViewRefreshIcon(), func() {
+		refreshPreview()
+	})
+
+	resetZoomBtn := widget.NewButton("重置缩放", func() {
+		sourceViewer.ResetZoom()
+	})
+
+	clearSelectionBtn := widget.NewButton("清除选区", func() {
+		sourceViewer.ClearSelection()
+		updateSourceInfo()
+	})
+
+	resetParamsBtn := widget.NewButton("重置参数", func() {
+		suppressParamRefresh = true
+		fgColorEntry.SetText("000000")
+		fgToleranceEntry.SetText("101010")
+		colGapEntry.SetText("1")
+		rowGapEntry.SetText("1")
+		suppressParamRefresh = false
+		refreshPreview()
+	})
+
 	exportBtn := widget.NewButtonWithIcon("导出", theme.DocumentSaveIcon(), func() {
 		if len(fontLibChars) == 0 {
 			dialog.ShowInformation("提示", "字库为空", w)
@@ -884,8 +1541,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			if err != nil {
 				return
 			}
-			fgHex := strings.TrimSpace(fgColorEntry.Text)
-			err = os.WriteFile(fp, []byte(exportFontLib(fontLibChars, fgHex)), 0644)
+			err = os.WriteFile(fp, []byte(exportFontLib(fontLibChars, currentColorParam())), 0644)
 			if err != nil {
 				fyne.Do(func() { dialog.ShowError(fmt.Errorf("保存失败: %v", err), w) })
 				return
@@ -895,7 +1551,6 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			})
 		}()
 	})
-	exportBtn.Importance = widget.MediumImportance
 
 	copyBtn := widget.NewButtonWithIcon("复制", theme.ContentCopyIcon(), func() {
 		if len(fontLibChars) == 0 {
@@ -909,7 +1564,6 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		w.Clipboard().SetContent(sb.String())
 		dialog.ShowInformation("成功", fmt.Sprintf("已复制 %d 个字符到剪贴板", len(fontLibChars)), w)
 	})
-	copyBtn.Importance = widget.MediumImportance
 
 	importBtn := widget.NewButtonWithIcon("导入", theme.FolderOpenIcon(), func() {
 		go func() {
@@ -931,11 +1585,11 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			fyne.Do(func() {
 				fontLibChars = append(fontLibChars, imported...)
 				rebuildLibList()
+				refreshPreview()
 				dialog.ShowInformation("成功", fmt.Sprintf("已导入 %d 个字符", len(imported)), w)
 			})
 		}()
 	})
-	importBtn.Importance = widget.MediumImportance
 
 	clearLibBtn := widget.NewButtonWithIcon("清空", theme.DeleteIcon(), func() {
 		if len(fontLibChars) == 0 {
@@ -945,86 +1599,85 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			if ok {
 				fontLibChars = nil
 				rebuildLibList()
+				refreshPreview()
 			}
 		}, w)
 	})
-	clearLibBtn.Importance = widget.MediumImportance
 
-	// ===== 布局 =====
-	leftPanel := container.New(&fixedWidthLayout{width: 155, padding: 10, verticalSpacing: 4},
-		layout.NewSpacer(),
+	legend := widget.NewLabel("绿色 = 文字前景，会入库\n黑色 = 背景，会忽略")
+	legend.Wrapping = fyne.TextWrapWord
+
+	leftPanel := container.New(&fixedWidthLayout{width: 190, padding: 10, verticalSpacing: 5},
+		widget.NewLabelWithStyle("来源", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		getSelBtn,
+		loadImageBtn,
 		widget.NewSeparator(),
-		widget.NewLabel("文字颜色:"),
+		widget.NewLabelWithStyle("智能操作", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		autoPreprocessBtn,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("手动操作", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewGridWithColumns(2, cropBtn, refreshBtn),
+		container.NewGridWithColumns(2, resetZoomBtn, clearSelectionBtn),
+		resetParamsBtn,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("参数", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("文字色:"),
 		fgColorEntry,
-		widget.NewSeparator(),
+		widget.NewLabel("偏色容差:"),
+		fgToleranceEntry,
 		widget.NewLabel("列间距(像素):"),
 		colGapEntry,
 		widget.NewLabel("行间距(像素):"),
 		rowGapEntry,
 		widget.NewSeparator(),
-		sliceBtn,
+		legend,
 		layout.NewSpacer(),
 	)
 
-	gridBg := newGridBgWidget()
-	previewTappable := newTappableArea(func(pos fyne.Position) {
-		if !showingOriginal || regionImg == nil {
-			return
-		}
-		stride := float32(dotCellSize + 1)
-		px := int(pos.X / stride)
-		py := int(pos.Y / stride)
-		b := regionImg.Bounds()
-		if px < 0 || py < 0 || px >= b.Dx() || py >= b.Dy() {
-			return
-		}
-		r, g, bl, _ := regionImg.At(b.Min.X+px, b.Min.Y+py).RGBA()
-		hexColor := fmt.Sprintf("%02X%02X%02X", r>>8, g>>8, bl>>8)
-		cur := fgColorEntry.Text
-		if idx := strings.Index(cur, "-"); idx >= 0 {
-			fgColorEntry.SetText(hexColor + cur[idx:])
-		} else {
-			fgColorEntry.SetText(hexColor)
-		}
-	})
-	previewScroll := container.NewScroll(container.NewStack(
-		container.New(&topLeftLayout{}, previewCanvasImg),
-		previewTappable,
-	))
-	previewArea := container.NewStack(gridBg, previewScroll)
-
-	quickFillRow := container.NewBorder(nil, nil, nil,
-		container.NewHBox(quickFillBtn, addToLibBtn),
-		quickFillEntry,
+	sourcePanel := container.NewBorder(
+		container.NewVBox(widget.NewLabelWithStyle("原图 / 当前裁剪图", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceInfoLabel),
+		nil, nil, nil,
+		container.NewStack(newGridBgWidget(), sourceScroll),
 	)
-	charCardArea := newFixedHeightContainer(charCardScroll, 130)
 
-	centerArea := container.NewBorder(
-		infoLabel,
-		container.NewVBox(
-			widget.NewSeparator(),
-			charCardArea,
-			quickFillRow,
-		),
+	previewScroll := container.NewScroll(container.New(&topLeftLayout{}, previewCanvasImg))
+	previewPanel := container.NewBorder(
+		container.NewVBox(widget.NewLabelWithStyle("二值化预览 / 分割框", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), previewInfoLabel),
+		nil, nil, nil,
+		container.NewStack(newGridBgWidget(), previewScroll),
+	)
+	centerSplit := container.NewVSplit(sourcePanel, previewPanel)
+	centerSplit.Offset = 0.52
+
+	quickFillRow := container.NewBorder(nil, nil, nil, quickFillBtn, quickFillEntry)
+	splitPanel := container.NewBorder(
+		container.NewVBox(widget.NewLabelWithStyle("分割结果", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator()),
+		container.NewVBox(widget.NewSeparator(), quickFillRow, addToLibBtn),
 		nil, nil,
-		previewArea,
+		container.NewVScroll(splitListBox),
 	)
 
-	libBtnRow1 := container.NewGridWithColumns(2, exportBtn, copyBtn)
-	libBtnRow2 := container.NewGridWithColumns(2, importBtn, clearLibBtn)
-
-	rightContent := container.NewBorder(
-		container.NewVBox(libHeaderLabel, widget.NewSeparator()),
-		container.NewVBox(widget.NewSeparator(), libBtnRow1, libBtnRow2),
+	libButtons := container.NewVBox(
+		widget.NewSeparator(),
+		container.NewGridWithColumns(2, exportBtn, copyBtn),
+		container.NewGridWithColumns(2, importBtn, clearLibBtn),
+	)
+	libPanel := container.NewBorder(
+		container.NewVBox(libHeaderLabel, libSearchEntry, widget.NewSeparator()),
+		libButtons,
 		nil, nil,
-		libListScroll,
+		container.NewVScroll(fontLibListBox),
 	)
+
+	rightSplit := container.NewVSplit(splitPanel, libPanel)
+	rightSplit.Offset = 0.55
 	rightBg := canvas.NewRectangle(color.Transparent)
-	rightBg.SetMinSize(fyne.NewSize(200, 0))
-	rightPanel := container.NewStack(rightBg, container.NewPadded(rightContent))
+	rightBg.SetMinSize(fyne.NewSize(320, 0))
+	rightPanel := container.NewStack(rightBg, container.NewPadded(rightSplit))
 
-	mainContent := container.NewBorder(nil, nil, leftPanel, rightPanel, centerArea)
+	mainContent := container.NewBorder(nil, nil, leftPanel, rightPanel, centerSplit)
+	rebuildLibList()
+	rebuildSplitList()
 	w.SetContent(mainContent)
 	w.Resize(fontLibWindowSize)
 	w.CenterOnScreen()
