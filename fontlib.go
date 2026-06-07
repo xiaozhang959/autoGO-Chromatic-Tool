@@ -742,6 +742,73 @@ func fontCharMatchKey(ch FontChar) string {
 	return fontBitmapMatchKey(decodeBitmapHex(strings.TrimSpace(ch.HexData), ch.Width, ch.Height))
 }
 
+func resizeBitmapNearest(bitmap [][]bool, width, height int) [][]bool {
+	if width <= 0 || height <= 0 || len(bitmap) == 0 || len(bitmap[0]) == 0 {
+		return nil
+	}
+	srcH := len(bitmap)
+	srcW := len(bitmap[0])
+	resized := make([][]bool, height)
+	for y := 0; y < height; y++ {
+		srcY := y * srcH / height
+		resized[y] = make([]bool, width)
+		for x := 0; x < width; x++ {
+			srcX := x * srcW / width
+			resized[y][x] = bitmap[srcY][srcX]
+		}
+	}
+	return resized
+}
+
+func bitmapSimilarity(a, b [][]bool) float64 {
+	a = trimBitmapBounds(a)
+	b = trimBitmapBounds(b)
+	if len(a) == 0 || len(a[0]) == 0 || len(b) == 0 || len(b[0]) == 0 {
+		return 0
+	}
+
+	height := len(a)
+	width := len(a[0])
+	if len(b) != height || len(b[0]) != width {
+		b = resizeBitmapNearest(b, width, height)
+		if len(b) == 0 || len(b[0]) == 0 {
+			return 0
+		}
+	}
+
+	total := width * height
+	same := 0
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			if a[y][x] == b[y][x] {
+				same++
+			}
+		}
+	}
+	return float64(same) / float64(total)
+}
+
+func bestFontCharMatch(cellBitmap [][]bool, fontLibChars []FontChar, minSimilarity float64) (string, float64, bool) {
+	bestScore := -1.0
+	bestName := ""
+	for _, ch := range fontLibChars {
+		if strings.TrimSpace(ch.Char) == "" {
+			continue
+		}
+		bitmap := ch.Bitmap
+		if len(bitmap) == 0 && ch.Width > 0 && ch.Height > 0 && strings.TrimSpace(ch.HexData) != "" {
+			bitmap = decodeBitmapHex(strings.TrimSpace(ch.HexData), ch.Width, ch.Height)
+		}
+		score := bitmapSimilarity(cellBitmap, bitmap)
+		if score <= 0 || score < minSimilarity || score <= bestScore {
+			continue
+		}
+		bestScore = score
+		bestName = ch.Char
+	}
+	return bestName, bestScore, bestName != ""
+}
+
 // ==================== 字库文件读写 ====================
 
 func parseFontLib(content string) []FontChar {
@@ -1724,6 +1791,8 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	var fontLibChars []FontChar
 	var referencePoints []fontColorReferencePoint
 	var suppressParamRefresh bool
+	var similarityMatchEnabled bool
+	var similarityThreshold = 0.80
 
 	fgColorEntry := widget.NewEntry()
 	fgColorEntry.SetText("000000")
@@ -1753,6 +1822,9 @@ func openFontLibWindow(parentWindow fyne.Window) {
 
 	quickFillEntry := widget.NewEntry()
 	quickFillEntry.SetPlaceHolder("快速填入: 主题壁纸")
+	similarityEntry := widget.NewEntry()
+	similarityEntry.SetText("0.80")
+	similarityEntry.SetPlaceHolder("0.80")
 
 	readInt := func(e *widget.Entry, def int) int {
 		v, err := strconv.Atoi(strings.TrimSpace(e.Text))
@@ -1760,6 +1832,17 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			return def
 		}
 		return v
+	}
+	readSimilarity := func() (float64, bool) {
+		raw := strings.TrimSpace(similarityEntry.Text)
+		if raw == "" {
+			raw = "0.80"
+		}
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || v < 0 || v > 1 {
+			return 0, false
+		}
+		return v, true
 	}
 
 	currentColorParam := func() string {
@@ -1961,8 +2044,17 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			charHexCache[i] = hexData
 			charWpCache[i] = wp
 			matchedName := libMatchNames[fontBitmapMatchKey(cell.Bitmap)]
+			matchScore := 1.0
+			matchBySimilarity := false
 			if matchedName != "" {
 				charMatchedLib[i] = true
+			} else if similarityMatchEnabled {
+				if name, score, ok := bestFontCharMatch(cell.Bitmap, fontLibChars, similarityThreshold); ok {
+					matchedName = name
+					matchScore = score
+					matchBySimilarity = true
+					charMatchedLib[i] = true
+				}
 			}
 
 			previewImg := canvas.NewImageFromImage(createCharPreview(cell.Bitmap, 2))
@@ -1974,6 +2066,9 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			statusText := "未匹配字库"
 			if matchedName != "" {
 				statusText = "已匹配: " + matchedName
+				if matchBySimilarity {
+					statusText = fmt.Sprintf("已匹配: %s (%.2f)", matchedName, matchScore)
+				}
 			}
 			statusLabel := widget.NewLabel(statusText)
 			nameEntry := widget.NewEntry()
@@ -2086,6 +2181,34 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		}
 	})
 	addToLibBtn.Importance = widget.HighImportance
+
+	matchLibBtn := widget.NewButtonWithIcon("匹配字库中的文字", theme.SearchIcon(), func() {
+		if len(charCells) == 0 {
+			dialog.ShowInformation("提示", "暂无分割结果，请先加载图片并刷新预览", w)
+			return
+		}
+		if len(fontLibChars) == 0 {
+			dialog.ShowInformation("提示", "字库为空，请先导入或添加字库字符", w)
+			return
+		}
+		v, ok := readSimilarity()
+		if !ok {
+			dialog.ShowInformation("提示", "最低相似度请输入 0.0 到 1.0 之间的数字，例如 0.80", w)
+			return
+		}
+		similarityThreshold = v
+		similarityMatchEnabled = true
+		rebuildSplitList()
+
+		matched := 0
+		for _, ok := range charMatchedLib {
+			if ok {
+				matched++
+			}
+		}
+		previewInfoLabel.SetText(fmt.Sprintf("字库匹配完成: 最低相似度 %.2f | 已匹配 %d/%d 个字符", similarityThreshold, matched, len(charCells)))
+	})
+	matchLibBtn.Importance = widget.HighImportance
 
 	getSelBtn := widget.NewButtonWithIcon("去裁剪选取", theme.VisibilityIcon(), func() {
 		if imageViewer == nil || imageViewer.image == nil {
@@ -2377,9 +2500,10 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	centerSplit.Offset = 0.52
 
 	quickFillRow := container.NewBorder(nil, nil, nil, quickFillBtn, quickFillEntry)
+	similarityRow := container.NewBorder(nil, nil, widget.NewLabel("最低相似度:"), nil, similarityEntry)
 	splitPanel := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("分割结果", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator()),
-		container.NewVBox(widget.NewSeparator(), quickFillRow, addToLibBtn),
+		container.NewVBox(widget.NewSeparator(), similarityRow, matchLibBtn, quickFillRow, addToLibBtn),
 		nil, nil,
 		container.NewVScroll(splitListBox),
 	)

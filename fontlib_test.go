@@ -211,6 +211,85 @@ func TestFontLibMatchKeyIgnoresWhitespacePadding(t *testing.T) {
 	}
 }
 
+func TestBitmapSimilarityExactMatchIgnoresWhitespacePadding(t *testing.T) {
+	compact := [][]bool{
+		{true, false, true},
+		{false, true, false},
+	}
+	padded := [][]bool{
+		{false, false, false, false, false},
+		{false, true, false, true, false},
+		{false, false, true, false, false},
+		{false, false, false, false, false},
+	}
+
+	got := bitmapSimilarity(compact, padded)
+	if got != 1 {
+		t.Fatalf("similarity = %v, want 1", got)
+	}
+}
+
+func TestBitmapSimilarityAllowsSmallDifference(t *testing.T) {
+	a := [][]bool{
+		{true, false},
+		{false, true},
+	}
+	b := [][]bool{
+		{true, false},
+		{true, true},
+	}
+
+	got := bitmapSimilarity(a, b)
+	if got != 0.75 {
+		t.Fatalf("similarity = %v, want 0.75", got)
+	}
+}
+
+func TestBitmapSimilarityResizesTemplate(t *testing.T) {
+	cell := [][]bool{
+		{true, true, false, false},
+		{true, true, false, false},
+		{false, false, true, true},
+		{false, false, true, true},
+	}
+	template := [][]bool{
+		{true, false},
+		{false, true},
+	}
+
+	got := bitmapSimilarity(cell, template)
+	if got != 1 {
+		t.Fatalf("similarity = %v, want 1", got)
+	}
+}
+
+func TestBestFontCharMatchUsesThreshold(t *testing.T) {
+	cell := [][]bool{
+		{true, false},
+		{false, true},
+	}
+	near := [][]bool{
+		{true, false},
+		{true, true},
+	}
+	nearHex, nearWhite := encodeBitmapHex(near)
+	chars := []FontChar{{
+		Char:        "近",
+		Width:       len(near[0]),
+		Height:      len(near),
+		HexData:     strings.ToUpper(nearHex),
+		WhitePixels: nearWhite,
+	}}
+
+	name, score, ok := bestFontCharMatch(cell, chars, 0.7)
+	if !ok || name != "近" || score != 0.75 {
+		t.Fatalf("match = %q %.2f %v, want 近 0.75 true", name, score, ok)
+	}
+	if _, _, ok := bestFontCharMatch(cell, chars, 0.8); ok {
+		t.Fatal("expected match below threshold to be rejected")
+	}
+}
+
 func TestFontImageViewerImagePositionRejectsOutsideDisplayedImage(t *testing.T) {
 	img := newSolidFontTestImage(4, 3, color.NRGBA{255, 255, 255, 255})
 	viewer := newFontImageViewer()
