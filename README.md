@@ -39,8 +39,30 @@
 
 ## 运行
 
+普通启动（不启用 OpenCV 找图后端）：
+
 ```bash
 go run .
+```
+
+OpenCV 找图测试必须启用 `opencv_cgo`，不能只用 `go run .`。
+
+Windows：
+
+```powershell
+$opencvRoot = Resolve-Path ".\third_party\opencv\windows-amd64"
+$env:PATH = "C:\msys64\ucrt64\bin;$opencvRoot\bin;$env:PATH"
+$env:CGO_LDFLAGS = "-L$opencvRoot\lib"
+go run -tags opencv_cgo .
+```
+
+macOS：
+
+```bash
+brew install opencv pkg-config
+export CGO_CXXFLAGS="$(pkg-config --cflags opencv4)"
+export CGO_LDFLAGS="$(pkg-config --libs opencv4)"
+go run -tags opencv_cgo .
 ```
 
 涉及设备截图、节点抓取和 App 信息查询的功能需要本机可用 `adb`，并已连接 Android 设备。
