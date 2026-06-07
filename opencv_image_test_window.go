@@ -129,7 +129,7 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 		}
 		rect, ok := currentOpenCVSelectedRect()
 		if !ok {
-			dialog.ShowInformation("提示", "请先在主窗口图像上拖拽框选模板区域。", w)
+			dialog.ShowInformation("提示", "请先在主窗口图像上使用“范围”工具框选区域", w)
 			return
 		}
 		cropTemplateFromRect(imageViewer.image, rect)
