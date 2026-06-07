@@ -51,6 +51,35 @@ func TestBuildOpenCVImageTestCodeUsesNewDocSignature(t *testing.T) {
 	}
 }
 
+func TestOpenCVEffectiveMatchThreshold(t *testing.T) {
+	if got := openCVEffectiveMatchThreshold(0.6); got != 0.8 {
+		t.Fatalf("openCVEffectiveMatchThreshold(0.6) = %v, want 0.8", got)
+	}
+	if got := openCVEffectiveMatchThreshold(0); got != 0.9 {
+		t.Fatalf("openCVEffectiveMatchThreshold(0) = %v, want 0.9", got)
+	}
+}
+
+func TestFormatOpenCVImageTestResultShowsThreshold(t *testing.T) {
+	result := openCVMatchResult{
+		BestScore:    0.791695,
+		TemplateSize: image.Pt(187, 219),
+		Backend:      "OpenCV CGO",
+	}
+
+	text := formatOpenCVImageTestResult(openCVImageFuncFindImage, result, 0.6)
+	for _, want := range []string{
+		"sim: 0.600000",
+		"threshold: 0.800000 (0.5 + sim * 0.5)",
+		"bestScore: 0.791695",
+		"result: -1,-1",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("formatted result missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestOpenCVOptionsFromEntriesParsesCommaRange(t *testing.T) {
 	rangeEntry := widget.NewEntry()
 	rangeEntry.SetText("10, 20, 30, 40")
