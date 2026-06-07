@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -7095,95 +7096,117 @@ func main() {
 	importImage := func() {
 		// 使用系统原生文件打开对话框
 		go func() {
-			filePath, err := nativedialog.File().
-				Filter("图片文件", "png", "jpg", "jpeg", "bmp").
-				Title("选择图片文件").
-				Load()
-
+			filePaths, err := openImageFiles()
 			if err != nil {
-				// 用户取消或发生错误
-				return
-			}
-
-			// 读取文件内容
-			data, err := ioutil.ReadFile(filePath)
-			if err != nil {
+				if errors.Is(err, nativedialog.ErrCancelled) {
+					return
+				}
 				fyne.Do(func() {
-					dialog.ShowError(fmt.Errorf("读取文件失败: %v", err), w)
+					dialog.ShowError(fmt.Errorf("选择文件失败: %v", err), w)
 				})
 				return
 			}
-
-			// 根据文件扩展名解码图像
-			var img image.Image
-			ext := strings.ToLower(filepath.Ext(filePath))
-
-			switch ext {
-			case ".png":
-				img, err = png.Decode(bytes.NewReader(data))
-			case ".jpg", ".jpeg":
-				img, err = jpeg.Decode(bytes.NewReader(data))
-			case ".bmp":
-				img, err = bmp.Decode(bytes.NewReader(data))
-			default:
-				// 尝试自动检测格式
-				img, _, err = image.Decode(bytes.NewReader(data))
-			}
-
-			if err != nil {
-				fyne.Do(func() {
-					dialog.ShowError(fmt.Errorf("解码图像失败: %v", err), w)
-				})
+			if len(filePaths) == 0 {
 				return
 			}
 
-			// 转换为NRGBA格式
-			img = convertToNRGBA(img)
+			type importedImage struct {
+				filePath string
+				img      image.Image
+			}
+
+			importedImages := make([]importedImage, 0, len(filePaths))
+			failed := make([]string, 0)
+
+			for _, filePath := range filePaths {
+				// 读取文件内容
+				data, err := ioutil.ReadFile(filePath)
+				if err != nil {
+					failed = append(failed, fmt.Sprintf("%s: 读取文件失败: %v", filePath, err))
+					continue
+				}
+
+				// 根据文件扩展名解码图像
+				var img image.Image
+				ext := strings.ToLower(filepath.Ext(filePath))
+
+				switch ext {
+				case ".png":
+					img, err = png.Decode(bytes.NewReader(data))
+				case ".jpg", ".jpeg":
+					img, err = jpeg.Decode(bytes.NewReader(data))
+				case ".bmp":
+					img, err = bmp.Decode(bytes.NewReader(data))
+				default:
+					// 尝试自动检测格式
+					img, _, err = image.Decode(bytes.NewReader(data))
+				}
+
+				if err != nil {
+					failed = append(failed, fmt.Sprintf("%s: 解码图像失败: %v", filePath, err))
+					continue
+				}
+
+				// 转换为NRGBA格式
+				importedImages = append(importedImages, importedImage{
+					filePath: filePath,
+					img:      convertToNRGBA(img),
+				})
+			}
+
+			if len(importedImages) == 0 {
+				fyne.Do(func() {
+					dialog.ShowError(fmt.Errorf("图片加载失败:\n%s", strings.Join(failed, "\n")), w)
+				})
+				return
+			}
 
 			// 在主线程中更新UI
 			fyne.Do(func() {
 				// 保存当前标签页的数据
 				saveCurrentTabData()
 
-				// 创建新的图像查看器和标签页
-				newImageViewer := NewImageViewer()
-				newMagnifier := NewMagnifierWidget()
+				for _, imported := range importedImages {
+					// 创建新的图像查看器和标签页
+					newImageViewer := NewImageViewer()
+					newMagnifier := NewMagnifierWidget()
 
-				newImgContainer := container.New(&topLeftLayout{}, newImageViewer)
-				newScrollContainer := container.NewScroll(newImgContainer)
+					newImgContainer := container.New(&topLeftLayout{}, newImageViewer)
+					newScrollContainer := container.NewScroll(newImgContainer)
 
-				newImageViewer.scrollContainer = newScrollContainer
-				newImageViewer.magnifier = newMagnifier
-				configureImageViewer(newImageViewer)
-				newImageViewer.SetImage(img)
+					newImageViewer.scrollContainer = newScrollContainer
+					newImageViewer.magnifier = newMagnifier
+					configureImageViewer(newImageViewer)
+					newImageViewer.SetImage(imported.img)
 
-				// 创建新标签页
-				newScrollWithMagnifier := container.NewStack(newScrollContainer, newMagnifier)
-				tabCounter++
+					// 创建新标签页
+					newScrollWithMagnifier := container.NewStack(newScrollContainer, newMagnifier)
+					tabCounter++
 
-				// 使用文件名作为标签名称
-				tabName := filepath.Base(filePath)
-				newTab := container.NewTabItem(tabName, newScrollWithMagnifier)
+					// 使用文件名作为标签名称
+					tabName := filepath.Base(imported.filePath)
+					newTab := container.NewTabItem(tabName, newScrollWithMagnifier)
 
-				// 初始化新标签页的数据
-				tabDataMap[newTab] = &TabData{
-					colorPoints:        make([]ColorPoint, 0),
-					markRects:          make([]MarkRect, 0),
-					manualRectSelected: false,
-					imageViewer:        newImageViewer,
-					generatedCode:      "",
+					// 初始化新标签页的数据
+					tabDataMap[newTab] = &TabData{
+						colorPoints:        make([]ColorPoint, 0),
+						markRects:          make([]MarkRect, 0),
+						manualRectSelected: false,
+						imageViewer:        newImageViewer,
+						generatedCode:      "",
+					}
+
+					tabs.Append(newTab)
+					tabs.Select(newTab)
+
+					// 更新当前标签页引用
+					currentTab = newTab
+
+					// 更新当前imageViewer引用
+					imageViewer = newImageViewer
+					fitImageToView(newImageViewer)
+					w.Canvas().Focus(newImageViewer)
 				}
-
-				tabs.Append(newTab)
-				tabs.Select(newTab)
-
-				// 更新当前标签页引用
-				currentTab = newTab
-
-				// 更新当前imageViewer引用
-				imageViewer = newImageViewer
-				fitImageToView(newImageViewer)
-				w.Canvas().Focus(newImageViewer)
 
 				// 清空颜色点列表和矩形区域
 				colorPoints = make([]ColorPoint, 0)
@@ -7197,6 +7220,10 @@ func main() {
 				// 刷新表格
 				if refreshColorList != nil {
 					refreshColorList()
+				}
+
+				if len(failed) > 0 {
+					dialog.ShowError(fmt.Errorf("部分图片加载失败:\n%s", strings.Join(failed, "\n")), w)
 				}
 			})
 		}()
