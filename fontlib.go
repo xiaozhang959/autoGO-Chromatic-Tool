@@ -1607,28 +1607,25 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	legend := widget.NewLabel("绿色 = 文字前景，会入库\n黑色 = 背景，会忽略")
 	legend.Wrapping = fyne.TextWrapWord
 
+	fgColorRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("文字色:"), nil, fgColorEntry), 42)
+	fgToleranceRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("偏色容差:"), nil, fgToleranceEntry), 42)
+	colGapRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("列间距(像素):"), nil, colGapEntry), 42)
+	rowGapRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("行间距(像素):"), nil, rowGapEntry), 42)
+
 	leftPanel := container.New(&fixedWidthLayout{width: 190, padding: 10, verticalSpacing: 5},
-		widget.NewLabelWithStyle("来源", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		getSelBtn,
 		loadImageBtn,
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("智能操作", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		autoPreprocessBtn,
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("手动操作", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		newFixedHeightContainer(container.NewGridWithColumns(2, cropBtn, refreshBtn), 44),
 		newFixedHeightContainer(container.NewGridWithColumns(2, resetZoomBtn, clearSelectionBtn), 44),
 		resetParamsBtn,
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("参数", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel("文字色:"),
-		fgColorEntry,
-		widget.NewLabel("偏色容差:"),
-		fgToleranceEntry,
-		widget.NewLabel("列间距(像素):"),
-		colGapEntry,
-		widget.NewLabel("行间距(像素):"),
-		rowGapEntry,
+		fgColorRow,
+		fgToleranceRow,
+		colGapRow,
+		rowGapRow,
 		widget.NewSeparator(),
 		legend,
 		layout.NewSpacer(),
