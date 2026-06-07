@@ -1742,7 +1742,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	previewInfoLabel.Wrapping = fyne.TextWrapWord
 
 	referenceHeaderLabel := widget.NewLabel("自动参考点 0/5")
-	referenceHintLabel := widget.NewLabel("右键原图添加文字色参考点")
+	referenceHintLabel := widget.NewLabel("右键原图添加参考点")
 	referenceHintLabel.Wrapping = fyne.TextWrapWord
 
 	splitListBox := container.NewVBox()
@@ -1805,9 +1805,9 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			referenceHintLabel.SetText(fmt.Sprintf("#%s @ %d,%d，点击删除", fontColorHex(point.Color), point.Point.X, point.Point.Y))
 		}, func() {
 			if len(referencePoints) == 0 {
-				referenceHintLabel.SetText("右键原图添加文字色参考点")
+				referenceHintLabel.SetText("右键原图添加参考点")
 			} else {
-				referenceHintLabel.SetText("悬停圆点查看坐标，点击删除")
+				referenceHintLabel.SetText("悬停看坐标，点击删除")
 			}
 		})
 	}
@@ -1878,9 +1878,9 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			}
 		}
 		if len(referencePoints) == 0 {
-			referenceHintLabel.SetText("右键原图添加文字色参考点")
+			referenceHintLabel.SetText("右键原图添加参考点")
 		} else {
-			referenceHintLabel.SetText("悬停圆点查看坐标，点击删除")
+			referenceHintLabel.SetText("悬停看坐标，点击删除")
 		}
 	}
 	clearReferencePoints = func() {
@@ -2342,7 +2342,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		referenceHeaderLabel,
 		referenceDotRow,
 		referenceHintLabel,
-	), 76)
+	), 96)
 
 	leftPanel := container.New(&fixedWidthLayout{width: 190, padding: 10, verticalSpacing: 5},
 		getSelBtn,
