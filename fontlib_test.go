@@ -152,3 +152,23 @@ func TestFontImageViewerImagePositionRejectsOutsideDisplayedImage(t *testing.T) 
 		t.Fatal("expected y at displayed image edge to be rejected")
 	}
 }
+
+func TestFontSourceInitialZoomMakesSmallImagesVisible(t *testing.T) {
+	zoom := fontSourceInitialZoom(image.Rect(0, 0, 131, 66))
+	if zoom <= 1 {
+		t.Fatalf("small source zoom = %v, want > 1", zoom)
+	}
+	if zoom > maxImageZoom {
+		t.Fatalf("small source zoom = %v, exceeds max %v", zoom, maxImageZoom)
+	}
+	if float32(131)*zoom < fontSourceInitialDisplayWidth-0.5 {
+		t.Fatalf("scaled width = %v, want at least %d", float32(131)*zoom, fontSourceInitialDisplayWidth)
+	}
+}
+
+func TestFontSourceInitialZoomKeepsLargeImagesAtOne(t *testing.T) {
+	zoom := fontSourceInitialZoom(image.Rect(0, 0, 800, 300))
+	if zoom != 1 {
+		t.Fatalf("large source zoom = %v, want 1", zoom)
+	}
+}

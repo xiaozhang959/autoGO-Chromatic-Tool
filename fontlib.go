@@ -20,7 +20,11 @@ import (
 	nativedialog "github.com/sqweek/dialog"
 )
 
-const dotCellSize = 8
+const (
+	dotCellSize                    = 8
+	fontSourceInitialDisplayWidth  = 360
+	fontSourceInitialDisplayHeight = 180
+)
 
 type FontChar struct {
 	Char        string
@@ -849,6 +853,28 @@ func (v *fontImageViewer) SetMagnifier(magnifier *MagnifierWidget) {
 	v.magnifier = magnifier
 }
 
+func fontSourceInitialZoom(bounds image.Rectangle) float32 {
+	if bounds.Empty() || bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		return 1
+	}
+	if bounds.Dx() >= fontSourceInitialDisplayWidth || bounds.Dy() >= fontSourceInitialDisplayHeight {
+		return 1
+	}
+	zoomX := float32(fontSourceInitialDisplayWidth) / float32(bounds.Dx())
+	zoomY := float32(fontSourceInitialDisplayHeight) / float32(bounds.Dy())
+	zoom := zoomX
+	if zoomY > zoom {
+		zoom = zoomY
+	}
+	if zoom < 1 {
+		return 1
+	}
+	if zoom > maxImageZoom {
+		return maxImageZoom
+	}
+	return zoom
+}
+
 func (v *fontImageViewer) SetImage(img image.Image) {
 	if v.magnifier != nil {
 		v.magnifier.Hide()
@@ -1516,6 +1542,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		}
 		regionImg = img
 		sourceViewer.SetImage(regionImg)
+		sourceViewer.SetZoom(fontSourceInitialZoom(regionImg.Bounds()))
 		updateSourceInfo()
 		refreshPreview()
 	}
