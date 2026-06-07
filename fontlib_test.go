@@ -101,27 +101,40 @@ func TestAutoPreprocessFontImageClampsBoundaryCrop(t *testing.T) {
 	}
 }
 
-func TestEstimateFontColorFromReferencesPrefersReferencedTextColor(t *testing.T) {
-	img := newSolidFontTestImage(40, 20, color.NRGBA{245, 245, 245, 255})
-	fillFontTestRect(img, image.Rect(1, 1, 18, 15), color.NRGBA{0, 0, 0, 255})
-	target := color.NRGBA{48, 90, 140, 255}
-	fillFontTestRect(img, image.Rect(25, 6, 31, 13), target)
+func TestEstimateFontColorFromReferencePointsCombinesMultipleSamples(t *testing.T) {
+	bg := color.NRGBA{245, 245, 245, 255}
+	img := newSolidFontTestImage(48, 24, bg)
+	fillFontTestRect(img, image.Rect(1, 1, 22, 18), color.NRGBA{0, 0, 0, 255})
+	shadeA := color.NRGBA{48, 90, 140, 255}
+	shadeB := color.NRGBA{86, 120, 166, 255}
+	shadeC := color.NRGBA{62, 105, 152, 255}
+	fillFontTestRect(img, image.Rect(28, 4, 34, 10), shadeA)
+	fillFontTestRect(img, image.Rect(36, 6, 42, 12), shadeB)
+	fillFontTestRect(img, image.Rect(31, 14, 39, 19), shadeC)
 
 	_, automaticForeground, ok := estimateFontForegroundColor(img)
 	if !ok {
 		t.Fatal("automatic foreground estimation failed")
 	}
-	if fontColorDistanceSq(automaticForeground, target) <= 20*20 {
+	if fontColorDistanceSq(automaticForeground, shadeA) <= 20*20 {
 		t.Fatalf("test setup invalid: automatic foreground already selected target color %v", automaticForeground)
 	}
 
-	_, referencedForeground, tolerance, ok := estimateFontColorFromReferences(img, []color.NRGBA{target})
+	_, referencedForeground, tolerance, ok := estimateFontColorFromReferencePoints(img, []fontColorReferencePoint{
+		{Point: image.Pt(29, 5), Color: shadeA},
+		{Point: image.Pt(37, 7), Color: shadeB},
+		{Point: image.Pt(32, 15), Color: shadeC},
+	})
 	if !ok {
-		t.Fatal("reference color estimation failed")
+		t.Fatal("reference point color estimation failed")
 	}
-	assertColorClose(t, referencedForeground, target, 1)
-	if tolerance.R == 0 || tolerance.G == 0 || tolerance.B == 0 {
-		t.Fatalf("invalid tolerance from references: %v", tolerance)
+	for _, sample := range []color.NRGBA{shadeA, shadeB, shadeC} {
+		if !isColorMatch(sample, referencedForeground, tolerance) {
+			t.Fatalf("sample %v not covered by foreground %v tolerance %v", sample, referencedForeground, tolerance)
+		}
+	}
+	if isColorMatch(bg, referencedForeground, tolerance) {
+		t.Fatalf("background %v should not match foreground %v tolerance %v", bg, referencedForeground, tolerance)
 	}
 }
 

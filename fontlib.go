@@ -215,20 +215,6 @@ func estimateFontTolerance(src image.Image, foreground, background color.NRGBA) 
 	}
 }
 
-func averageFontReferenceColor(referenceColors []color.NRGBA) (color.NRGBA, bool) {
-	if len(referenceColors) == 0 {
-		return color.NRGBA{}, false
-	}
-	sumR, sumG, sumB := 0, 0, 0
-	for _, c := range referenceColors {
-		sumR += int(c.R)
-		sumG += int(c.G)
-		sumB += int(c.B)
-	}
-	count := len(referenceColors)
-	return color.NRGBA{uint8(sumR / count), uint8(sumG / count), uint8(sumB / count), 255}, true
-}
-
 func estimateFontBackgroundColor(src image.Image) (color.NRGBA, bool) {
 	if src == nil || src.Bounds().Empty() {
 		return color.NRGBA{}, false
@@ -262,20 +248,126 @@ func estimateFontBackgroundColor(src image.Image) (color.NRGBA, bool) {
 	return fontBucketAverage(bgBucket), true
 }
 
-func maxReferenceColorChannelDiff(c color.NRGBA, referenceColors []color.NRGBA) int {
-	best := 256
+func fontColorMaxChannelDiff(a, b color.NRGBA) int {
+	return max(fontAbsDiffInt(a.R, b.R), max(fontAbsDiffInt(a.G, b.G), fontAbsDiffInt(a.B, b.B)))
+}
+
+func nearestFontReferenceColorDistance(c color.NRGBA, referenceColors []color.NRGBA) int {
+	best := -1
 	for _, ref := range referenceColors {
-		diff := max(fontAbsDiffInt(c.R, ref.R), max(fontAbsDiffInt(c.G, ref.G), fontAbsDiffInt(c.B, ref.B)))
-		if diff < best {
-			best = diff
+		distance := fontColorDistanceSq(c, ref)
+		if best < 0 || distance < best {
+			best = distance
 		}
 	}
 	return best
 }
 
-func estimateFontColorFromReferences(src image.Image, referenceColors []color.NRGBA) (background, foreground, tolerance color.NRGBA, ok bool) {
-	foreground, ok = averageFontReferenceColor(referenceColors)
-	if !ok {
+func collectFontReferenceSamples(src image.Image, referencePoints []fontColorReferencePoint, background color.NRGBA) []color.NRGBA {
+	if src == nil || src.Bounds().Empty() || len(referencePoints) == 0 {
+		return nil
+	}
+	bounds := src.Bounds()
+	var centers []color.NRGBA
+	for _, ref := range referencePoints {
+		if !ref.Point.In(bounds) {
+			continue
+		}
+		centers = append(centers, imageColorNRGBA(src, ref.Point.X, ref.Point.Y))
+	}
+	if len(centers) == 0 {
+		return nil
+	}
+
+	samples := append([]color.NRGBA{}, centers...)
+	seen := make(map[image.Point]bool)
+	for _, ref := range referencePoints {
+		if !ref.Point.In(bounds) {
+			continue
+		}
+		center := imageColorNRGBA(src, ref.Point.X, ref.Point.Y)
+		for dy := -1; dy <= 1; dy++ {
+			for dx := -1; dx <= 1; dx++ {
+				p := image.Pt(ref.Point.X+dx, ref.Point.Y+dy)
+				if !p.In(bounds) || seen[p] {
+					continue
+				}
+				seen[p] = true
+				c := imageColorNRGBA(src, p.X, p.Y)
+				if p == ref.Point {
+					continue
+				}
+				if fontColorMaxChannelDiff(c, center) > 72 {
+					continue
+				}
+				if nearestFontReferenceColorDistance(c, centers) >= fontColorDistanceSq(c, background) {
+					continue
+				}
+				samples = append(samples, c)
+			}
+		}
+	}
+	return samples
+}
+
+func estimateFontRangeFromSamples(samples []color.NRGBA) (foreground, tolerance color.NRGBA, ok bool) {
+	if len(samples) == 0 {
+		return color.NRGBA{}, color.NRGBA{}, false
+	}
+	minR, minG, minB := 255, 255, 255
+	maxR, maxG, maxB := 0, 0, 0
+	for _, c := range samples {
+		minR = min(minR, int(c.R))
+		minG = min(minG, int(c.G))
+		minB = min(minB, int(c.B))
+		maxR = max(maxR, int(c.R))
+		maxG = max(maxG, int(c.G))
+		maxB = max(maxB, int(c.B))
+	}
+	fgR := (minR + maxR) / 2
+	fgG := (minG + maxG) / 2
+	fgB := (minB + maxB) / 2
+	return color.NRGBA{uint8(fgR), uint8(fgG), uint8(fgB), 255}, color.NRGBA{
+		R: fontClampByte((maxR-minR)/2+8, 8, 96),
+		G: fontClampByte((maxG-minG)/2+8, 8, 96),
+		B: fontClampByte((maxB-minB)/2+8, 8, 96),
+		A: 255,
+	}, true
+}
+
+func requiredFontTolerance(foreground color.NRGBA, samples []color.NRGBA) color.NRGBA {
+	maxR, maxG, maxB := 0, 0, 0
+	for _, c := range samples {
+		maxR = max(maxR, fontAbsDiffInt(c.R, foreground.R))
+		maxG = max(maxG, fontAbsDiffInt(c.G, foreground.G))
+		maxB = max(maxB, fontAbsDiffInt(c.B, foreground.B))
+	}
+	return color.NRGBA{
+		R: fontClampByte(maxR+2, 0, 255),
+		G: fontClampByte(maxG+2, 0, 255),
+		B: fontClampByte(maxB+2, 0, 255),
+		A: 255,
+	}
+}
+
+func capFontToleranceAgainstBackground(foreground, background, tolerance, required color.NRGBA) color.NRGBA {
+	capChannel := func(diff, current, need int) uint8 {
+		capValue := max(need, diff-8)
+		if diff <= 8 {
+			capValue = need
+		}
+		return fontClampByte(min(current, capValue), need, 96)
+	}
+	return color.NRGBA{
+		R: capChannel(fontAbsDiffInt(foreground.R, background.R), int(tolerance.R), int(required.R)),
+		G: capChannel(fontAbsDiffInt(foreground.G, background.G), int(tolerance.G), int(required.G)),
+		B: capChannel(fontAbsDiffInt(foreground.B, background.B), int(tolerance.B), int(required.B)),
+		A: 255,
+	}
+}
+
+func estimateFontColorFromReferencePoints(src image.Image, referencePoints []fontColorReferencePoint) (background, foreground, tolerance color.NRGBA, ok bool) {
+	if len(referencePoints) == 0 {
 		return color.NRGBA{}, color.NRGBA{}, color.NRGBA{}, false
 	}
 	background, ok = estimateFontBackgroundColor(src)
@@ -283,50 +375,21 @@ func estimateFontColorFromReferences(src image.Image, referenceColors []color.NR
 		return color.NRGBA{}, color.NRGBA{}, color.NRGBA{}, false
 	}
 
-	maxR, maxG, maxB := 0, 0, 0
-	for _, ref := range referenceColors {
-		maxR = max(maxR, fontAbsDiffInt(ref.R, foreground.R))
-		maxG = max(maxG, fontAbsDiffInt(ref.G, foreground.G))
-		maxB = max(maxB, fontAbsDiffInt(ref.B, foreground.B))
+	samples := collectFontReferenceSamples(src, referencePoints, background)
+	foreground, tolerance, ok = estimateFontRangeFromSamples(samples)
+	if !ok {
+		return color.NRGBA{}, color.NRGBA{}, color.NRGBA{}, false
 	}
 
-	matched := 0
-	channelWindow := max(18, max(maxR, max(maxG, maxB))+18)
-	if len(referenceColors) > 1 {
-		channelWindow += 8
-	}
-	channelWindow = min(channelWindow, 64)
-
-	bounds := src.Bounds()
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			c := imageColorNRGBA(src, x, y)
-			if maxReferenceColorChannelDiff(c, referenceColors) > channelWindow {
-				continue
-			}
-			if fontColorDistanceSq(c, background) <= fontColorDistanceSq(c, foreground) {
-				continue
-			}
-			maxR = max(maxR, fontAbsDiffInt(c.R, foreground.R))
-			maxG = max(maxG, fontAbsDiffInt(c.G, foreground.G))
-			maxB = max(maxB, fontAbsDiffInt(c.B, foreground.B))
-			matched++
+	var centers []color.NRGBA
+	for _, ref := range referencePoints {
+		if ref.Point.In(src.Bounds()) {
+			centers = append(centers, imageColorNRGBA(src, ref.Point.X, ref.Point.Y))
 		}
 	}
-	if matched == 0 {
-		for _, ref := range referenceColors {
-			maxR = max(maxR, fontAbsDiffInt(ref.R, foreground.R))
-			maxG = max(maxG, fontAbsDiffInt(ref.G, foreground.G))
-			maxB = max(maxB, fontAbsDiffInt(ref.B, foreground.B))
-		}
-	}
-
-	return background, foreground, color.NRGBA{
-		R: fontClampByte(maxR+8, 8, 80),
-		G: fontClampByte(maxG+8, 8, 80),
-		B: fontClampByte(maxB+8, 8, 80),
-		A: 255,
-	}, true
+	required := requiredFontTolerance(foreground, centers)
+	tolerance = capFontToleranceAgainstBackground(foreground, background, tolerance, required)
+	return background, foreground, tolerance, true
 }
 
 func fontForegroundBounds(binaryImg *image.NRGBA) (image.Rectangle, int, bool) {
@@ -2086,15 +2149,16 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			analysisRect = selected
 		}
 		analysisImg := cropImage(regionImg, analysisRect)
-		referenceColors := make([]color.NRGBA, 0, len(referencePoints))
+		localReferencePoints := make([]fontColorReferencePoint, 0, len(referencePoints))
 		for _, point := range referencePoints {
 			if point.Point.In(analysisRect) {
-				referenceColors = append(referenceColors, point.Color)
+				localPoint := image.Pt(point.Point.X-analysisRect.Min.X, point.Point.Y-analysisRect.Min.Y)
+				localReferencePoints = append(localReferencePoints, fontColorReferencePoint{Point: localPoint, Color: point.Color})
 			}
 		}
 
-		usedReferences := len(referenceColors)
-		background, foreground, tolerance, ok := estimateFontColorFromReferences(analysisImg, referenceColors)
+		usedReferences := len(localReferencePoints)
+		background, foreground, tolerance, ok := estimateFontColorFromReferencePoints(analysisImg, localReferencePoints)
 		if !ok {
 			background, foreground, ok = estimateFontForegroundColor(analysisImg)
 			if !ok {
