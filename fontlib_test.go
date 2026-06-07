@@ -101,6 +101,30 @@ func TestAutoPreprocessFontImageClampsBoundaryCrop(t *testing.T) {
 	}
 }
 
+func TestEstimateFontColorFromReferencesPrefersReferencedTextColor(t *testing.T) {
+	img := newSolidFontTestImage(40, 20, color.NRGBA{245, 245, 245, 255})
+	fillFontTestRect(img, image.Rect(1, 1, 18, 15), color.NRGBA{0, 0, 0, 255})
+	target := color.NRGBA{48, 90, 140, 255}
+	fillFontTestRect(img, image.Rect(25, 6, 31, 13), target)
+
+	_, automaticForeground, ok := estimateFontForegroundColor(img)
+	if !ok {
+		t.Fatal("automatic foreground estimation failed")
+	}
+	if fontColorDistanceSq(automaticForeground, target) <= 20*20 {
+		t.Fatalf("test setup invalid: automatic foreground already selected target color %v", automaticForeground)
+	}
+
+	_, referencedForeground, tolerance, ok := estimateFontColorFromReferences(img, []color.NRGBA{target})
+	if !ok {
+		t.Fatal("reference color estimation failed")
+	}
+	assertColorClose(t, referencedForeground, target, 1)
+	if tolerance.R == 0 || tolerance.G == 0 || tolerance.B == 0 {
+		t.Fatalf("invalid tolerance from references: %v", tolerance)
+	}
+}
+
 func TestFindCharacterBBoxesRespondsToGapParams(t *testing.T) {
 	img := newSolidFontTestImage(12, 8, color.NRGBA{255, 255, 255, 255})
 	fillFontTestRect(img, image.Rect(1, 2, 4, 6), color.NRGBA{0, 0, 0, 255})

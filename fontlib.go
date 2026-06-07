@@ -58,6 +58,11 @@ type fontColorBucket struct {
 	sumB  int
 }
 
+type fontColorReferencePoint struct {
+	Point image.Point
+	Color color.NRGBA
+}
+
 func fontColorHex(c color.NRGBA) string {
 	return fmt.Sprintf("%02X%02X%02X", c.R, c.G, c.B)
 }
@@ -208,6 +213,120 @@ func estimateFontTolerance(src image.Image, foreground, background color.NRGBA) 
 		B: fontClampByte(maxB+8, 16, 80),
 		A: 255,
 	}
+}
+
+func averageFontReferenceColor(referenceColors []color.NRGBA) (color.NRGBA, bool) {
+	if len(referenceColors) == 0 {
+		return color.NRGBA{}, false
+	}
+	sumR, sumG, sumB := 0, 0, 0
+	for _, c := range referenceColors {
+		sumR += int(c.R)
+		sumG += int(c.G)
+		sumB += int(c.B)
+	}
+	count := len(referenceColors)
+	return color.NRGBA{uint8(sumR / count), uint8(sumG / count), uint8(sumB / count), 255}, true
+}
+
+func estimateFontBackgroundColor(src image.Image) (color.NRGBA, bool) {
+	if src == nil || src.Bounds().Empty() {
+		return color.NRGBA{}, false
+	}
+	bounds := src.Bounds()
+	buckets := make(map[int]*fontColorBucket)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := imageColorNRGBA(src, x, y)
+			key := fontColorBucketKey(c)
+			bucket := buckets[key]
+			if bucket == nil {
+				bucket = &fontColorBucket{}
+				buckets[key] = bucket
+			}
+			bucket.count++
+			bucket.sumR += int(c.R)
+			bucket.sumG += int(c.G)
+			bucket.sumB += int(c.B)
+		}
+	}
+	var bgBucket *fontColorBucket
+	for _, bucket := range buckets {
+		if bgBucket == nil || bucket.count > bgBucket.count {
+			bgBucket = bucket
+		}
+	}
+	if bgBucket == nil {
+		return color.NRGBA{}, false
+	}
+	return fontBucketAverage(bgBucket), true
+}
+
+func maxReferenceColorChannelDiff(c color.NRGBA, referenceColors []color.NRGBA) int {
+	best := 256
+	for _, ref := range referenceColors {
+		diff := max(fontAbsDiffInt(c.R, ref.R), max(fontAbsDiffInt(c.G, ref.G), fontAbsDiffInt(c.B, ref.B)))
+		if diff < best {
+			best = diff
+		}
+	}
+	return best
+}
+
+func estimateFontColorFromReferences(src image.Image, referenceColors []color.NRGBA) (background, foreground, tolerance color.NRGBA, ok bool) {
+	foreground, ok = averageFontReferenceColor(referenceColors)
+	if !ok {
+		return color.NRGBA{}, color.NRGBA{}, color.NRGBA{}, false
+	}
+	background, ok = estimateFontBackgroundColor(src)
+	if !ok {
+		return color.NRGBA{}, color.NRGBA{}, color.NRGBA{}, false
+	}
+
+	maxR, maxG, maxB := 0, 0, 0
+	for _, ref := range referenceColors {
+		maxR = max(maxR, fontAbsDiffInt(ref.R, foreground.R))
+		maxG = max(maxG, fontAbsDiffInt(ref.G, foreground.G))
+		maxB = max(maxB, fontAbsDiffInt(ref.B, foreground.B))
+	}
+
+	matched := 0
+	channelWindow := max(18, max(maxR, max(maxG, maxB))+18)
+	if len(referenceColors) > 1 {
+		channelWindow += 8
+	}
+	channelWindow = min(channelWindow, 64)
+
+	bounds := src.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := imageColorNRGBA(src, x, y)
+			if maxReferenceColorChannelDiff(c, referenceColors) > channelWindow {
+				continue
+			}
+			if fontColorDistanceSq(c, background) <= fontColorDistanceSq(c, foreground) {
+				continue
+			}
+			maxR = max(maxR, fontAbsDiffInt(c.R, foreground.R))
+			maxG = max(maxG, fontAbsDiffInt(c.G, foreground.G))
+			maxB = max(maxB, fontAbsDiffInt(c.B, foreground.B))
+			matched++
+		}
+	}
+	if matched == 0 {
+		for _, ref := range referenceColors {
+			maxR = max(maxR, fontAbsDiffInt(ref.R, foreground.R))
+			maxG = max(maxG, fontAbsDiffInt(ref.G, foreground.G))
+			maxB = max(maxB, fontAbsDiffInt(ref.B, foreground.B))
+		}
+	}
+
+	return background, foreground, color.NRGBA{
+		R: fontClampByte(maxR+8, 8, 80),
+		G: fontClampByte(maxG+8, 8, 80),
+		B: fontClampByte(maxB+8, 8, 80),
+		A: 255,
+	}, true
 }
 
 func fontForegroundBounds(binaryImg *image.NRGBA) (image.Rectangle, int, bool) {
@@ -895,6 +1014,7 @@ type fontImageViewer struct {
 	magnifier          *MagnifierWidget
 	onSelectionChanged func(image.Rectangle)
 	onColorPicked      func(color.NRGBA)
+	onReferencePicked  func(fontColorReferencePoint)
 }
 
 func newFontImageViewer() *fontImageViewer {
@@ -1228,6 +1348,15 @@ func (v *fontImageViewer) MouseDown(e *desktop.MouseEvent) {
 		v.updateMagnifier(e.Position)
 		return
 	}
+	if e.Button == desktop.MouseButtonSecondary {
+		p, ok := v.imagePosition(e.Position)
+		if ok && v.onReferencePicked != nil {
+			v.onReferencePicked(fontColorReferencePoint{Point: p, Color: imageColorNRGBA(v.image, p.X, p.Y)})
+		}
+		v.dragMode = fontImageDragNone
+		v.updateMagnifier(e.Position)
+		return
+	}
 	if e.Button == desktop.MouseButtonPrimary && v.selectionMode {
 		p, ok := v.imagePosition(e.Position)
 		if !ok {
@@ -1433,6 +1562,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	var binaryRegion *image.NRGBA
 	var regionImg image.Image
 	var fontLibChars []FontChar
+	var referencePoints []fontColorReferencePoint
 	var suppressParamRefresh bool
 
 	fgColorEntry := widget.NewEntry()
@@ -1450,6 +1580,11 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	sourceInfoLabel.Wrapping = fyne.TextWrapWord
 	previewInfoLabel := widget.NewLabel("绿色 = 文字前景，会入库；黑色 = 背景，会忽略")
 	previewInfoLabel.Wrapping = fyne.TextWrapWord
+
+	referenceHeaderLabel := widget.NewLabel("自动参考点 0/5")
+	referenceListLabel := widget.NewLabel("右键原图添加文字色参考点")
+	referenceListLabel.Wrapping = fyne.TextWrapWord
+	clearReferenceBtn := widget.NewButton("清空参考点", nil)
 
 	splitListBox := container.NewVBox()
 	fontLibListBox := container.NewVBox()
@@ -1487,6 +1622,8 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	var refreshPreview func()
 	var rebuildSplitList func()
 	var rebuildLibList func()
+	var updateReferenceList func()
+	var clearReferencePoints func()
 	var setCropConfirmVisible func(bool)
 
 	sourceViewer := newFontImageViewer()
@@ -1500,6 +1637,17 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	}
 	sourceViewer.onColorPicked = func(c color.NRGBA) {
 		fgColorEntry.SetText(fontColorHex(c))
+	}
+	sourceViewer.onReferencePicked = func(point fontColorReferencePoint) {
+		if len(referencePoints) >= 5 {
+			referencePoints = referencePoints[1:]
+		}
+		referencePoints = append(referencePoints, point)
+		if updateReferenceList != nil {
+			updateReferenceList()
+		}
+		sourceInfoLabel.SetText(fmt.Sprintf("已添加自动参考点: %s @ %d,%d（最多5个，右键继续添加）",
+			fontColorHex(point.Color), point.Point.X, point.Point.Y))
 	}
 	sourceScroll := container.NewScroll(sourceViewer)
 	sourceViewer.SetScroll(sourceScroll)
@@ -1522,7 +1670,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			return
 		}
 		bounds := regionImg.Bounds()
-		text := fmt.Sprintf("当前图: %d×%d px | 左键拖动图片；Ctrl+左键取色；Ctrl+滚轮缩放",
+		text := fmt.Sprintf("当前图: %d×%d px | 左键拖动图片；右键加参考点；Ctrl+左键取色；Ctrl+滚轮缩放",
 			bounds.Dx(), bounds.Dy())
 		if sourceViewer.SelectionMode() {
 			text += " | 请拖拽选择裁剪区域"
@@ -1533,6 +1681,30 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		}
 		sourceInfoLabel.SetText(text)
 	}
+
+	updateReferenceList = func() {
+		referenceHeaderLabel.SetText(fmt.Sprintf("自动参考点 %d/5", len(referencePoints)))
+		if len(referencePoints) == 0 {
+			referenceListLabel.SetText("右键原图添加文字色参考点")
+			return
+		}
+		var lines []string
+		for i, point := range referencePoints {
+			lines = append(lines, fmt.Sprintf("%d. #%s @ %d,%d", i+1, fontColorHex(point.Color), point.Point.X, point.Point.Y))
+		}
+		referenceListLabel.SetText(strings.Join(lines, "\n"))
+	}
+	clearReferencePoints = func() {
+		if len(referencePoints) == 0 {
+			return
+		}
+		referencePoints = nil
+		if updateReferenceList != nil {
+			updateReferenceList()
+		}
+	}
+	clearReferenceBtn.OnTapped = clearReferencePoints
+	updateReferenceList()
 
 	rebuildLibList = func() {
 		fontLibListBox.RemoveAll()
@@ -1663,6 +1835,11 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			return
 		}
 		regionImg = img
+		if clearReferencePoints != nil {
+			clearReferencePoints()
+		} else {
+			referencePoints = nil
+		}
 		sourceViewer.SetImage(regionImg)
 		sourceViewer.SetZoom(fontSourceInitialZoom(regionImg.Bounds()))
 		updateSourceInfo()
@@ -1784,12 +1961,24 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			analysisRect = selected
 		}
 		analysisImg := cropImage(regionImg, analysisRect)
-		background, foreground, ok := estimateFontForegroundColor(analysisImg)
-		if !ok {
-			dialog.ShowInformation("自动取色", "未识别到稳定的文字前景色，当前参数未修改", w)
-			return
+		referenceColors := make([]color.NRGBA, 0, len(referencePoints))
+		for _, point := range referencePoints {
+			if point.Point.In(analysisRect) {
+				referenceColors = append(referenceColors, point.Color)
+			}
 		}
-		tolerance := estimateFontTolerance(analysisImg, foreground, background)
+
+		usedReferences := len(referenceColors)
+		background, foreground, tolerance, ok := estimateFontColorFromReferences(analysisImg, referenceColors)
+		if !ok {
+			background, foreground, ok = estimateFontForegroundColor(analysisImg)
+			if !ok {
+				dialog.ShowInformation("自动取色", "未识别到稳定的文字前景色，当前参数未修改；可右键文字位置添加参考点后重试", w)
+				return
+			}
+			tolerance = estimateFontTolerance(analysisImg, foreground, background)
+			usedReferences = 0
+		}
 
 		suppressParamRefresh = true
 		fgColorEntry.SetText(fontColorHex(foreground))
@@ -1797,8 +1986,12 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		suppressParamRefresh = false
 
 		refreshPreview()
-		previewInfoLabel.SetText(fmt.Sprintf("自动取色完成: 文字色 %s 容差 %s | 当前图未裁剪 | 检测到 %d 个字符",
-			fontColorHex(foreground), fontColorHex(tolerance), len(charCells)))
+		refText := "未使用参考点"
+		if usedReferences > 0 {
+			refText = fmt.Sprintf("参考点:%d", usedReferences)
+		}
+		previewInfoLabel.SetText(fmt.Sprintf("自动取色完成: 文字色 %s 容差 %s | %s | 当前图未裁剪 | 检测到 %d 个字符",
+			fontColorHex(foreground), fontColorHex(tolerance), refText, len(charCells)))
 	})
 	autoPreprocessBtn.Importance = widget.HighImportance
 
@@ -1953,6 +2146,11 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	fgToleranceRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("偏色容差:"), nil, fgToleranceEntry), 42)
 	colGapRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("列间距(像素):"), nil, colGapEntry), 42)
 	rowGapRow := newFixedHeightContainer(container.NewBorder(nil, nil, widget.NewLabel("行间距(像素):"), nil, rowGapEntry), 42)
+	referencePanel := newFixedHeightContainer(container.NewVBox(
+		referenceHeaderLabel,
+		referenceListLabel,
+		clearReferenceBtn,
+	), 118)
 
 	leftPanel := container.New(&fixedWidthLayout{width: 190, padding: 10, verticalSpacing: 5},
 		getSelBtn,
@@ -1967,6 +2165,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		widget.NewSeparator(),
 		newFixedHeightContainer(container.NewGridWithColumns(2, cropBtn, refreshBtn), 44),
 		newFixedHeightContainer(container.NewGridWithColumns(2, resetZoomBtn, clearSelectionBtn), 44),
+		referencePanel,
 		autoPreprocessBtn,
 		layout.NewSpacer(),
 	)
