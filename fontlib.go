@@ -1129,6 +1129,7 @@ func (v *fontImageViewer) MouseDown(e *desktop.MouseEvent) {
 			v.onColorPicked(imageColorNRGBA(v.image, p.X, p.Y))
 		}
 		v.dragMode = fontImageDragNone
+		v.updateMagnifier(e.Position)
 		return
 	}
 	if e.Button == desktop.MouseButtonPrimary && v.selectionMode {
@@ -1273,6 +1274,8 @@ func (r *fontImageViewerRenderer) MinSize() fyne.Size {
 
 func (r *fontImageViewerRenderer) Refresh() {
 	r.image.Image = r.viewer.image
+	r.image.Move(fyne.NewPos(0, 0))
+	r.image.Resize(r.viewer.minSize())
 	if r.viewer.image == nil {
 		r.image.Hide()
 	} else {
