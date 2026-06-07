@@ -829,6 +829,7 @@ type fontImageViewer struct {
 	dragCurrent        image.Point
 	dragMode           fontImageDragMode
 	lastDragAbs        fyne.Position
+	selectionMode      bool
 	onSelectionChanged func(image.Rectangle)
 	onColorPicked      func(color.NRGBA)
 }
@@ -849,6 +850,7 @@ func (v *fontImageViewer) SetImage(img image.Image) {
 	v.selection = image.Rectangle{}
 	v.tempSelection = image.Rectangle{}
 	v.dragMode = fontImageDragNone
+	v.selectionMode = false
 	v.Refresh()
 	if v.scroll != nil {
 		v.scroll.Refresh()
@@ -860,7 +862,7 @@ func (v *fontImageViewer) SetImage(img image.Image) {
 }
 
 func (v *fontImageViewer) ClearSelection() {
-	if v.selection.Empty() && v.tempSelection.Empty() {
+	if v.selection.Empty() && v.tempSelection.Empty() && v.dragMode == fontImageDragNone {
 		return
 	}
 	v.selection = image.Rectangle{}
@@ -870,6 +872,26 @@ func (v *fontImageViewer) ClearSelection() {
 	if v.onSelectionChanged != nil {
 		v.onSelectionChanged(image.Rectangle{})
 	}
+}
+
+func (v *fontImageViewer) StartSelectionMode() {
+	v.selectionMode = true
+	v.selection = image.Rectangle{}
+	v.tempSelection = image.Rectangle{}
+	v.dragMode = fontImageDragNone
+	v.Refresh()
+	if v.onSelectionChanged != nil {
+		v.onSelectionChanged(image.Rectangle{})
+	}
+}
+
+func (v *fontImageViewer) CancelSelectionMode() {
+	v.selectionMode = false
+	v.ClearSelection()
+}
+
+func (v *fontImageViewer) SelectionMode() bool {
+	return v.selectionMode
 }
 
 func (v *fontImageViewer) SelectedRect() (image.Rectangle, bool) {
@@ -1031,7 +1053,7 @@ func (v *fontImageViewer) MouseDown(e *desktop.MouseEvent) {
 		v.dragMode = fontImageDragNone
 		return
 	}
-	if e.Button == desktop.MouseButtonPrimary && e.Modifier&fyne.KeyModifierShift == 0 {
+	if e.Button == desktop.MouseButtonPrimary && v.selectionMode {
 		p, ok := v.imagePosition(e.Position)
 		if !ok {
 			return
@@ -1042,7 +1064,11 @@ func (v *fontImageViewer) MouseDown(e *desktop.MouseEvent) {
 		v.tempSelection = image.Rectangle{}
 		return
 	}
-	v.dragMode = fontImageDragPan
+	if e.Button == desktop.MouseButtonPrimary {
+		v.dragMode = fontImageDragPan
+		return
+	}
+	v.dragMode = fontImageDragNone
 }
 
 func (v *fontImageViewer) MouseMoved(e *desktop.MouseEvent) {
@@ -1083,6 +1109,7 @@ func (v *fontImageViewer) MouseUp(e *desktop.MouseEvent) {
 	}
 	v.tempSelection = image.Rectangle{}
 	v.dragMode = fontImageDragNone
+	v.selectionMode = false
 	v.Refresh()
 	if v.onSelectionChanged != nil {
 		v.onSelectionChanged(v.selection)
@@ -1233,10 +1260,6 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	previewInfoLabel := widget.NewLabel("绿色 = 文字前景，会入库；黑色 = 背景，会忽略")
 	previewInfoLabel.Wrapping = fyne.TextWrapWord
 
-	previewCanvasImg := canvas.NewImageFromImage(nil)
-	previewCanvasImg.ScaleMode = canvas.ImageScalePixels
-	previewCanvasImg.FillMode = canvas.ImageFillOriginal
-
 	splitListBox := container.NewVBox()
 	fontLibListBox := container.NewVBox()
 	libHeaderLabel := widget.NewLabelWithStyle("字库内容 (0)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
@@ -1273,9 +1296,13 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	var refreshPreview func()
 	var rebuildSplitList func()
 	var rebuildLibList func()
+	var setCropConfirmVisible func(bool)
 
 	sourceViewer := newFontImageViewer()
-	sourceViewer.onSelectionChanged = func(image.Rectangle) {
+	sourceViewer.onSelectionChanged = func(rect image.Rectangle) {
+		if setCropConfirmVisible != nil {
+			setCropConfirmVisible(!rect.Empty())
+		}
 		if updateSourceInfo != nil {
 			updateSourceInfo()
 		}
@@ -1289,14 +1316,24 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		sourceViewer.Scrolled(e)
 	})
 
+	previewViewer := newFontImageViewer()
+	previewScroll := container.NewScroll(previewViewer)
+	previewViewer.SetScroll(previewScroll)
+	previewScrollOverlay := newFontScrollOverlay(func(e *fyne.ScrollEvent) {
+		previewViewer.Scrolled(e)
+	})
+
 	updateSourceInfo = func() {
 		if regionImg == nil {
 			sourceInfoLabel.SetText("请先去裁剪选取或加载图片")
 			return
 		}
 		bounds := regionImg.Bounds()
-		text := fmt.Sprintf("当前图: %d×%d px | 拖拽框选裁剪；Ctrl+左键取色；Shift+拖动平移；Ctrl+滚轮缩放",
+		text := fmt.Sprintf("当前图: %d×%d px | 左键拖动图片；Ctrl+左键取色；Ctrl+滚轮缩放",
 			bounds.Dx(), bounds.Dy())
+		if sourceViewer.SelectionMode() {
+			text += " | 请拖拽选择裁剪区域"
+		}
 		if rect, ok := sourceViewer.SelectedRect(); ok {
 			text += fmt.Sprintf(" | 选区: %d,%d - %d,%d (%d×%d)",
 				rect.Min.X, rect.Min.Y, rect.Max.X, rect.Max.Y, rect.Dx(), rect.Dy())
@@ -1401,9 +1438,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		if regionImg == nil {
 			binaryRegion = nil
 			charCells = nil
-			previewCanvasImg.Image = nil
-			previewCanvasImg.SetMinSize(fyne.NewSize(1, 1))
-			previewCanvasImg.Refresh()
+			previewViewer.SetImage(nil)
 			previewInfoLabel.SetText("请先去裁剪选取或加载图片")
 			rebuildSplitList()
 			return
@@ -1415,13 +1450,11 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		dotImg, cells := renderDotMatrix(binaryRegion, cg, rg)
 		charCells = cells
 
-		previewCanvasImg.Image = dotImg
-		previewCanvasImg.SetMinSize(fyne.NewSize(float32(dotImg.Bounds().Dx()), float32(dotImg.Bounds().Dy())))
-		previewCanvasImg.Refresh()
+		previewViewer.SetImage(dotImg)
 
 		bw := binaryRegion.Bounds().Dx()
 		bh := binaryRegion.Bounds().Dy()
-		previewInfoLabel.SetText(fmt.Sprintf("二值预览: %d×%d px | 检测到 %d 个字符 | 列间距:%d 行间距:%d",
+		previewInfoLabel.SetText(fmt.Sprintf("二值预览: %d×%d px | 检测到 %d 个字符 | 列间距:%d 行间距:%d | 左键拖动；Ctrl+滚轮缩放",
 			bw, bh, len(charCells), cg, rg))
 		rebuildSplitList()
 	}
@@ -1569,17 +1602,50 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	})
 	autoPreprocessBtn.Importance = widget.HighImportance
 
+	var cropConfirmRow *fyne.Container
+	confirmCropBtn := widget.NewButtonWithIcon("确认裁剪", theme.ConfirmIcon(), func() {
+		rect, ok := sourceViewer.SelectedRect()
+		if !ok {
+			dialog.ShowInformation("提示", "当前裁剪选区无效，请重新选择", w)
+			return
+		}
+		setRegionImage(cropImage(regionImg, rect))
+		if setCropConfirmVisible != nil {
+			setCropConfirmVisible(false)
+		}
+	})
+	confirmCropBtn.Importance = widget.HighImportance
+	cancelCropBtn := widget.NewButton("取消", func() {
+		sourceViewer.CancelSelectionMode()
+		if setCropConfirmVisible != nil {
+			setCropConfirmVisible(false)
+		}
+		updateSourceInfo()
+	})
+	cropConfirmRow = container.NewGridWithColumns(2, confirmCropBtn, cancelCropBtn)
+	cropConfirmRow.Hide()
+	setCropConfirmVisible = func(show bool) {
+		if cropConfirmRow == nil {
+			return
+		}
+		if show {
+			cropConfirmRow.Show()
+		} else {
+			cropConfirmRow.Hide()
+		}
+		cropConfirmRow.Refresh()
+	}
+
 	cropBtn := widget.NewButtonWithIcon("裁剪", theme.ContentCutIcon(), func() {
 		if regionImg == nil {
 			dialog.ShowInformation("提示", "请先去裁剪选取或加载图片", w)
 			return
 		}
-		rect, ok := sourceViewer.SelectedRect()
-		if !ok {
-			dialog.ShowInformation("提示", "请先在上方图片拖拽框选裁剪区域", w)
-			return
+		sourceViewer.StartSelectionMode()
+		if setCropConfirmVisible != nil {
+			setCropConfirmVisible(false)
 		}
-		setRegionImage(cropImage(regionImg, rect))
+		sourceInfoLabel.SetText("请在上方图片拖拽选择裁剪区域，松开后点击确认裁剪或取消")
 	})
 
 	refreshBtn := widget.NewButtonWithIcon("刷新预览", theme.ViewRefreshIcon(), func() {
@@ -1588,10 +1654,14 @@ func openFontLibWindow(parentWindow fyne.Window) {
 
 	resetZoomBtn := widget.NewButton("重置缩放", func() {
 		sourceViewer.ResetZoom()
+		previewViewer.ResetZoom()
 	})
 
 	clearSelectionBtn := widget.NewButton("清除选区", func() {
-		sourceViewer.ClearSelection()
+		sourceViewer.CancelSelectionMode()
+		if setCropConfirmVisible != nil {
+			setCropConfirmVisible(false)
+		}
 		updateSourceInfo()
 	})
 
@@ -1702,16 +1772,15 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	)
 
 	sourcePanel := container.NewBorder(
-		container.NewVBox(widget.NewLabelWithStyle("原图 / 当前裁剪图", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceInfoLabel),
+		container.NewVBox(widget.NewLabelWithStyle("原图 / 当前裁剪图", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), sourceInfoLabel, cropConfirmRow),
 		nil, nil, nil,
 		container.NewStack(newGridBgWidget(), sourceScroll, sourceScrollOverlay),
 	)
 
-	previewScroll := container.NewScroll(container.New(&topLeftLayout{}, previewCanvasImg))
 	previewPanel := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("二值化预览 / 分割框", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), previewInfoLabel),
 		nil, nil, nil,
-		container.NewStack(newGridBgWidget(), previewScroll),
+		container.NewStack(newGridBgWidget(), previewScroll, previewScrollOverlay),
 	)
 	centerSplit := container.NewVSplit(sourcePanel, previewPanel)
 	centerSplit.Offset = 0.52
