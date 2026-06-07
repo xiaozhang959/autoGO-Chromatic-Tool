@@ -830,6 +830,7 @@ type fontImageViewer struct {
 	dragMode           fontImageDragMode
 	lastDragAbs        fyne.Position
 	onSelectionChanged func(image.Rectangle)
+	onColorPicked      func(color.NRGBA)
 }
 
 func newFontImageViewer() *fontImageViewer {
@@ -989,6 +990,14 @@ func (v *fontImageViewer) MouseDown(e *desktop.MouseEvent) {
 		return
 	}
 	v.lastDragAbs = e.AbsolutePosition
+	if e.Button == desktop.MouseButtonPrimary && e.Modifier&fyne.KeyModifierControl != 0 {
+		p, ok := v.imagePosition(e.Position)
+		if ok && v.onColorPicked != nil {
+			v.onColorPicked(imageColorNRGBA(v.image, p.X, p.Y))
+		}
+		v.dragMode = fontImageDragNone
+		return
+	}
 	if e.Button == desktop.MouseButtonPrimary && e.Modifier&fyne.KeyModifierShift == 0 {
 		p, ok := v.imagePosition(e.Position)
 		if !ok {
@@ -1081,7 +1090,7 @@ type fontImageViewerRenderer struct {
 
 func (r *fontImageViewerRenderer) Layout(size fyne.Size) {
 	r.image.Move(fyne.NewPos(0, 0))
-	r.image.Resize(size)
+	r.image.Resize(r.viewer.minSize())
 	r.updateSelection()
 }
 
@@ -1213,6 +1222,9 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			updateSourceInfo()
 		}
 	}
+	sourceViewer.onColorPicked = func(c color.NRGBA) {
+		fgColorEntry.SetText(fontColorHex(c))
+	}
 	sourceScroll := container.NewScroll(sourceViewer)
 	sourceViewer.SetScroll(sourceScroll)
 
@@ -1222,7 +1234,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			return
 		}
 		bounds := regionImg.Bounds()
-		text := fmt.Sprintf("当前图: %d×%d px | 拖拽框选裁剪；Shift+拖动平移；Ctrl+滚轮缩放",
+		text := fmt.Sprintf("当前图: %d×%d px | 拖拽框选裁剪；Ctrl+左键取色；Shift+拖动平移；Ctrl+滚轮缩放",
 			bounds.Dx(), bounds.Dy())
 		if rect, ok := sourceViewer.SelectedRect(); ok {
 			text += fmt.Sprintf(" | 选区: %d,%d - %d,%d (%d×%d)",
