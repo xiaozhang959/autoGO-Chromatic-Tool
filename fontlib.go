@@ -919,19 +919,14 @@ func (v *fontImageViewer) imagePosition(pos fyne.Position) (image.Point, bool) {
 		zoom = 1
 	}
 	bounds := v.image.Bounds()
+	displaySize := v.minSize()
+	if pos.X < 0 || pos.Y < 0 || pos.X >= displaySize.Width || pos.Y >= displaySize.Height {
+		return image.Point{}, false
+	}
 	x := bounds.Min.X + int(pos.X/zoom)
 	y := bounds.Min.Y + int(pos.Y/zoom)
-	if x < bounds.Min.X {
-		x = bounds.Min.X
-	}
-	if x >= bounds.Max.X {
-		x = bounds.Max.X - 1
-	}
-	if y < bounds.Min.Y {
-		y = bounds.Min.Y
-	}
-	if y >= bounds.Max.Y {
-		y = bounds.Max.Y - 1
+	if x < bounds.Min.X || x >= bounds.Max.X || y < bounds.Min.Y || y >= bounds.Max.Y {
+		return image.Point{}, false
 	}
 	return image.Pt(x, y), true
 }

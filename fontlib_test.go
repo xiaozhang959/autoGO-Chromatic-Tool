@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"fyne.io/fyne/v2"
 )
 
 func newSolidFontTestImage(w, h int, c color.NRGBA) *image.NRGBA {
@@ -131,5 +133,22 @@ func TestFontLibExportParseRoundTrip(t *testing.T) {
 	}
 	if parsed[0].Char != chars[0].Char || parsed[0].Width != chars[0].Width || parsed[0].HexData != chars[0].HexData || parsed[0].WhitePixels != chars[0].WhitePixels {
 		t.Fatalf("round trip mismatch: got %+v, want %+v", parsed[0], chars[0])
+	}
+}
+
+func TestFontImageViewerImagePositionRejectsOutsideDisplayedImage(t *testing.T) {
+	img := newSolidFontTestImage(4, 3, color.NRGBA{255, 255, 255, 255})
+	viewer := newFontImageViewer()
+	viewer.SetImage(img)
+
+	point, ok := viewer.imagePosition(fyne.NewPos(2.9, 1.2))
+	if !ok || point != image.Pt(2, 1) {
+		t.Fatalf("imagePosition inside = %v, %v; want (2,1), true", point, ok)
+	}
+	if _, ok := viewer.imagePosition(fyne.NewPos(4, 1)); ok {
+		t.Fatal("expected x at displayed image edge to be rejected")
+	}
+	if _, ok := viewer.imagePosition(fyne.NewPos(1, 3)); ok {
+		t.Fatal("expected y at displayed image edge to be rejected")
 	}
 }
