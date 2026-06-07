@@ -7508,7 +7508,7 @@ func main() {
 	fontLibBtn.Importance = widget.MediumImportance
 
 	// 主题切换按钮使用高重要性，使其更加突出
-	themeBtn := widget.NewButtonWithIcon("", theme.ColorPaletteIcon(), toggleTheme)
+	themeBtn := widget.NewButtonWithIcon("配色", theme.ColorPaletteIcon(), toggleTheme)
 	themeBtn.Importance = widget.MediumImportance
 
 	// 创建代码显示框（多行只读文本框）
@@ -7662,8 +7662,10 @@ func main() {
 	var centerRightSplit *container.Split
 	updateGridBtn := func() {
 		if gridModeEnabled {
+			gridModeBtn.SetText("● 点阵模式")
 			gridModeBtn.Importance = widget.HighImportance
 		} else {
+			gridModeBtn.SetText("○ 点阵模式")
 			gridModeBtn.Importance = widget.MediumImportance
 		}
 		gridModeBtn.Refresh()
@@ -7676,7 +7678,7 @@ func main() {
 			saveCurrentConfig()
 		}
 	}
-	gridModeBtn = widget.NewButtonWithIcon("点阵", theme.GridIcon(), toggleGridMode)
+	gridModeBtn = widget.NewButton("○ 点阵模式", toggleGridMode)
 	registerCommand(commandToggleGrid, toggleGridMode)
 	updateGridBtn() // 初始化按钮状态
 
@@ -8193,7 +8195,7 @@ func main() {
 		configDialog.Resize(fyne.NewSize(820, 560))
 		configDialog.Show()
 	}
-	gridSettingsBtn := widget.NewButtonWithIcon("系统设置", theme.SettingsIcon(), openSystemConfigDialog)
+	gridSettingsBtn := widget.NewButtonWithIcon("系统", theme.SettingsIcon(), openSystemConfigDialog)
 
 	// 使用Border布局，然后用固定高度容器包装（高度设为35）
 	gridRowBorder := container.NewBorder(nil, nil, nil, gridSettingsBtn, gridModeBtn)
@@ -8266,7 +8268,7 @@ func main() {
 		return container.New(&fixedWidthLayout{width: width}, content)
 	}
 
-	showMagnifierCheck := widget.NewCheck("显示放大镜", func(checked bool) {
+	showMagnifierCheck := widget.NewCheck("放大镜", func(checked bool) {
 		magnifierEnabled = checked
 		if !checked && imageViewer != nil && imageViewer.magnifier != nil {
 			imageViewer.magnifier.Hide()
