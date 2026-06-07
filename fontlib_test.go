@@ -172,3 +172,19 @@ func TestFontSourceInitialZoomKeepsLargeImagesAtOne(t *testing.T) {
 		t.Fatalf("large source zoom = %v, want 1", zoom)
 	}
 }
+
+func TestFontPreviewZoomMatchesSourcePixelScale(t *testing.T) {
+	sourceZoom := float32(2.7)
+	got := fontPreviewZoomForSourceZoom(sourceZoom)
+	want := sourceZoom / float32(dotCellSize+1)
+	if got < want-0.0001 || got > want+0.0001 {
+		t.Fatalf("preview zoom = %v, want %v", got, want)
+	}
+}
+
+func TestFontPreviewZoomClampsToMinimum(t *testing.T) {
+	got := fontPreviewZoomForSourceZoom(0.1)
+	if got != minImageZoom {
+		t.Fatalf("preview zoom = %v, want min %v", got, minImageZoom)
+	}
+}

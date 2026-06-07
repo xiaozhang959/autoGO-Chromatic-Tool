@@ -875,6 +875,20 @@ func fontSourceInitialZoom(bounds image.Rectangle) float32 {
 	return zoom
 }
 
+func fontPreviewZoomForSourceZoom(sourceZoom float32) float32 {
+	if sourceZoom <= 0 {
+		sourceZoom = 1
+	}
+	zoom := sourceZoom / float32(dotCellSize+1)
+	if zoom < minImageZoom {
+		return minImageZoom
+	}
+	if zoom > maxImageZoom {
+		return maxImageZoom
+	}
+	return zoom
+}
+
 func (v *fontImageViewer) SetImage(img image.Image) {
 	if v.magnifier != nil {
 		v.magnifier.Hide()
@@ -1528,6 +1542,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		charCells = cells
 
 		previewViewer.SetImage(dotImg)
+		previewViewer.SetZoom(fontPreviewZoomForSourceZoom(sourceViewer.zoom))
 
 		bw := binaryRegion.Bounds().Dx()
 		bh := binaryRegion.Bounds().Dy()
