@@ -3,6 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -134,6 +135,42 @@ func TestFontLibExportParseRoundTrip(t *testing.T) {
 	}
 	if parsed[0].Char != chars[0].Char || parsed[0].Width != chars[0].Width || parsed[0].HexData != chars[0].HexData || parsed[0].WhitePixels != chars[0].WhitePixels {
 		t.Fatalf("round trip mismatch: got %+v, want %+v", parsed[0], chars[0])
+	}
+}
+
+func TestFontLibMatchKeyIgnoresWhitespacePadding(t *testing.T) {
+	compact := [][]bool{
+		{true, false, true},
+		{false, true, false},
+	}
+	padded := [][]bool{
+		{false, false, false, false, false},
+		{false, true, false, true, false},
+		{false, false, true, false, false},
+		{false, false, false, false, false},
+	}
+
+	compactHex, compactWp := encodeBitmapHex(compact)
+	paddedHex, paddedWp := encodeBitmapHex(padded)
+	imported := FontChar{
+		Char:        "字",
+		Width:       len(padded[0]),
+		Height:      len(padded),
+		HexData:     strings.ToUpper(paddedHex),
+		WhitePixels: paddedWp,
+		Bitmap:      decodeBitmapHex(strings.ToUpper(paddedHex), len(padded[0]), len(padded)),
+	}
+	current := FontChar{
+		Char:        "字",
+		Width:       len(compact[0]),
+		Height:      len(compact),
+		HexData:     compactHex,
+		WhitePixels: compactWp,
+		Bitmap:      compact,
+	}
+
+	if fontCharMatchKey(imported) != fontCharMatchKey(current) {
+		t.Fatalf("match key mismatch: imported %q, current %q", fontCharMatchKey(imported), fontCharMatchKey(current))
 	}
 }
 

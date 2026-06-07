@@ -503,6 +503,63 @@ func decodeBitmapHex(hexData string, width, height int) [][]bool {
 	return bitmap
 }
 
+func trimBitmapBounds(bitmap [][]bool) [][]bool {
+	if len(bitmap) == 0 || len(bitmap[0]) == 0 {
+		return nil
+	}
+	minX, minY := len(bitmap[0]), len(bitmap)
+	maxX, maxY := -1, -1
+	for y, row := range bitmap {
+		for x, px := range row {
+			if !px {
+				continue
+			}
+			if x < minX {
+				minX = x
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if y > maxY {
+				maxY = y
+			}
+		}
+	}
+	if maxX < minX || maxY < minY {
+		return nil
+	}
+
+	trimmed := make([][]bool, maxY-minY+1)
+	for y := minY; y <= maxY; y++ {
+		row := make([]bool, maxX-minX+1)
+		copy(row, bitmap[y][minX:maxX+1])
+		trimmed[y-minY] = row
+	}
+	return trimmed
+}
+
+func fontBitmapMatchKey(bitmap [][]bool) string {
+	trimmed := trimBitmapBounds(bitmap)
+	if len(trimmed) == 0 || len(trimmed[0]) == 0 {
+		return ""
+	}
+	hexData, _ := encodeBitmapHex(trimmed)
+	return fmt.Sprintf("%dx%d:%s", len(trimmed[0]), len(trimmed), strings.ToLower(hexData))
+}
+
+func fontCharMatchKey(ch FontChar) string {
+	if key := fontBitmapMatchKey(ch.Bitmap); key != "" {
+		return key
+	}
+	if ch.Width <= 0 || ch.Height <= 0 || strings.TrimSpace(ch.HexData) == "" {
+		return ""
+	}
+	return fontBitmapMatchKey(decodeBitmapHex(strings.TrimSpace(ch.HexData), ch.Width, ch.Height))
+}
+
 // ==================== 字库文件读写 ====================
 
 func parseFontLib(content string) []FontChar {
@@ -1531,17 +1588,21 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			return
 		}
 
+		libMatchNames := make(map[string]string, len(fontLibChars))
+		for _, lc := range fontLibChars {
+			key := fontCharMatchKey(lc)
+			if key != "" && libMatchNames[key] == "" {
+				libMatchNames[key] = lc.Char
+			}
+		}
+
 		for i, cell := range charCells {
 			hexData, wp := encodeBitmapHex(cell.Bitmap)
 			charHexCache[i] = hexData
 			charWpCache[i] = wp
-			matchedName := ""
-			for _, lc := range fontLibChars {
-				if lc.HexData == hexData {
-					matchedName = lc.Char
-					charMatchedLib[i] = true
-					break
-				}
+			matchedName := libMatchNames[fontBitmapMatchKey(cell.Bitmap)]
+			if matchedName != "" {
+				charMatchedLib[i] = true
 			}
 
 			previewImg := canvas.NewImageFromImage(createCharPreview(cell.Bitmap, 2))
@@ -1902,11 +1963,11 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		colGapRow,
 		rowGapRow,
 		widget.NewSeparator(),
-		autoPreprocessBtn,
+		resetParamsBtn,
 		widget.NewSeparator(),
 		newFixedHeightContainer(container.NewGridWithColumns(2, cropBtn, refreshBtn), 44),
 		newFixedHeightContainer(container.NewGridWithColumns(2, resetZoomBtn, clearSelectionBtn), 44),
-		resetParamsBtn,
+		autoPreprocessBtn,
 		layout.NewSpacer(),
 	)
 
@@ -1949,8 +2010,10 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	rightBg := canvas.NewRectangle(color.Transparent)
 	rightBg.SetMinSize(fyne.NewSize(320, 0))
 	rightPanel := container.NewStack(rightBg, container.NewPadded(rightSplit))
+	centerAndRightSplit := container.NewHSplit(centerSplit, rightPanel)
+	centerAndRightSplit.Offset = 0.68
 
-	mainContent := container.NewBorder(nil, nil, leftPanel, rightPanel, centerSplit)
+	mainContent := container.NewBorder(nil, nil, leftPanel, nil, centerAndRightSplit)
 	rebuildLibList()
 	rebuildSplitList()
 	w.SetContent(mainContent)
