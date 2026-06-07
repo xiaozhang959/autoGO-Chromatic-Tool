@@ -206,7 +206,7 @@ func openOpenCVImageTestWindow(parent fyne.Window, defaultSimText string) {
 				imageViewer.ClearFindTestHighlights()
 			}
 		} else {
-			resultEntry.SetText(formatOpenCVImageTestResult(functionName, result, opts.Sim))
+			resultEntry.SetText(formatOpenCVImageTestResult(functionName, result))
 			setOpenCVFindTestHighlightRects(imageViewer, openCVMatchHighlightRects(result))
 		}
 
@@ -337,11 +337,9 @@ func parseOpenCVIntEntry(entry *widget.Entry, fallback int) int {
 	return value
 }
 
-func formatOpenCVImageTestResult(functionName string, result openCVMatchResult, sim float32) string {
+func formatOpenCVImageTestResult(functionName string, result openCVMatchResult) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("backend: %s\n", result.Backend))
-	sb.WriteString(fmt.Sprintf("sim: %.6f\n", sim))
-	sb.WriteString(fmt.Sprintf("threshold: %.6f (0.5 + sim * 0.5)\n", openCVEffectiveMatchThreshold(sim)))
 	sb.WriteString(fmt.Sprintf("bestScore: %.6f\n", result.BestScore))
 	sb.WriteString(fmt.Sprintf("template: %dx%d\n", result.TemplateSize.X, result.TemplateSize.Y))
 	if len(result.Matches) == 0 {

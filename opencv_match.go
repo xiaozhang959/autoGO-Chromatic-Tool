@@ -52,13 +52,6 @@ func normalizeOpenCVImageFunctionName(name string) string {
 	}
 }
 
-func openCVEffectiveMatchThreshold(sim float32) float32 {
-	if sim <= 0 {
-		sim = 0.8
-	}
-	return 0.5 + sim*0.5
-}
-
 func runOpenCVImageMatch(source image.Image, templateBytes []byte, opts openCVMatchOptions) (openCVMatchResult, error) {
 	if source == nil {
 		return openCVMatchResult{}, fmt.Errorf("请先截图或载入待查找图片")
