@@ -6809,6 +6809,84 @@ func main() {
 		}
 	}
 
+	selectAdjacentTab := func(step int) {
+		count := len(tabs.Items)
+		if count < 2 {
+			return
+		}
+
+		index := tabs.SelectedIndex()
+		if index < 0 || index >= count {
+			index = 0
+		} else {
+			index = (index + step + count) % count
+		}
+		tabs.SelectIndex(index)
+	}
+
+	tabs.OnTabScrolled = func(_ *container.TabItem, event *fyne.ScrollEvent) {
+		if event == nil {
+			return
+		}
+
+		delta := event.Scrolled.DY
+		if delta == 0 {
+			delta = event.Scrolled.DX
+		}
+		switch {
+		case delta < 0:
+			selectAdjacentTab(1)
+		case delta > 0:
+			selectAdjacentTab(-1)
+		}
+	}
+
+	var tabContextMenu *widget.PopUpMenu
+	closeTabs := func(items []*container.TabItem) {
+		for _, tab := range append([]*container.TabItem(nil), items...) {
+			tabs.Close(tab)
+		}
+	}
+	tabs.OnTabSecondaryTapped = func(tab *container.TabItem, event *fyne.PointEvent) {
+		if tab == nil {
+			return
+		}
+
+		tabs.Select(tab)
+		if tabContextMenu != nil {
+			tabContextMenu.Hide()
+			tabContextMenu = nil
+		}
+
+		closeCurrentItem := fyne.NewMenuItem("关闭当前", func() {
+			tabs.Close(tab)
+		})
+		closeOtherItems := fyne.NewMenuItem("关闭其它标签页", func() {
+			items := make([]*container.TabItem, 0, len(tabs.Items))
+			for _, item := range tabs.Items {
+				if item != tab {
+					items = append(items, item)
+				}
+			}
+			closeTabs(items)
+		})
+		closeOtherItems.Disabled = len(tabs.Items) <= 1
+		closeAllItems := fyne.NewMenuItem("关闭所有标签页", func() {
+			closeTabs(tabs.Items)
+		})
+
+		menu := fyne.NewMenu("", closeCurrentItem, closeOtherItems, closeAllItems)
+		tabContextMenu = widget.NewPopUpMenu(menu, w.Canvas())
+		pos := fyne.NewPos(0, 0)
+		if event != nil {
+			pos = event.Position
+			if !event.AbsolutePosition.IsZero() {
+				pos = event.AbsolutePosition
+			}
+		}
+		tabContextMenu.ShowAtPosition(pos)
+	}
+
 	// 标签页计数器
 	tabCounter := 0
 

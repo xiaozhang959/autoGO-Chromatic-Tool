@@ -23,11 +23,13 @@ type DocTabs struct {
 
 	Items []*TabItem
 
-	CreateTab      func() *TabItem `json:"-"`
-	CloseIntercept func(*TabItem)  `json:"-"`
-	OnClosed       func(*TabItem)  `json:"-"`
-	OnSelected     func(*TabItem)  `json:"-"`
-	OnUnselected   func(*TabItem)  `json:"-"`
+	CreateTab            func() *TabItem                   `json:"-"`
+	CloseIntercept       func(*TabItem)                    `json:"-"`
+	OnClosed             func(*TabItem)                    `json:"-"`
+	OnSelected           func(*TabItem)                    `json:"-"`
+	OnTabScrolled        func(*TabItem, *fyne.ScrollEvent) `json:"-"`
+	OnTabSecondaryTapped func(*TabItem, *fyne.PointEvent)  `json:"-"`
+	OnUnselected         func(*TabItem)                    `json:"-"`
 
 	current         int
 	location        TabLocation
@@ -80,6 +82,14 @@ func (t *DocTabs) CreateRenderer() fyne.WidgetRenderer {
 	r.updateIndicator(false)
 	r.applyTheme(t)
 	return r
+}
+
+// Close closes the specified tab using the same logic as the tab close button.
+func (t *DocTabs) Close(item *TabItem) {
+	if item == nil {
+		return
+	}
+	t.close(item)
 }
 
 // DisableIndex disables the TabItem at the specified index.
@@ -335,7 +345,17 @@ func (r *docTabsRenderer) buildTabButtons(count int, buttons *fyne.Container) {
 			item.button = &tabButton{
 				onTapped: func() { r.docTabs.Select(item) },
 				onClosed: func() { r.docTabs.close(item) },
-				tabs:     r.tabs,
+				onScrolled: func(event *fyne.ScrollEvent) {
+					if f := r.docTabs.OnTabScrolled; f != nil {
+						f(item, event)
+					}
+				},
+				onTappedSecondary: func(event *fyne.PointEvent) {
+					if f := r.docTabs.OnTabSecondaryTapped; f != nil {
+						f(item, event)
+					}
+				},
+				tabs: r.tabs,
 			}
 		}
 		button := item.button
