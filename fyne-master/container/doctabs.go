@@ -61,6 +61,7 @@ func (t *DocTabs) CreateRenderer() fyne.WidgetRenderer {
 	th := t.Theme()
 	v := fyne.CurrentApp().Settings().ThemeVariant()
 
+	tabButtons := &fyne.Container{Layout: layout.NewHBoxLayout()}
 	r := &docTabsRenderer{
 		baseTabsRenderer: baseTabsRenderer{
 			bar:       &fyne.Container{},
@@ -68,14 +69,16 @@ func (t *DocTabs) CreateRenderer() fyne.WidgetRenderer {
 			indicator: canvas.NewRectangle(th.Color(theme.ColorNamePrimary, v)),
 		},
 		docTabs:  t,
-		scroller: &fyne.Container{Layout: layout.NewHBoxLayout()}, // 改为普通容器，不使用滚动
+		scroller: NewHScroll(tabButtons),
+	}
+	r.scroller.OnScrolled = func(fyne.Position) {
+		r.updateIndicator(false)
 	}
 	r.action = r.buildAllTabsButton()
 	r.create = r.buildCreateTabsButton()
 	r.tabs = t
 
 	r.box = NewHBox(r.create, r.action)
-	// 移除 OnScrolled 回调，因为不再是滚动容器
 	r.updateAllTabs()
 	r.updateCreateTab()
 	r.updateTabs()
@@ -245,7 +248,7 @@ var _ fyne.WidgetRenderer = (*docTabsRenderer)(nil)
 type docTabsRenderer struct {
 	baseTabsRenderer
 	docTabs      *DocTabs
-	scroller     *fyne.Container // 改为普通容器
+	scroller     *Scroll
 	box          *fyne.Container
 	create       *widget.Button
 	lastSelected int
@@ -258,7 +261,7 @@ func (r *docTabsRenderer) Layout(size fyne.Size) {
 	r.layout(r.docTabs, size)
 
 	// lay out buttons before updating indicator, which is relative to their position
-	buttons := r.scroller // 直接使用容器
+	buttons := r.tabButtons()
 	buttons.Layout.Layout(buttons.Objects, buttons.Size())
 	r.updateIndicator(r.docTabs.transitioning())
 
@@ -374,7 +377,44 @@ func (r *docTabsRenderer) buildTabButtons(count int, buttons *fyne.Container) {
 }
 
 func (r *docTabsRenderer) scrollToSelected() {
-	// 由于不使用滚动容器，这个函数现在只需要更新指示器
+	if r.docTabs.current < 0 {
+		return
+	}
+
+	buttons := r.tabButtons().Objects
+	if r.docTabs.current >= len(buttons) {
+		return
+	}
+
+	selected := buttons[r.docTabs.current]
+	selectedPos := selected.Position()
+	selectedSize := selected.Size()
+	offset := r.scroller.Offset
+	visibleSize := r.scroller.Size()
+
+	if r.docTabs.location == TabLocationLeading || r.docTabs.location == TabLocationTrailing {
+		switch {
+		case selectedPos.Y < offset.Y:
+			offset.Y = selectedPos.Y
+		case selectedPos.Y+selectedSize.Height > offset.Y+visibleSize.Height:
+			offset.Y = selectedPos.Y + selectedSize.Height - visibleSize.Height
+		}
+	} else {
+		switch {
+		case selectedPos.X < offset.X:
+			offset.X = selectedPos.X
+		case selectedPos.X+selectedSize.Width > offset.X+visibleSize.Width:
+			offset.X = selectedPos.X + selectedSize.Width - visibleSize.Width
+		}
+	}
+
+	if offset.X < 0 {
+		offset.X = 0
+	}
+	if offset.Y < 0 {
+		offset.Y = 0
+	}
+	r.scroller.ScrollToOffset(offset)
 	r.updateIndicator(false)
 }
 
@@ -389,7 +429,7 @@ func (r *docTabsRenderer) updateIndicator(animate bool) {
 	var selectedPos fyne.Position
 	var selectedSize fyne.Size
 
-	buttons := r.scroller.Objects // 直接使用容器的Objects
+	buttons := r.tabButtons().Objects
 
 	if r.docTabs.current >= len(buttons) {
 		if a := r.action; a != nil {
@@ -410,7 +450,7 @@ func (r *docTabsRenderer) updateIndicator(animate bool) {
 		}
 	}
 
-	scrollOffset := fyne.NewPos(0, 0) // 不再使用滚动，offset总是0
+	scrollOffset := r.scroller.Offset
 	scrollSize := r.scroller.Size()
 
 	var indicatorPos fyne.Position
@@ -468,17 +508,24 @@ func (r *docTabsRenderer) updateCreateTab() {
 
 func (r *docTabsRenderer) updateTabs() {
 	tabCount := len(r.docTabs.Items)
-	r.buildTabButtons(tabCount, r.scroller) // 直接使用容器
+	tabButtons := r.tabButtons()
+	r.buildTabButtons(tabCount, tabButtons)
 
 	// Set layout of tab bar containing tab buttons and overflow action
 	if r.docTabs.location == TabLocationLeading || r.docTabs.location == TabLocationTrailing {
 		r.bar.Layout = layout.NewBorderLayout(nil, r.box, nil, nil)
-		r.scroller.Layout = layout.NewVBoxLayout() // 垂直布局
+		r.scroller.Direction = ScrollVerticalOnly
+		tabButtons.Layout = layout.NewVBoxLayout()
 	} else {
 		r.bar.Layout = layout.NewBorderLayout(nil, nil, nil, r.box)
-		r.scroller.Layout = layout.NewHBoxLayout() // 水平布局
+		r.scroller.Direction = ScrollHorizontalOnly
+		tabButtons.Layout = layout.NewHBoxLayout()
 	}
 
 	r.bar.Objects = []fyne.CanvasObject{r.scroller, r.box}
 	r.bar.Refresh()
+}
+
+func (r *docTabsRenderer) tabButtons() *fyne.Container {
+	return r.scroller.Content.(*fyne.Container)
 }

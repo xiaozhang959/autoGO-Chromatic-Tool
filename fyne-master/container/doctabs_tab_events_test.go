@@ -59,6 +59,23 @@ func TestDocTabs_CloseTriggersOnClosed(t *testing.T) {
 	assert.Equal(t, []*TabItem{tab2}, tabs.Items)
 }
 
+func TestDocTabs_TabBarUsesScrollForOverflow(t *testing.T) {
+	tabs := NewDocTabs(
+		NewTabItem("very-long-tab-name-1", widget.NewLabel("Test1")),
+		NewTabItem("very-long-tab-name-2", widget.NewLabel("Test2")),
+		NewTabItem("very-long-tab-name-3", widget.NewLabel("Test3")),
+		NewTabItem("very-long-tab-name-4", widget.NewLabel("Test4")),
+	)
+	renderer := test.TempWidgetRenderer(t, tabs).(*docTabsRenderer)
+
+	scroll, ok := renderer.bar.Objects[0].(*Scroll)
+	require.True(t, ok)
+
+	tabButtons := scroll.Content.(*fyne.Container)
+	require.Len(t, tabButtons.Objects, 4)
+	assert.Less(t, scroll.MinSize().Width, tabButtons.MinSize().Width)
+}
+
 func docTabsTabButtons(renderer *docTabsRenderer) []fyne.CanvasObject {
 	if scroll, ok := renderer.bar.Objects[0].(*Scroll); ok {
 		return scroll.Content.(*fyne.Container).Objects
