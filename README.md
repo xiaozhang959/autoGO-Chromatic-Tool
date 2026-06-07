@@ -47,7 +47,11 @@ go run .
 
 ## 编译
 
-Windows 完整编译命令（带图标，启动不弹命令行窗口）：
+### 本地普通构建
+
+普通构建不启用 `opencv_cgo`，不需要本机 OpenCV 环境，适合日常开发和快速验证。OpenCV 真实找图后端不会被编入。
+
+Windows（带图标，启动不弹命令行窗口）：
 
 ```powershell
 # 首次编译前安装资源生成工具
@@ -62,6 +66,42 @@ go build -ldflags="-s -w -H windowsgui" -o "build/AutoGo图色助手.exe" .
 # 清理临时资源文件，图标已嵌入 exe
 Remove-Item rsrc_windows_amd64.syso
 ```
+
+macOS / Linux：
+
+```bash
+mkdir -p build
+go build -ldflags="-s -w" -o "build/AutoGo图色助手" .
+```
+
+### 本地 OpenCV 单文件构建
+
+OpenCV 单文件构建会启用 `opencv_cgo`，并最小静态编译 OpenCV `4.13.0`。首次执行会下载并编译 OpenCV，耗时较长；后续会复用默认工作目录缓存。生成的 Windows exe / macOS 可执行文件不需要额外放置 OpenCV DLL 或 dylib。
+
+Windows amd64：
+
+```powershell
+# 需要 MSYS2 UCRT64 MinGW 工具链，确保 gcc/g++/mingw32-make 可用
+$env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
+
+powershell -ExecutionPolicy Bypass `
+  -File ".\scripts\build_with_static_opencv_windows.ps1" `
+  -Output "build\AutoGo图色助手-opencv.exe" `
+  -BuildOpenCVIfMissing
+```
+
+macOS arm64 / amd64：
+
+```bash
+# 需要 Xcode Command Line Tools 和 cmake；如缺少 cmake 可先执行：brew install cmake
+bash scripts/build_with_static_opencv_macos.sh \
+  --output "build/AutoGo图色助手-opencv" \
+  --arch "$(go env GOARCH)" \
+  --build-opencv-if-missing \
+  --ldflags "-s -w"
+```
+
+如需指定 macOS 架构，将 `--arch` 改为 `arm64` 或 `amd64`。
 
 ## 测试
 
