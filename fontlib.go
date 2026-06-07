@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -928,14 +929,25 @@ func (v *fontImageViewer) updateMagnifier(pos fyne.Position) {
 		v.hideMagnifier()
 		return
 	}
-	zoom := v.zoom
-	if zoom <= 0 {
-		zoom = 1
+	viewPos := pos.Subtract(v.scroll.Offset)
+	v.magnifier.Update(v.image, p.X, p.Y, viewPos.X, viewPos.Y)
+}
+
+func (v *fontImageViewer) updateMagnifierFromViewport(pos fyne.Position) {
+	contentPos := pos
+	if v.scroll != nil {
+		contentPos = pos.Add(v.scroll.Offset)
 	}
-	bounds := v.image.Bounds()
-	viewX := float32(p.X-bounds.Min.X)*zoom - v.scroll.Offset.X
-	viewY := float32(p.Y-bounds.Min.Y)*zoom - v.scroll.Offset.Y
-	v.magnifier.Update(v.image, p.X, p.Y, viewX, viewY)
+	p, ok := v.imagePosition(contentPos)
+	if !ok {
+		v.hideMagnifier()
+		return
+	}
+	if !magnifierEnabled || v.magnifier == nil || v.image == nil || v.dragMode != fontImageDragNone {
+		v.hideMagnifier()
+		return
+	}
+	v.magnifier.Update(v.image, p.X, p.Y, pos.X, pos.Y)
 }
 
 func (v *fontImageViewer) ClearSelection() {
@@ -1032,18 +1044,33 @@ func (v *fontImageViewer) zoomAt(pos fyne.Position, zoomIn bool) {
 		return
 	}
 
+	oldW, oldH := v.displayPixelSizeForZoom(oldScale)
+	bounds := v.image.Bounds()
 	contentPos := pos
 	if v.scroll != nil {
 		contentPos = pos.Add(v.scroll.Offset)
 	}
-	imageX := contentPos.X / oldScale
-	imageY := contentPos.Y / oldScale
+	if contentPos.X < 0 {
+		contentPos.X = 0
+	} else if contentPos.X > float32(oldW) {
+		contentPos.X = float32(oldW)
+	}
+	if contentPos.Y < 0 {
+		contentPos.Y = 0
+	} else if contentPos.Y > float32(oldH) {
+		contentPos.Y = float32(oldH)
+	}
+	imageX := contentPos.X * float32(bounds.Dx()) / float32(oldW)
+	imageY := contentPos.Y * float32(bounds.Dy()) / float32(oldH)
 
 	v.zoom = newScale
 	v.Refresh()
 	if v.scroll != nil {
+		newW, newH := v.displayPixelSizeForZoom(newScale)
+		newContentX := imageX * float32(newW) / float32(bounds.Dx())
+		newContentY := imageY * float32(newH) / float32(bounds.Dy())
 		v.scroll.Refresh()
-		v.scroll.ScrollToOffset(fyne.NewPos(imageX*newScale-pos.X, imageY*newScale-pos.Y))
+		v.scroll.ScrollToOffset(fyne.NewPos(newContentX-pos.X, newContentY-pos.Y))
 	}
 }
 
@@ -1051,17 +1078,13 @@ func (v *fontImageViewer) imagePosition(pos fyne.Position) (image.Point, bool) {
 	if v.image == nil {
 		return image.Point{}, false
 	}
-	zoom := v.zoom
-	if zoom <= 0 {
-		zoom = 1
-	}
 	bounds := v.image.Bounds()
-	displaySize := v.minSize()
-	if pos.X < 0 || pos.Y < 0 || pos.X >= displaySize.Width || pos.Y >= displaySize.Height {
+	displayW, displayH := v.displayPixelSize()
+	if pos.X < 0 || pos.Y < 0 || pos.X >= float32(displayW) || pos.Y >= float32(displayH) {
 		return image.Point{}, false
 	}
-	x := bounds.Min.X + int(pos.X/zoom)
-	y := bounds.Min.Y + int(pos.Y/zoom)
+	x := bounds.Min.X + int(pos.X*float32(bounds.Dx())/float32(displayW))
+	y := bounds.Min.Y + int(pos.Y*float32(bounds.Dy())/float32(displayH))
 	if x < bounds.Min.X || x >= bounds.Max.X || y < bounds.Min.Y || y >= bounds.Max.Y {
 		return image.Point{}, false
 	}
@@ -1090,15 +1113,31 @@ func (v *fontImageViewer) currentDisplaySelection() (image.Rectangle, bool) {
 }
 
 func (v *fontImageViewer) minSize() fyne.Size {
+	w, h := v.displayPixelSize()
+	return fyne.NewSize(float32(w), float32(h))
+}
+
+func (v *fontImageViewer) displayPixelSize() (int, int) {
+	return v.displayPixelSizeForZoom(v.zoom)
+}
+
+func (v *fontImageViewer) displayPixelSizeForZoom(zoom float32) (int, int) {
 	if v.image == nil || v.image.Bounds().Empty() {
-		return fyne.NewSize(1, 1)
+		return 1, 1
 	}
 	bounds := v.image.Bounds()
-	zoom := v.zoom
 	if zoom <= 0 {
 		zoom = 1
 	}
-	return fyne.NewSize(float32(bounds.Dx())*zoom, float32(bounds.Dy())*zoom)
+	w := int(math.Ceil(float64(float32(bounds.Dx()) * zoom)))
+	h := int(math.Ceil(float64(float32(bounds.Dy()) * zoom)))
+	if w < 1 {
+		w = 1
+	}
+	if h < 1 {
+		h = 1
+	}
+	return w, h
 }
 
 func (v *fontImageViewer) CreateRenderer() fyne.WidgetRenderer {
@@ -1206,13 +1245,17 @@ func (v *fontImageViewer) MouseOut() {
 	v.hideMagnifier()
 }
 
+func (v *fontImageViewer) Cursor() desktop.Cursor {
+	return desktop.CrosshairCursor
+}
+
 func (v *fontImageViewer) Scrolled(e *fyne.ScrollEvent) {
-	defer v.updateMagnifier(e.Position)
 	driver, ok := fyne.CurrentApp().Driver().(desktop.Driver)
 	if !ok || driver.CurrentKeyModifiers()&fyne.KeyModifierControl == 0 {
 		if v.scroll != nil {
 			v.scroll.Scrolled(e)
 		}
+		v.updateMagnifierFromViewport(e.Position)
 		return
 	}
 
@@ -1224,6 +1267,7 @@ func (v *fontImageViewer) Scrolled(e *fyne.ScrollEvent) {
 		return
 	}
 	v.zoomAt(e.Position, delta > 0)
+	v.updateMagnifierFromViewport(e.Position)
 }
 
 type fontScrollOverlay struct {
@@ -1299,14 +1343,13 @@ func (r *fontImageViewerRenderer) updateSelection() {
 		return
 	}
 	bounds := r.viewer.image.Bounds()
-	zoom := r.viewer.zoom
-	if zoom <= 0 {
-		zoom = 1
-	}
-	x := float32(rect.Min.X-bounds.Min.X) * zoom
-	y := float32(rect.Min.Y-bounds.Min.Y) * zoom
-	w := float32(rect.Dx()) * zoom
-	h := float32(rect.Dy()) * zoom
+	displayW, displayH := r.viewer.displayPixelSize()
+	scaleX := float32(displayW) / float32(bounds.Dx())
+	scaleY := float32(displayH) / float32(bounds.Dy())
+	x := float32(rect.Min.X-bounds.Min.X) * scaleX
+	y := float32(rect.Min.Y-bounds.Min.Y) * scaleY
+	w := float32(rect.Dx()) * scaleX
+	h := float32(rect.Dy()) * scaleY
 	if w < 1 {
 		w = 1
 	}

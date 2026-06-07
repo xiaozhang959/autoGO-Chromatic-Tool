@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
 )
 
 func newSolidFontTestImage(w, h int, c color.NRGBA) *image.NRGBA {
@@ -150,6 +151,32 @@ func TestFontImageViewerImagePositionRejectsOutsideDisplayedImage(t *testing.T) 
 	}
 	if _, ok := viewer.imagePosition(fyne.NewPos(1, 3)); ok {
 		t.Fatal("expected y at displayed image edge to be rejected")
+	}
+}
+
+func TestFontImageViewerImagePositionUsesRoundedDisplaySize(t *testing.T) {
+	img := newSolidFontTestImage(10, 3, color.NRGBA{255, 255, 255, 255})
+	viewer := newFontImageViewer()
+	viewer.SetImage(img)
+	viewer.SetZoom(1.1)
+
+	displayW, displayH := viewer.displayPixelSize()
+	if displayW != 11 || displayH != 4 {
+		t.Fatalf("display size = %dx%d, want 11x4", displayW, displayH)
+	}
+	point, ok := viewer.imagePosition(fyne.NewPos(10.9, 3.9))
+	if !ok || point != image.Pt(9, 2) {
+		t.Fatalf("imagePosition at rounded display edge = %v, %v; want (9,2), true", point, ok)
+	}
+	if _, ok := viewer.imagePosition(fyne.NewPos(11, 1)); ok {
+		t.Fatal("expected x at rounded display edge to be rejected")
+	}
+}
+
+func TestFontImageViewerUsesCrosshairCursor(t *testing.T) {
+	viewer := newFontImageViewer()
+	if got := viewer.Cursor(); got != desktop.CrosshairCursor {
+		t.Fatalf("cursor = %v, want %v", got, desktop.CrosshairCursor)
 	}
 }
 
