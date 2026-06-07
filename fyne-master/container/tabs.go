@@ -504,18 +504,22 @@ const (
 
 var _ fyne.Widget = (*tabButton)(nil)
 var _ fyne.Tappable = (*tabButton)(nil)
+var _ fyne.SecondaryTappable = (*tabButton)(nil)
+var _ fyne.Scrollable = (*tabButton)(nil)
 var _ desktop.Hoverable = (*tabButton)(nil)
 
 type tabButton struct {
 	widget.DisableableWidget
-	hovered       bool
-	icon          fyne.Resource
-	iconPosition  buttonIconPosition
-	importance    widget.Importance
-	onTapped      func()
-	onClosed      func()
-	text          string
-	textAlignment fyne.TextAlign
+	hovered           bool
+	icon              fyne.Resource
+	iconPosition      buttonIconPosition
+	importance        widget.Importance
+	onTapped          func()
+	onClosed          func()
+	onScrolled        func(*fyne.ScrollEvent)
+	onTappedSecondary func(*fyne.PointEvent)
+	text              string
+	textAlignment     fyne.TextAlign
 
 	tabs baseTabs
 }
@@ -576,12 +580,30 @@ func (b *tabButton) MouseOut() {
 	b.Refresh()
 }
 
+func (b *tabButton) Scrolled(event *fyne.ScrollEvent) {
+	if b.Disabled() {
+		return
+	}
+	if f := b.onScrolled; f != nil {
+		f(event)
+	}
+}
+
 func (b *tabButton) Tapped(*fyne.PointEvent) {
 	if b.Disabled() {
 		return
 	}
 
 	b.onTapped()
+}
+
+func (b *tabButton) TappedSecondary(event *fyne.PointEvent) {
+	if b.Disabled() {
+		return
+	}
+	if f := b.onTappedSecondary; f != nil {
+		f(event)
+	}
 }
 
 type tabButtonRenderer struct {
