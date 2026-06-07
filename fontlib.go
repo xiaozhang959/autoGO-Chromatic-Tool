@@ -1090,6 +1090,28 @@ func (t *tappableArea) Tapped(e *fyne.PointEvent) {
 	}
 }
 
+type tappableContent struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+	onTap   func()
+}
+
+func newTappableContent(content fyne.CanvasObject, onTap func()) *tappableContent {
+	t := &tappableContent{content: content, onTap: onTap}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+func (t *tappableContent) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(t.content)
+}
+
+func (t *tappableContent) Tapped(*fyne.PointEvent) {
+	if t.onTap != nil {
+		t.onTap()
+	}
+}
+
 type hoverContainer struct {
 	widget.BaseWidget
 	content fyne.CanvasObject
@@ -1786,6 +1808,8 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	var charHexCache []string
 	var charWpCache []int
 	var charMatchedLib []bool
+	var charSelected []bool
+	var charSelectChecks []*widget.Check
 	var binaryRegion *image.NRGBA
 	var regionImg image.Image
 	var fontLibChars []FontChar
@@ -1867,6 +1891,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	var updateReferenceList func()
 	var clearReferencePoints func()
 	var setCropConfirmVisible func(bool)
+	var selectSplitRows func(bool)
 
 	referenceDots := make([]*fontReferenceDot, 5)
 	for i := range referenceDots {
@@ -2024,6 +2049,8 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		charHexCache = make([]string, len(charCells))
 		charWpCache = make([]int, len(charCells))
 		charMatchedLib = make([]bool, len(charCells))
+		charSelected = make([]bool, len(charCells))
+		charSelectChecks = make([]*widget.Check, len(charCells))
 
 		if len(charCells) == 0 {
 			splitListBox.Add(widget.NewLabel("暂无分割结果"))
@@ -2040,6 +2067,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 		}
 
 		for i, cell := range charCells {
+			idx := i
 			hexData, wp := encodeBitmapHex(cell.Bitmap)
 			charHexCache[i] = hexData
 			charWpCache[i] = wp
@@ -2056,6 +2084,8 @@ func openFontLibWindow(parentWindow fyne.Window) {
 					charMatchedLib[i] = true
 				}
 			}
+			canAdd := matchedName == ""
+			charSelected[i] = canAdd
 
 			previewImg := canvas.NewImageFromImage(createCharPreview(cell.Bitmap, 2))
 			previewImg.ScaleMode = canvas.ImageScalePixels
@@ -2079,12 +2109,43 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			}
 			charNameEntries[i] = nameEntry
 
+			selectCheck := widget.NewCheck("入库", func(checked bool) {
+				if idx >= 0 && idx < len(charSelected) {
+					charSelected[idx] = checked
+				}
+			})
+			selectCheck.SetChecked(canAdd)
+			if !canAdd {
+				selectCheck.Disable()
+			}
+			charSelectChecks[i] = selectCheck
+
+			toggleRow := func() {
+				if idx < 0 || idx >= len(charMatchedLib) || charMatchedLib[idx] || idx >= len(charSelectChecks) || charSelectChecks[idx] == nil {
+					return
+				}
+				charSelectChecks[idx].SetChecked(!charSelectChecks[idx].Checked)
+			}
 			infoBox := container.NewVBox(idLabel, statusLabel)
-			row := container.NewBorder(nil, nil, previewImg, nameEntryContainer, infoBox)
+			clickablePreview := newTappableContent(previewImg, toggleRow)
+			clickableInfo := newTappableContent(infoBox, toggleRow)
+			row := container.NewBorder(nil, nil, container.NewHBox(selectCheck, clickablePreview), nameEntryContainer, clickableInfo)
 			splitListBox.Add(row)
 			splitListBox.Add(widget.NewSeparator())
 		}
 		splitListBox.Refresh()
+	}
+
+	selectSplitRows = func(selected bool) {
+		for i, check := range charSelectChecks {
+			if check == nil || i >= len(charMatchedLib) || charMatchedLib[i] {
+				continue
+			}
+			check.SetChecked(selected)
+			if i < len(charSelected) {
+				charSelected[i] = selected
+			}
+		}
 	}
 
 	refreshPreview = func() {
@@ -2148,12 +2209,17 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	})
 	quickFillBtn.Importance = widget.HighImportance
 
-	addToLibBtn := widget.NewButtonWithIcon("添加到字库", theme.ContentAddIcon(), func() {
+	addToLibBtn := widget.NewButtonWithIcon("添加选中到字库", theme.ContentAddIcon(), func() {
 		added := 0
+		selectedRows := 0
 		for i, cell := range charCells {
-			if i >= len(charNameEntries) || i >= len(charMatchedLib) {
+			if i >= len(charNameEntries) || i >= len(charMatchedLib) || i >= len(charSelected) {
 				break
 			}
+			if !charSelected[i] {
+				continue
+			}
+			selectedRows++
 			if charMatchedLib[i] {
 				continue
 			}
@@ -2175,12 +2241,31 @@ func openFontLibWindow(parentWindow fyne.Window) {
 			})
 			added++
 		}
+		if selectedRows == 0 {
+			dialog.ShowInformation("提示", "请先勾选要添加到字库的分割行", w)
+			return
+		}
+		if added == 0 {
+			dialog.ShowInformation("提示", "已勾选的分割行没有可添加内容，请先填写字符", w)
+			return
+		}
 		if added > 0 {
 			rebuildLibList()
 			refreshPreview()
 		}
 	})
 	addToLibBtn.Importance = widget.HighImportance
+
+	selectAllBtn := widget.NewButton("全选", func() {
+		if selectSplitRows != nil {
+			selectSplitRows(true)
+		}
+	})
+	clearSelectBtn := widget.NewButton("全不选", func() {
+		if selectSplitRows != nil {
+			selectSplitRows(false)
+		}
+	})
 
 	matchLibBtn := widget.NewButtonWithIcon("匹配字库中的文字", theme.SearchIcon(), func() {
 		if len(charCells) == 0 {
@@ -2501,9 +2586,10 @@ func openFontLibWindow(parentWindow fyne.Window) {
 
 	quickFillRow := container.NewBorder(nil, nil, nil, quickFillBtn, quickFillEntry)
 	similarityRow := container.NewBorder(nil, nil, widget.NewLabel("最低相似度:"), nil, similarityEntry)
+	selectRow := container.NewGridWithColumns(2, selectAllBtn, clearSelectBtn)
 	splitPanel := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("分割结果", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator()),
-		container.NewVBox(widget.NewSeparator(), similarityRow, matchLibBtn, quickFillRow, addToLibBtn),
+		container.NewVBox(widget.NewSeparator(), similarityRow, matchLibBtn, selectRow, quickFillRow, addToLibBtn),
 		nil, nil,
 		container.NewVScroll(splitListBox),
 	)
