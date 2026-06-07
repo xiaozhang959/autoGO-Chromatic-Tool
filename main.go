@@ -8877,7 +8877,6 @@ func main() {
 				bottomActionButtons,
 			)),
 			container.NewTabItem("点阵OCR", container.NewCenter(widget.NewLabel("点阵OCR布局待实现"))),
-			container.NewTabItem("光学OCR", container.NewCenter(widget.NewLabel("光学OCR布局待实现"))),
 		),
 	)
 
