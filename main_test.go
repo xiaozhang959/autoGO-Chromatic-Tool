@@ -996,6 +996,50 @@ func TestInitialRightPanelSplitOffsetFallsBackForInvalidValue(t *testing.T) {
 	}
 }
 
+func TestInitialFontLibWindowSizeUsesSavedWidth(t *testing.T) {
+	config := defaultUserConfig()
+	config.FontLibWindowWidth = 1280
+
+	got := initialFontLibWindowSize(config)
+	if got.Width != 1280 {
+		t.Fatalf("font lib window width mismatch: want 1280 got %v", got.Width)
+	}
+}
+
+func TestNormalizeUserConfigFontLibLayout(t *testing.T) {
+	config := normalizeUserConfig(UserConfig{
+		FontLibWindowWidth: 500,
+		FontLibRightSplit:  1.2,
+	})
+	if config.FontLibWindowWidth != 0 {
+		t.Fatalf("invalid font lib window width was not reset: got %v", config.FontLibWindowWidth)
+	}
+	if config.FontLibRightSplit != 0 {
+		t.Fatalf("invalid font lib right split was not reset: got %v", config.FontLibRightSplit)
+	}
+
+	config = normalizeUserConfig(UserConfig{
+		FontLibWindowWidth: 1200,
+		FontLibRightSplit:  0.66,
+	})
+	if config.FontLibWindowWidth != 1200 {
+		t.Fatalf("valid font lib window width was not preserved: got %v", config.FontLibWindowWidth)
+	}
+	if config.FontLibRightSplit != 0.66 {
+		t.Fatalf("valid font lib right split was not preserved: got %v", config.FontLibRightSplit)
+	}
+}
+
+func TestInitialFontLibRightSplitOffsetUsesSavedValue(t *testing.T) {
+	config := defaultUserConfig()
+	config.FontLibRightSplit = 0.72
+
+	got := initialFontLibRightSplitOffset(config)
+	if got != 0.72 {
+		t.Fatalf("font lib split offset mismatch: want 0.72 got %v", got)
+	}
+}
+
 func TestBuildImagesAPICodeColorExportUsesOfficialParamOrder(t *testing.T) {
 	withColorPointsForTest(t, []ColorPoint{
 		{Position: "10, 20", Color: "#081029", Offset: "202020", Selected: true},

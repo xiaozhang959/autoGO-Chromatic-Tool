@@ -1798,10 +1798,23 @@ func (r *fontImageViewerRenderer) updateSelection() {
 
 // ==================== 字库制作窗口 ====================
 
+const fontLibWindowTitle = "AutoGo 字库制作"
+
+var fontLibWindow fyne.Window
+
 func openFontLibWindow(parentWindow fyne.Window) {
+	if fontLibWindow != nil {
+		fontLibWindow.Show()
+		restoreWindowByTitle(fontLibWindowTitle)
+		fontLibWindow.RequestFocus()
+		return
+	}
+
 	a := fyne.CurrentApp()
-	w := a.NewWindow("AutoGo 字库制作")
-	fontLibWindowSize := initialWindowSize(0.82, 0.78)
+	w := a.NewWindow(fontLibWindowTitle)
+	fontLibWindow = w
+	fontLibConfig := loadUserConfig()
+	fontLibWindowSize := initialFontLibWindowSize(fontLibConfig)
 
 	var charCells []CharCell
 	var charNameEntries []*widget.Entry
@@ -2256,18 +2269,29 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	})
 	addToLibBtn.Importance = widget.HighImportance
 
-	selectAllBtn := widget.NewButton("全选", func() {
-		if selectSplitRows != nil {
-			selectSplitRows(true)
+	toggleSelectBtn := widget.NewButton("全选/全不选", func() {
+		if selectSplitRows == nil {
+			return
 		}
-	})
-	clearSelectBtn := widget.NewButton("全不选", func() {
-		if selectSplitRows != nil {
-			selectSplitRows(false)
+		hasSelectable := false
+		allSelected := true
+		for i := range charCells {
+			if i >= len(charMatchedLib) || charMatchedLib[i] {
+				continue
+			}
+			hasSelectable = true
+			if i >= len(charSelected) || !charSelected[i] {
+				allSelected = false
+				break
+			}
 		}
+		if !hasSelectable {
+			return
+		}
+		selectSplitRows(!allSelected)
 	})
 
-	matchLibBtn := widget.NewButtonWithIcon("匹配字库中的文字", theme.SearchIcon(), func() {
+	matchLibBtn := widget.NewButtonWithIcon("匹配字库文字", theme.SearchIcon(), func() {
 		if len(charCells) == 0 {
 			dialog.ShowInformation("提示", "暂无分割结果，请先加载图片并刷新预览", w)
 			return
@@ -2586,18 +2610,18 @@ func openFontLibWindow(parentWindow fyne.Window) {
 
 	quickFillRow := container.NewBorder(nil, nil, nil, quickFillBtn, quickFillEntry)
 	similarityRow := container.NewBorder(nil, nil, widget.NewLabel("最低相似度:"), nil, similarityEntry)
-	selectRow := container.NewGridWithColumns(2, selectAllBtn, clearSelectBtn)
+	matchRow := container.NewBorder(nil, nil, nil, matchLibBtn, similarityRow)
+	addSelectedRow := container.NewBorder(nil, nil, toggleSelectBtn, nil, addToLibBtn)
 	splitPanel := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("分割结果", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator()),
-		container.NewVBox(widget.NewSeparator(), similarityRow, matchLibBtn, selectRow, quickFillRow, addToLibBtn),
+		container.NewVBox(widget.NewSeparator(), matchRow, quickFillRow, addSelectedRow),
 		nil, nil,
 		container.NewVScroll(splitListBox),
 	)
 
 	libButtons := container.NewVBox(
 		widget.NewSeparator(),
-		container.NewGridWithColumns(2, exportBtn, copyBtn),
-		container.NewGridWithColumns(2, importBtn, clearLibBtn),
+		container.NewGridWithColumns(4, importBtn, exportBtn, copyBtn, clearLibBtn),
 	)
 	libPanel := container.NewBorder(
 		container.NewVBox(libHeaderLabel, libSearchEntry, widget.NewSeparator()),
@@ -2612,7 +2636,19 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	rightBg.SetMinSize(fyne.NewSize(320, 0))
 	rightPanel := container.NewStack(rightBg, container.NewPadded(rightSplit))
 	centerAndRightSplit := container.NewHSplit(centerSplit, rightPanel)
-	centerAndRightSplit.Offset = 0.68
+	centerAndRightSplit.Offset = initialFontLibRightSplitOffset(fontLibConfig)
+
+	w.SetOnClosed(func() {
+		savedConfig := loadUserConfig()
+		if size := w.Canvas().Size(); size.Width > 0 {
+			savedConfig.FontLibWindowWidth = normalizeFontLibWindowWidth(size.Width)
+		}
+		savedConfig.FontLibRightSplit = normalizeSplitOffset(centerAndRightSplit.Offset)
+		saveUserConfigSilently(savedConfig)
+		if fontLibWindow == w {
+			fontLibWindow = nil
+		}
+	})
 
 	mainContent := container.NewBorder(nil, nil, leftPanel, nil, centerAndRightSplit)
 	rebuildLibList()
