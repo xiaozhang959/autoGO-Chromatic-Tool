@@ -1798,10 +1798,20 @@ func (r *fontImageViewerRenderer) updateSelection() {
 
 // ==================== 字库制作窗口 ====================
 
+var fontLibWindow fyne.Window
+
 func openFontLibWindow(parentWindow fyne.Window) {
+	if fontLibWindow != nil {
+		fontLibWindow.Show()
+		fontLibWindow.RequestFocus()
+		return
+	}
+
 	a := fyne.CurrentApp()
 	w := a.NewWindow("AutoGo 字库制作")
-	fontLibWindowSize := initialWindowSize(0.82, 0.78)
+	fontLibWindow = w
+	fontLibConfig := loadUserConfig()
+	fontLibWindowSize := initialFontLibWindowSize(fontLibConfig)
 
 	var charCells []CharCell
 	var charNameEntries []*widget.Entry
@@ -2623,7 +2633,19 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	rightBg.SetMinSize(fyne.NewSize(320, 0))
 	rightPanel := container.NewStack(rightBg, container.NewPadded(rightSplit))
 	centerAndRightSplit := container.NewHSplit(centerSplit, rightPanel)
-	centerAndRightSplit.Offset = 0.68
+	centerAndRightSplit.Offset = initialFontLibRightSplitOffset(fontLibConfig)
+
+	w.SetOnClosed(func() {
+		savedConfig := loadUserConfig()
+		if size := w.Canvas().Size(); size.Width > 0 {
+			savedConfig.FontLibWindowWidth = normalizeFontLibWindowWidth(size.Width)
+		}
+		savedConfig.FontLibRightSplit = normalizeSplitOffset(centerAndRightSplit.Offset)
+		saveUserConfigSilently(savedConfig)
+		if fontLibWindow == w {
+			fontLibWindow = nil
+		}
+	})
 
 	mainContent := container.NewBorder(nil, nil, leftPanel, nil, centerAndRightSplit)
 	rebuildLibList()

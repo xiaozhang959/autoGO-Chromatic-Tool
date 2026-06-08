@@ -71,6 +71,8 @@ type UserConfig struct {
 	GridSpacing   int    `json:"grid_spacing"`
 
 	RightPanelSplitOffset float64                   `json:"right_panel_split_offset"`
+	FontLibWindowWidth    float32                   `json:"font_lib_window_width"`
+	FontLibRightSplit     float64                   `json:"font_lib_right_split"`
 	CustomThemeSchemes    []CustomThemeSchemeConfig `json:"custom_theme_schemes"`
 	FormatTemplates       map[string]string         `json:"format_templates"`
 	Shortcuts             map[string]string         `json:"shortcuts"`
@@ -1250,6 +1252,28 @@ func initialRightPanelSplitOffset(config UserConfig, totalWidth, leftWidth, righ
 	return splitOffsetForFixedRightWidth(totalWidth, leftWidth, rightWidth)
 }
 
+func normalizeFontLibWindowWidth(width float32) float32 {
+	if math.IsNaN(float64(width)) || width < 600 || width > 4000 {
+		return 0
+	}
+	return width
+}
+
+func initialFontLibWindowSize(config UserConfig) fyne.Size {
+	size := initialWindowSize(0.82, 0.78)
+	if width := normalizeFontLibWindowWidth(config.FontLibWindowWidth); width > 0 {
+		size.Width = width
+	}
+	return size
+}
+
+func initialFontLibRightSplitOffset(config UserConfig) float64 {
+	if offset := normalizeSplitOffset(config.FontLibRightSplit); offset > 0 {
+		return offset
+	}
+	return 0.68
+}
+
 // 固定高度的容器布局
 type fixedHeightContainer struct {
 	widget.BaseWidget
@@ -1488,6 +1512,8 @@ func normalizeUserConfig(config UserConfig) UserConfig {
 		config.GridSpacing = defaults.GridSpacing
 	}
 	config.RightPanelSplitOffset = normalizeSplitOffset(config.RightPanelSplitOffset)
+	config.FontLibWindowWidth = normalizeFontLibWindowWidth(config.FontLibWindowWidth)
+	config.FontLibRightSplit = normalizeSplitOffset(config.FontLibRightSplit)
 	config.FormatTemplates = normalizeAPIFormatTemplates(config.FormatTemplates)
 	config.Shortcuts = normalizeShortcutConfig(config.Shortcuts)
 	config.ToolButtons = normalizeToolButtonConfigs(config.ToolButtons)
@@ -8827,6 +8853,7 @@ func main() {
 		if centerRightSplit != nil {
 			rightPanelSplitOffset = normalizeSplitOffset(centerRightSplit.Offset)
 		}
+		savedConfig := loadUserConfig()
 		saveUserConfigSilently(UserConfig{
 			Precision:     strings.TrimSpace(precisionEntry.Text),
 			UniformOffset: strings.TrimSpace(uniformOffsetEntry.Text),
@@ -8846,6 +8873,8 @@ func main() {
 			GridSpacing:   gridSpacingValue,
 
 			RightPanelSplitOffset: rightPanelSplitOffset,
+			FontLibWindowWidth:    savedConfig.FontLibWindowWidth,
+			FontLibRightSplit:     savedConfig.FontLibRightSplit,
 			CustomThemeSchemes:    copyCustomThemeSchemes(customThemeSchemesValue),
 			FormatTemplates:       copyAPIFormatTemplates(apiFormatTemplates),
 			Shortcuts:             copyShortcutConfig(shortcutConfig),
