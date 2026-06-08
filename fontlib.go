@@ -1798,17 +1798,20 @@ func (r *fontImageViewerRenderer) updateSelection() {
 
 // ==================== 字库制作窗口 ====================
 
+const fontLibWindowTitle = "AutoGo 字库制作"
+
 var fontLibWindow fyne.Window
 
 func openFontLibWindow(parentWindow fyne.Window) {
 	if fontLibWindow != nil {
 		fontLibWindow.Show()
+		restoreWindowByTitle(fontLibWindowTitle)
 		fontLibWindow.RequestFocus()
 		return
 	}
 
 	a := fyne.CurrentApp()
-	w := a.NewWindow("AutoGo 字库制作")
+	w := a.NewWindow(fontLibWindowTitle)
 	fontLibWindow = w
 	fontLibConfig := loadUserConfig()
 	fontLibWindowSize := initialFontLibWindowSize(fontLibConfig)
