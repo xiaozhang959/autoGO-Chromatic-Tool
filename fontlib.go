@@ -2597,7 +2597,7 @@ func openFontLibWindow(parentWindow fyne.Window) {
 
 	quickFillRow := container.NewBorder(nil, nil, nil, quickFillBtn, quickFillEntry)
 	similarityRow := container.NewBorder(nil, nil, widget.NewLabel("最低相似度:"), nil, similarityEntry)
-	matchRow := container.NewBorder(nil, nil, matchLibBtn, nil, similarityRow)
+	matchRow := container.NewBorder(nil, nil, nil, matchLibBtn, similarityRow)
 	addSelectedRow := container.NewBorder(nil, nil, toggleSelectBtn, nil, addToLibBtn)
 	splitPanel := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("分割结果", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator()),
