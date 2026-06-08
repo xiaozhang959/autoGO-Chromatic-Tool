@@ -47,6 +47,11 @@
 
 ![节点工具截图](docs/images/node-tool.png)
 
+- 字库制作页面
+<img width="1419" height="907" alt="图片" src="https://github.com/user-attachments/assets/04dea999-6d37-4855-993b-224673c14f09" />
+
+
+
 
 
 ## 运行
