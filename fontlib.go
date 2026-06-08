@@ -2256,18 +2256,29 @@ func openFontLibWindow(parentWindow fyne.Window) {
 	})
 	addToLibBtn.Importance = widget.HighImportance
 
-	selectAllBtn := widget.NewButton("全选", func() {
-		if selectSplitRows != nil {
-			selectSplitRows(true)
+	toggleSelectBtn := widget.NewButton("全选/全不选", func() {
+		if selectSplitRows == nil {
+			return
 		}
-	})
-	clearSelectBtn := widget.NewButton("全不选", func() {
-		if selectSplitRows != nil {
-			selectSplitRows(false)
+		hasSelectable := false
+		allSelected := true
+		for i := range charCells {
+			if i >= len(charMatchedLib) || charMatchedLib[i] {
+				continue
+			}
+			hasSelectable = true
+			if i >= len(charSelected) || !charSelected[i] {
+				allSelected = false
+				break
+			}
 		}
+		if !hasSelectable {
+			return
+		}
+		selectSplitRows(!allSelected)
 	})
 
-	matchLibBtn := widget.NewButtonWithIcon("匹配字库中的文字", theme.SearchIcon(), func() {
+	matchLibBtn := widget.NewButtonWithIcon("匹配字库文字", theme.SearchIcon(), func() {
 		if len(charCells) == 0 {
 			dialog.ShowInformation("提示", "暂无分割结果，请先加载图片并刷新预览", w)
 			return
@@ -2586,18 +2597,18 @@ func openFontLibWindow(parentWindow fyne.Window) {
 
 	quickFillRow := container.NewBorder(nil, nil, nil, quickFillBtn, quickFillEntry)
 	similarityRow := container.NewBorder(nil, nil, widget.NewLabel("最低相似度:"), nil, similarityEntry)
-	selectRow := container.NewGridWithColumns(2, selectAllBtn, clearSelectBtn)
+	matchRow := container.NewBorder(nil, nil, matchLibBtn, nil, similarityRow)
+	addSelectedRow := container.NewBorder(nil, nil, toggleSelectBtn, nil, addToLibBtn)
 	splitPanel := container.NewBorder(
 		container.NewVBox(widget.NewLabelWithStyle("分割结果", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), widget.NewSeparator()),
-		container.NewVBox(widget.NewSeparator(), similarityRow, matchLibBtn, selectRow, quickFillRow, addToLibBtn),
+		container.NewVBox(widget.NewSeparator(), matchRow, quickFillRow, addSelectedRow),
 		nil, nil,
 		container.NewVScroll(splitListBox),
 	)
 
 	libButtons := container.NewVBox(
 		widget.NewSeparator(),
-		container.NewGridWithColumns(2, exportBtn, copyBtn),
-		container.NewGridWithColumns(2, importBtn, clearLibBtn),
+		container.NewGridWithColumns(4, importBtn, exportBtn, copyBtn, clearLibBtn),
 	)
 	libPanel := container.NewBorder(
 		container.NewVBox(libHeaderLabel, libSearchEntry, widget.NewSeparator()),
